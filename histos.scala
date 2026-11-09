@@ -1,4 +1,6 @@
+plugin(dep"rocks.earlyeffect::specular-histos:0.0.2-SNAPSHOT")
 import histos.*
+import dev.earlyeffect.specular.{Site, Specular}
 
 object build extends HistosBuild:
   def graph =
@@ -8,7 +10,7 @@ object build extends HistosBuild:
     val zioJson    = dep"dev.zio::zio-json:1.1.1"
     val zioTest    = dep"dev.zio::zio-test:2.1.27"
     val zioTestSbt = dep"dev.zio::zio-test-sbt:2.1.27"
-    val core = module("core", Jvm)(scala3)
+    val core       = module("core", Jvm)(scala3)
       .artifact(artifact"terret")
       .scalac(
         ScalacFlag.Deprecation,
@@ -90,4 +92,20 @@ object build extends HistosBuild:
       .organization(organization"rocks.earlyeffect")
       .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
       .developer(Developer(developer"russwyte", pom"Russ White"))
-      .description(pom"Terret lets coding hosts talk to coding harnesses.")(core, grok, dsh, mcp, app, docs)
+      .description(pom"Terret lets coding hosts talk to coding harnesses.")(
+        use(
+          Specular(
+            Site
+              .forProject("docs", "terret.docs.BuildSite")
+              .name("terret")
+              .organization("rocks.earlyeffect")
+              .version("unreleased")
+          )
+        ),
+        core,
+        grok,
+        dsh,
+        mcp,
+        app,
+        docs,
+      )
