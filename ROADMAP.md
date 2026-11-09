@@ -4,7 +4,7 @@ Decisions live in [DESIGN.md](DESIGN.md). This file is status only. The change t
 
 ## Where we are
 
-Phase 5, more adapters. The dsh headless adapter is in. The process still wires Grok. Phase 4's site task is still blocked: the published specular-histos jar has no API digest resource, and this histos refuses that jar.
+Phase 5, more adapters. The dsh headless adapter is in. The process defaults to Grok and selects dsh with `harness`. Phase 4's site task is still blocked: the published specular-histos jar has no API digest resource, and this histos refuses that jar.
 
 ## Phases
 

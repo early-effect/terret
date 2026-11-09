@@ -113,7 +113,7 @@ Stdout is newline-delimited JSON. `text` becomes an assistant event. `thinking` 
 
 A `turn_end` or an `error` event decides the turn, so the process exit code is not a second failure. Exit 0 with neither is incomplete. A non-zero exit with neither is that exit code. Headless exits 0 only when the last reason kind is `completed`.
 
-Headless has no permission flag. The adapter records the ceiling it was given and does not invent a deny list. The core still clamps before `open`. The packaged process still wires the Grok adapter. The MCP jobs do not change.
+Headless has no permission flag. The adapter records the ceiling it was given and does not invent a deny list. The core still clamps before `open`. The packaged process defaults to Grok. `harness` `dsh` selects this adapter. The MCP jobs do not change.
 
 ## Build and docs
 
@@ -155,7 +155,7 @@ MCP inbound is a heddle `Api`. `TerretMcp.mcp` runs `Mcp.from` on it, and the re
 
 A tool payload is JSON text on that wire. Heddle's schema has no open JSON value, so the payload is a string. The tool names are the job names. Nothing in the catalog is named for a harness.
 
-The packaged process is `terret.app.Main`. Config is nested under `terret`. `listen` is `http` or `stdio`. The default is HTTP on `127.0.0.1`, port 8080, path `/mcp`. `policy`, `allow`, `root`, and `version` are the session facts. The Grok keys (`command`, `transport`, `approval`, and the bind triple) stay on `GrokConfig`. An empty version is rejected. A relative root is rejected.
+The packaged process is `terret.app.Main`. Config is nested under `terret`. `listen` is `http` or `stdio`. The default is HTTP on `127.0.0.1`, port 8080, path `/mcp`. `policy`, `allow`, `root`, and `version` are the session facts. `harness` is `grok` or `dsh`, and the default is `grok`. An unset `command` is `grok` or `dsh` with the harness. `profile` belongs to dsh and defaults to `headless`. A profile on grok is rejected. The Grok keys (`transport`, `approval`, and the bind triple) stay on `GrokConfig`, and setting them on dsh is rejected. An empty version is rejected. A relative root is rejected.
 
 Warp's local agent reads `.warp/.mcp.json` from the project or from the home directory. There is no Warp.local library and no Warp.local type. The document is `mcpServers.terret.url`. A wildcard bind (`0.0.0.0` or `::`) is rewritten to `127.0.0.1`, and an IPv6 address is bracketed. HTTP is the documented attach path. The process does not write the file.
 

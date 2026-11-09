@@ -41,9 +41,11 @@ object ProcessSpec extends ZIOSpecDefault:
           allow = "ReadWorkspace, Network",
           root = Some("/work"),
           version = "dev",
-          command = "grok",
-          transport = "AcpWebSocket",
-          approval = "Always",
+          harness = "grok",
+          command = Some("grok"),
+          profile = None,
+          transport = Some("AcpWebSocket"),
+          approval = Some("Always"),
           bindHost = Some("127.0.0.1"),
           bindPort = Some(6767),
           bindSecret = Some("secret"),
@@ -57,8 +59,34 @@ object ProcessSpec extends ZIOSpecDefault:
           )
         ),
         parsed.map(_.root) == Workspace.from("/work").map(Some(_)),
-        parsed.map(_.grok.approval) == Right(terret.grok.GrokApproval.Always),
-        parsed.map(_.grok.transport) == Right(terret.grok.GrokTransport.AcpWebSocket),
+        parsed.map(_.harness) == terret.grok.AcpBind
+          .make("127.0.0.1", 6767, "secret")
+          .map { bind =>
+            ProcessHarness.Grok(
+              terret.grok.GrokConfig.socket(bind).withApproval(terret.grok.GrokApproval.Always)
+            )
+          }
+          .left
+          .map(ProcessError.Grok(_)),
+      )
+    },
+    test("dsh is the other harness, and the other harness's keys are refused") {
+      val selected = ProcessConfig.load(
+        defaults.copy(harness = "dsh", command = None, profile = Some("sdk"), transport = None, approval = None)
+      )
+      val blank = ProcessConfig.load(
+        defaults.copy(harness = "dsh", command = None, profile = Some(""), transport = None, approval = None)
+      )
+      val profile = ProcessConfig.load(defaults.copy(profile = Some("headless")))
+      val keys = ProcessConfig.load(defaults.copy(harness = "dsh"))
+      val unknown = ProcessConfig.load(defaults.copy(harness = "codex"))
+      val made = terret.dsh.DshConfig.make("dsh", "sdk").map(ProcessHarness.Dsh(_)).left.map(ProcessError.Dsh(_))
+      assertTrue(
+        selected.map(_.harness) == made,
+        blank == Left(ProcessError.Dsh(terret.dsh.DshConfigError.EmptyProfile)),
+        profile == Left(ProcessError.ProfileUnexpected),
+        keys == Left(ProcessError.GrokKeys),
+        unknown == Left(ProcessError.Harness("codex")),
       )
     },
     test("an empty version and a relative root are refused") {
@@ -109,9 +137,11 @@ object ProcessSpec extends ZIOSpecDefault:
     allow = "",
     root = None,
     version = "dev",
-    command = "grok",
-    transport = "Cli",
-    approval = "Ask",
+    harness = "grok",
+    command = Some("grok"),
+    profile = None,
+    transport = Some("Cli"),
+    approval = Some("Ask"),
     bindHost = None,
     bindPort = None,
     bindSecret = None,

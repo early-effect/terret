@@ -7,7 +7,7 @@ import terret.prompt.Prompt
 import zio.Chunk
 import zio.test.*
 
-/** The headless dsh adapter. The process still wires Grok. */
+/** The headless dsh adapter. The process selects it with `harness`. */
 object DshAdapter extends DocSpec:
   def doc = page("Dsh")(
     md"""
@@ -24,7 +24,8 @@ answer and does not add a second assistant event. A `turn_end` or an `error` eve
 so the process exit code is not a second failure.
 
 Headless has no permission flag. The adapter records the ceiling it was given. A task whose text is a
-single `-` is the CLI's stdin marker, and the adapter rejects it.
+single `-` is the CLI's stdin marker, and the adapter rejects it. The process defaults to Grok.
+`harness` `dsh` selects this adapter.
 """,
     exampleValue(Launch.argv(DshConfig.headless, Prompt("run the tests"), None).rendered).assert { argv =>
       assertTrue(argv == Chunk("dsh", "--profile", "headless", "--json", "run the tests"))

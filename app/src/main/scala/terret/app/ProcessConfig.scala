@@ -1,16 +1,22 @@
 package terret.app
 
+import terret.dsh.{DshConfig, DshConfigError}
 import terret.grok.{AcpBind, GrokApproval, GrokConfig, GrokConfigError, GrokTransport}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
 import zio.Config
+
+enum ProcessHarness:
+  case Grok(config: GrokConfig)
+  case Dsh(config: DshConfig)
+end ProcessHarness
 
 final case class ProcessConfig(
     listen: Listen,
     policy: PermissionPolicy,
     root: Option[Workspace],
     version: String,
-    grok: GrokConfig,
+    harness: ProcessHarness,
 )
 
 object ProcessConfig:
@@ -19,7 +25,7 @@ object ProcessConfig:
     policy = PermissionPolicy.Closed,
     root = None,
     version = "dev",
-    grok = GrokConfig.cli,
+    harness = ProcessHarness.Grok(GrokConfig.cli),
   )
 
   val raw: Config[Raw] =
@@ -31,9 +37,11 @@ object ProcessConfig:
         Config.string("allow").withDefault("") ++
         Config.string("root").optional ++
         Config.string("version").withDefault(local.version) ++
-        Config.string("command").withDefault("grok") ++
-        Config.string("transport").withDefault("Cli") ++
-        Config.string("approval").withDefault("Ask") ++
+        Config.string("harness").withDefault("grok") ++
+        Config.string("command").optional ++
+        Config.string("profile").optional ++
+        Config.string("transport").optional ++
+        Config.string("approval").optional ++
         Config.string("bindHost").optional ++
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional
@@ -46,7 +54,9 @@ object ProcessConfig:
           allow,
           root,
           version,
+          harness,
           command,
+          profile,
           transport,
           approval,
           bindHost,
@@ -61,7 +71,9 @@ object ProcessConfig:
           allow,
           root,
           version,
+          harness,
           command,
+          profile,
           transport,
           approval,
           bindHost,
@@ -76,8 +88,8 @@ object ProcessConfig:
       policy  <- policyOf(raw.policy, raw.allow)
       root    <- rootOf(raw.root)
       version <- versionOf(raw.version)
-      grok    <- grokOf(raw)
-    yield ProcessConfig(listen, policy, root, version, grok)
+      harness <- harnessOf(raw)
+    yield ProcessConfig(listen, policy, root, version, harness)
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -122,13 +134,34 @@ object ProcessConfig:
       case "Network"        => Right(Permission.Network)
       case other            => Left(ProcessError.Permission(other))
 
+  private def harnessOf(raw: Raw): Either[ProcessError, ProcessHarness] =
+    raw.harness match
+      case "grok" => grokOf(raw).map(ProcessHarness.Grok(_))
+      case "dsh"  => dshOf(raw).map(ProcessHarness.Dsh(_))
+      case other  => Left(ProcessError.Harness(other))
+
   private def grokOf(raw: Raw): Either[ProcessError, GrokConfig] =
-    for
-      transport <- transportOf(raw.transport)
-      approval  <- approvalOf(raw.approval)
-      bind      <- bindOf(transport, raw.bindHost, raw.bindPort, raw.bindSecret)
-      config    <- GrokConfig.make(raw.command, transport, approval, bind).left.map(ProcessError.Grok(_))
-    yield config
+    raw.profile match
+      case Some(_) => Left(ProcessError.ProfileUnexpected)
+      case None    =>
+        for
+          transport <- transportOf(raw.transport.getOrElse("Cli"))
+          approval  <- approvalOf(raw.approval.getOrElse("Ask"))
+          bind      <- bindOf(transport, raw.bindHost, raw.bindPort, raw.bindSecret)
+          config    <- GrokConfig
+            .make(raw.command.getOrElse("grok"), transport, approval, bind)
+            .left.map(ProcessError.Grok(_))
+        yield config
+
+  private def dshOf(raw: Raw): Either[ProcessError, DshConfig] =
+    val grokKeys =
+      raw.transport.nonEmpty || raw.approval.nonEmpty || raw.bindHost.nonEmpty || raw.bindPort.nonEmpty ||
+        raw.bindSecret.nonEmpty
+    if grokKeys then Left(ProcessError.GrokKeys)
+    else
+      DshConfig
+        .make(raw.command.getOrElse("dsh"), raw.profile.getOrElse("headless"))
+        .left.map(ProcessError.Dsh(_))
 
   private def transportOf(name: String): Either[ProcessError, GrokTransport] =
     name match
@@ -164,9 +197,11 @@ object ProcessConfig:
       allow: String,
       root: Option[String],
       version: String,
-      command: String,
-      transport: String,
-      approval: String,
+      harness: String,
+      command: Option[String],
+      profile: Option[String],
+      transport: Option[String],
+      approval: Option[String],
       bindHost: Option[String],
       bindPort: Option[Int],
       bindSecret: Option[String],
@@ -182,10 +217,14 @@ enum ProcessError:
   case Permission(value: String)
   case Transport(value: String)
   case Approval(value: String)
+  case Harness(value: String)
+  case ProfileUnexpected
+  case GrokKeys
   case BindIncomplete
   case BindUnexpected
   case Workspace(error: WorkspaceError)
   case Grok(error: GrokConfigError)
+  case Dsh(error: DshConfigError)
   case Mcp(error: terret.mcp.TerretMcpError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
@@ -200,10 +239,14 @@ enum ProcessError:
     case Permission(value)   => s"unknown permission $value"
     case Transport(value)    => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
     case Approval(value)     => s"approval is Ask or Always, got $value"
+    case Harness(value)      => s"harness is grok or dsh, got $value"
+    case ProfileUnexpected   => "profile belongs on the dsh harness"
+    case GrokKeys            => "transport, approval, and bind belong on the grok harness"
     case BindIncomplete      => "a socket transport needs bindHost, bindPort, and bindSecret"
     case BindUnexpected      => "bind fields belong on a socket transport"
     case Workspace(error)    => s"workspace ${error.toString}"
     case Grok(error)         => s"grok ${error.toString}"
+    case Dsh(error)          => s"dsh ${error.toString}"
     case Mcp(error)          => s"mcp ${error.toString}"
     case Server(error)       => error.message
     case Stdio(cause)        => s"stdio ${cause.toString}"

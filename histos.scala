@@ -53,7 +53,7 @@ object build extends HistosBuild:
       .testDependencies(zioTest, zioTestSbt)
     val app = module("app", Jvm)(scala3)
       .artifact(artifact"terret-app")
-      .dependsOn(mcp, grok)
+      .dependsOn(mcp, grok, dsh)
       .main(MainClass("terret.app.Main"))
       .scalac(
         ScalacFlag.Deprecation,
