@@ -1,0 +1,15 @@
+.scala-build/
+.bsp/*
+!.bsp/histos.json
+*/.bsp/
+.metals/
+.bloop/
+.idea/
+dist/
+target/
+.histos/
+.mcp.json
+*.class
+*.semanticdb
+.cursor/
+.vscode/
