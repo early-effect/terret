@@ -446,3 +446,6 @@ artifact org.jline jline-native 4.3.1 ff94ab4bccc3c1549444082ce07a2760cbf1ad4dae
 artifact org.slf4j slf4j-api 1.7.36 d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0 central
 evict org.scala-lang scala-library 2.12.20 3.10.0
 evict org.scala-lang scala-library 2.13.17 3.10.0
+plugin rocks.earlyeffect specular-histos 0.0.2-SNAPSHOT binary-or-source
+direct rocks.earlyeffect specular-histos 0.0.2-SNAPSHOT binary
+artifact rocks.earlyeffect specular-histos_3 0.0.2-SNAPSHOT f193ae9f9eb64d9289e05feb9e0d8914a7e3888160481a95aebf0505eb45e285 maven:https://central.sonatype.com/repository/maven-snapshots
