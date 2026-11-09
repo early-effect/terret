@@ -29,8 +29,19 @@ object build extends HistosBuild:
       )
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.14.2")
       .testDependencies(zioTest, zioTestSbt)
+    val mcp = module("mcp", Jvm)(scala3)
+      .artifact(artifact"terret-mcp")
+      .dependsOn(core)
+      .scalac(
+        ScalacFlag.Deprecation,
+        ScalacFlag.Feature,
+        ScalacFlag.UnusedAll,
+        ScalacFlag.ImplicitConversions,
+      )
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.14.2")
+      .testDependencies(zioTest, zioTestSbt)
     Projects
       .organization(organization"rocks.earlyeffect")
       .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
       .developer(Developer(developer"russwyte", pom"Russ White"))
-      .description(pom"Terret lets coding hosts talk to coding harnesses.")(core, grok)
+      .description(pom"Terret lets coding hosts talk to coding harnesses.")(core, grok, mcp)

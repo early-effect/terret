@@ -139,6 +139,10 @@ The CLI transport mints the session id. The first prompt uses `-s`. A later prom
 
 Heddle speaks the WebSocket upgrade on the server and newline JSON-RPC on stdio. It does not ship a WebSocket client, so the socket transport uses the JDK client. ACP stdio reuses `LinePipe`. Neither wire is folded into heddle as ACP.
 
+MCP inbound is a heddle `Api`. `TerretMcp.mcp` runs `Mcp.from` on it, and the result is what hosts attach to: `mcp.routes` and `mcp.stdio()`. The jobs are `open`, `run`, `resume`, `export`, and `cancel`. `open` starts a session from a workspace and a requested ceiling. The other four are the catalog. `run` publishes each event as `notifications/message` while the tool is in flight, then returns the outcome. `resume` and `export` return the retained log. `export` calls `transcript`. `cancel` calls the core cancel. An empty server version is rejected. `notifications/cancelled` interrupts the in-flight `run`, and the core finalizer cancels the harness.
+
+A tool payload is JSON text on that wire. Heddle's schema has no open JSON value, so the payload is a string. The tool names are the job names. Nothing in the catalog is named for a harness.
+
 ## Later
 
 dsh and any later harness implement the same core traits. Their protocols are not specified here yet. The MCP jobs should not change when a new adapter lands.
