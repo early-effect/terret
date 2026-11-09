@@ -143,6 +143,231 @@ evict dev.zio zio-test_3 2.1.26 2.1.27
 evict org.scala-lang scala-library 2.13.4 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
+cell app 3.10.0 jvm
+direct dev.zio zio 2.1.27 binary
+direct dev.zio zio-streams 2.1.27 binary
+direct dev.zio zio-json 1.1.1 binary
+direct rocks.earlyeffect heddle 0.14.2 binary
+direct rocks.earlyeffect heddle-mcp 0.14.2 binary
+artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
+artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
+artifact dev.zio zio-json_3 1.1.1 2d50be6acbe06bf3613520f07101f24249b04bbde2e8f44a2d0c04fdf2bed5c4 central
+artifact rocks.earlyeffect heddle_3 0.14.2 7bfd45ac505b0a1d5c922a25f864c5d2ea68db4303c6124b4704e0085c8e718d central
+artifact rocks.earlyeffect heddle-mcp_3 0.14.2 2f1fb0f14db12f954102bc3d1e6abdbcf85f8653a1c0f08394b67c02d9441fd1 central
+artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
+artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
+artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
+artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
+artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
+artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.14.2 b67d756e81880c49ddd108c7ec96b29981ba939cb09738da5ba589b9825ea82a central
+artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
+artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
+artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
+artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
+evict org.scala-lang scala3-library_3 3.3.6 3.9.0
+evict org.scala-lang scala3-library_3 3.3.8 3.9.0
+test app 3.10.0 jvm
+direct dev.zio zio 2.1.27 binary
+direct dev.zio zio-streams 2.1.27 binary
+direct dev.zio zio-json 1.1.1 binary
+direct rocks.earlyeffect heddle 0.14.2 binary
+direct rocks.earlyeffect heddle-mcp 0.14.2 binary
+direct dev.zio zio-test 2.1.27 binary
+direct dev.zio zio-test-sbt 2.1.27 binary
+artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
+artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
+artifact dev.zio zio-json_3 1.1.1 2d50be6acbe06bf3613520f07101f24249b04bbde2e8f44a2d0c04fdf2bed5c4 central
+artifact rocks.earlyeffect heddle_3 0.14.2 7bfd45ac505b0a1d5c922a25f864c5d2ea68db4303c6124b4704e0085c8e718d central
+artifact rocks.earlyeffect heddle-mcp_3 0.14.2 2f1fb0f14db12f954102bc3d1e6abdbcf85f8653a1c0f08394b67c02d9441fd1 central
+artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
+artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
+artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
+artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
+artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
+artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
+artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
+artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.14.2 b67d756e81880c49ddd108c7ec96b29981ba939cb09738da5ba589b9825ea82a central
+artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
+artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
+artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
+artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
+artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
+artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
+evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
+evict dev.zio zio-test_3 2.1.26 2.1.27
+evict org.scala-lang scala-library 2.13.4 3.9.0
+evict org.scala-lang scala3-library_3 3.3.6 3.9.0
+evict org.scala-lang scala3-library_3 3.3.8 3.9.0
+cell docs 3.10.0 jvm
+direct rocks.earlyeffect specular-core 0.21.3 binary
+direct rocks.earlyeffect specular-zio-test 0.21.3 binary
+direct rocks.earlyeffect specular-site 0.21.3 binary
+direct rocks.earlyeffect heddle 0.14.2 binary
+direct dev.zio zio 2.1.27 binary
+direct dev.zio zio-json 1.1.1 binary
+artifact rocks.earlyeffect specular-core_3 0.21.3 4180b2aba6714d990e1a7441c80140395634cac48be6053c1f0d68fae7d4aa29 central
+artifact rocks.earlyeffect specular-zio-test_3 0.21.3 de477c8b4efbdce9990d914dbcd579c983db3aab0a6c0b77c6e9489852b4b294 central
+artifact rocks.earlyeffect specular-site_3 0.21.3 9835584705bef20bb8e24c53d657484817b6783883ddbe973dd457c0ba1edbe3 central
+artifact rocks.earlyeffect heddle_3 0.14.2 7bfd45ac505b0a1d5c922a25f864c5d2ea68db4303c6124b4704e0085c8e718d central
+artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
+artifact dev.zio zio-json_3 1.1.1 2d50be6acbe06bf3613520f07101f24249b04bbde2e8f44a2d0c04fdf2bed5c4 central
+artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
+artifact rocks.earlyeffect ascent-core_3 0.10.1 6580587e60af9791b3b8b08dc0288a9ae8cfe5a1aa889e1d9ce275d28b540a28 central
+artifact rocks.earlyeffect ascent-css_3 0.10.1 d80770e229267288fe1c283057a13be4f3e9e5529b1217f6b416e0ddb7bf0afd central
+artifact org.scalameta scalameta_3 4.17.3 ee5862f7909ae8a72fb01e5eb93db5c95abb4b350b564def4c862b8c52337cc4 central
+artifact org.scalameta scalafmt-core_3 3.11.5 db284b94f9ea777722137ba601964f8d1f7151732cf82cf5da38e6484248576c central
+artifact org.scala-lang scala3-tasty-inspector_3 3.9.0 469fa2c2a8ed7e24982cd6dde46c3f3285b3fdf215ac8dc704beeab13049aac6 central
+artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
+artifact rocks.earlyeffect ascent-html_3 0.10.0 36dc1491182652c08096a839660f98ad55f1580a7f92f7c3576a62719c63e35e central
+artifact rocks.earlyeffect ascent-preview_3 0.11.1 8cf7dc890a27fe4fbdccb0921c2af09ba27e9d38566b9445d92794991c550f8d central
+artifact org.commonmark commonmark 0.30.0 090f0a758ac2f4f51aa86dff9dff0fdf7403666d0efd29f59886dc8e8b1eac53 central
+artifact org.commonmark commonmark-ext-gfm-tables 0.30.0 5e28b48e66f7697bee4dfeb4c8f8f08a84a2827d91b53bbd9bd5445e82d14bda central
+artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
+artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
+artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
+artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
+artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
+artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
+artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
+artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
+artifact rocks.earlyeffect ascent-dom-types_3 0.11.1 a594fb76cf4bdabd4aa4dc36219c157c698faa83e031c4120fb606538c9b2a3f central
+artifact com.lihaoyi fastparse_3 3.1.1 e01290ae240b88be4772e1afacf7cc6552a83fa23a98c6e1fdff4ad3028f1cf3 central
+artifact org.scalameta parsers_3 4.17.3 856725ca406c1343d0bf9dd8f0a7ef56298379f8c70b1308cfb34879ce88e033 central
+artifact org.scalameta scalafmt-sysops_3 3.11.5 bda82f1285bfc5eee28a7c6d853b00b81a68da1ff7a88cc67ed2fbf8afbdcafd central
+artifact org.scalameta scalafmt-config_3 3.11.5 472494d4ecd00df4ebcdef88229730979df25d157e5f4f2e5fea3250edfd645f central
+artifact org.scalameta scalafmt-macros_3 3.11.5 daff3dca549b0686219e0088d1869afc80863f62fa5c0decc72c6815480a1185 central
+artifact org.scalameta mdoc-parser_3 2.9.1 694bf0e88858a1552f4cd089fb62a5544724e489385ca358e5ee51a94f42b92f central
+artifact org.scala-lang scala3-compiler_3 3.9.0 3e2c09a5ca6cef17a55f2f66e123815f9c4ea061fce20d0e9d2371989405a61a central
+artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
+artifact rocks.earlyeffect ascent-mount-engine_3 0.11.0 d525ea1fe77d361569b13adea00f0650d2d4461c40b9fb4609383efdcf5b0a66 central
+artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
+artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
+artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
+artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
+artifact com.lihaoyi sourcecode_3 0.4.4 40cc148f8baab769de72892443476a05eed7471a9b5cd2cbc2a47bf22cad30d3 central
+artifact com.lihaoyi geny_3 1.1.0 45663793503bb2acf44736d74f1dbbcb69c953ba6c0bf91a50b640cb3bfd69b5 central
+artifact org.scalameta trees_3 4.17.3 59796996a4dd2dc6cf33e70e283296cb0dc12c2c3e9d6f328160e13048ed677c central
+artifact org.scalameta metaconfig-core_3 0.18.7 7d9306989f345b5509571d98eb389f1885bf22a008fb105311bca3b1450a66fa central
+artifact org.scalameta metaconfig-typesafe-config_3 0.18.7 b29167d5581dff78abd12f2d9a07661d0c3d70d6941db49cf9a754f0b43e621f central
+artifact org.scala-lang scala3-interfaces 3.9.0 64dfde1d2c6309d65a01c5f3ea836137eb84338dcadeb16f85764561ef4e10db central
+artifact org.scala-lang tasty-core_3 3.9.0 66e12dda98bb23e864f3a31f8527c8338bf47bce9b85cc380b368c69c1ba8d0f central
+artifact org.scala-lang.modules scala-asm 9.9.0-scala-1 75ac366e8ecb691e06a7e85041eed0f67919a646e5262fa0901225698c104375 central
+artifact org.scala-sbt compiler-interface 1.12.0 92f487a505eafdd0a033e4ff4f38a81509a655c76257c64e6808dd873cc145c3 central
+artifact rocks.earlyeffect ascent-dom-core_3 0.11.1 7f7229226d8ec0bace1797b02205cab5bd414e258b53e12d05493f7c18544a79 central
+artifact org.scalameta common_3 4.17.3 96e571322821ff3574357a5eb69cdca6409fd3c43c1adca47fd92a11f15d1bd1 central
+artifact org.scalameta io_2.13 4.17.3 c9aa7493cf90a1acafcc96dad84670409aeb3b5e280a38ce40332eb6a21cf49f central
+artifact org.scalameta trees2_2.13 4.17.3 3f3729adf6faa48802f8b7c77ac67a6077cb99073596dc3eaf48d6ca9371fe55 central
+artifact org.scalameta metaconfig-pprint_3 0.18.7 795e95014e7d7ea0e3e796bf7e637531c7d33f82ab07c372d420e0444c754e3e central
+artifact org.typelevel paiges-core_3 0.4.4 e84067f072fa7ccd3e31d491fedbf21267be75dbc7f8736c268c3d4b46f88d81 central
+artifact org.scala-lang scala-reflect 2.13.18 6935ff1982b2ac93d695f15aa66921be2f602921277afe002f018fd8c7d6e29b central
+artifact com.typesafe config 1.4.9 47d13e3196c84f2a8ccd014ae563738c3da5b7406b38e03505ec0601a2f4fc37 central
+artifact org.scala-sbt util-interface 1.11.5 1fc950a9e1a35385e79316e23c120d4fd184f6a7af0274e00a703b0dc76376af central
+artifact org.scalameta common2_2.13 4.17.3 d16050f3557e472ac3489501edd4d941d975bc0a6f72a54363b6598e29a972d0 central
+artifact com.lihaoyi fansi_3 0.5.1 df4b447704664563cb0fba9cf52d3fc7509654ab592824d5c2eb4647e6701ac4 central
+evict com.lihaoyi sourcecode_3 0.4.0 0.4.4
+evict dev.zio zio-json_3 1.1.0 1.1.1
+evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
+evict dev.zio zio-test_3 2.1.26 2.1.27
+evict dev.zio zio_3 2.1.26 2.1.27
+evict org.scala-lang scala-library 2.12.20 3.9.0
+evict org.scala-lang scala-library 2.13.15 3.9.0
+evict org.scala-lang scala-library 2.13.18 3.9.0
+evict org.scala-lang scala-library 2.13.4 3.9.0
+evict org.scala-lang scala-reflect 2.13.15 2.13.18
+evict org.scala-lang scala-reflect 2.13.4 2.13.18
+evict org.scala-lang scala3-compiler_3 3.3.8 3.9.0
+evict org.scala-lang scala3-library_3 3.3.1 3.9.0
+evict org.scala-lang scala3-library_3 3.3.3 3.9.0
+evict org.scala-lang scala3-library_3 3.3.6 3.9.0
+evict org.scala-lang scala3-library_3 3.3.8 3.9.0
+evict rocks.earlyeffect heddle_3 0.12.0 0.14.2
+test docs 3.10.0 jvm
+direct rocks.earlyeffect specular-core 0.21.3 binary
+direct rocks.earlyeffect specular-zio-test 0.21.3 binary
+direct rocks.earlyeffect specular-site 0.21.3 binary
+direct rocks.earlyeffect heddle 0.14.2 binary
+direct dev.zio zio 2.1.27 binary
+direct dev.zio zio-json 1.1.1 binary
+direct dev.zio zio-test 2.1.27 binary
+direct dev.zio zio-test-sbt 2.1.27 binary
+artifact rocks.earlyeffect specular-core_3 0.21.3 4180b2aba6714d990e1a7441c80140395634cac48be6053c1f0d68fae7d4aa29 central
+artifact rocks.earlyeffect specular-zio-test_3 0.21.3 de477c8b4efbdce9990d914dbcd579c983db3aab0a6c0b77c6e9489852b4b294 central
+artifact rocks.earlyeffect specular-site_3 0.21.3 9835584705bef20bb8e24c53d657484817b6783883ddbe973dd457c0ba1edbe3 central
+artifact rocks.earlyeffect heddle_3 0.14.2 7bfd45ac505b0a1d5c922a25f864c5d2ea68db4303c6124b4704e0085c8e718d central
+artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
+artifact dev.zio zio-json_3 1.1.1 2d50be6acbe06bf3613520f07101f24249b04bbde2e8f44a2d0c04fdf2bed5c4 central
+artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
+artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
+artifact rocks.earlyeffect ascent-core_3 0.10.1 6580587e60af9791b3b8b08dc0288a9ae8cfe5a1aa889e1d9ce275d28b540a28 central
+artifact rocks.earlyeffect ascent-css_3 0.10.1 d80770e229267288fe1c283057a13be4f3e9e5529b1217f6b416e0ddb7bf0afd central
+artifact org.scalameta scalameta_3 4.17.3 ee5862f7909ae8a72fb01e5eb93db5c95abb4b350b564def4c862b8c52337cc4 central
+artifact org.scalameta scalafmt-core_3 3.11.5 db284b94f9ea777722137ba601964f8d1f7151732cf82cf5da38e6484248576c central
+artifact org.scala-lang scala3-tasty-inspector_3 3.9.0 469fa2c2a8ed7e24982cd6dde46c3f3285b3fdf215ac8dc704beeab13049aac6 central
+artifact rocks.earlyeffect ascent-html_3 0.10.0 36dc1491182652c08096a839660f98ad55f1580a7f92f7c3576a62719c63e35e central
+artifact rocks.earlyeffect ascent-preview_3 0.11.1 8cf7dc890a27fe4fbdccb0921c2af09ba27e9d38566b9445d92794991c550f8d central
+artifact org.commonmark commonmark 0.30.0 090f0a758ac2f4f51aa86dff9dff0fdf7403666d0efd29f59886dc8e8b1eac53 central
+artifact org.commonmark commonmark-ext-gfm-tables 0.30.0 5e28b48e66f7697bee4dfeb4c8f8f08a84a2827d91b53bbd9bd5445e82d14bda central
+artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
+artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
+artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
+artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
+artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
+artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
+artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
+artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
+artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
+artifact rocks.earlyeffect ascent-dom-types_3 0.11.1 a594fb76cf4bdabd4aa4dc36219c157c698faa83e031c4120fb606538c9b2a3f central
+artifact com.lihaoyi fastparse_3 3.1.1 e01290ae240b88be4772e1afacf7cc6552a83fa23a98c6e1fdff4ad3028f1cf3 central
+artifact org.scalameta parsers_3 4.17.3 856725ca406c1343d0bf9dd8f0a7ef56298379f8c70b1308cfb34879ce88e033 central
+artifact org.scalameta scalafmt-sysops_3 3.11.5 bda82f1285bfc5eee28a7c6d853b00b81a68da1ff7a88cc67ed2fbf8afbdcafd central
+artifact org.scalameta scalafmt-config_3 3.11.5 472494d4ecd00df4ebcdef88229730979df25d157e5f4f2e5fea3250edfd645f central
+artifact org.scalameta scalafmt-macros_3 3.11.5 daff3dca549b0686219e0088d1869afc80863f62fa5c0decc72c6815480a1185 central
+artifact org.scalameta mdoc-parser_3 2.9.1 694bf0e88858a1552f4cd089fb62a5544724e489385ca358e5ee51a94f42b92f central
+artifact org.scala-lang scala3-compiler_3 3.9.0 3e2c09a5ca6cef17a55f2f66e123815f9c4ea061fce20d0e9d2371989405a61a central
+artifact rocks.earlyeffect ascent-mount-engine_3 0.11.0 d525ea1fe77d361569b13adea00f0650d2d4461c40b9fb4609383efdcf5b0a66 central
+artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
+artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
+artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
+artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
+artifact com.lihaoyi sourcecode_3 0.4.4 40cc148f8baab769de72892443476a05eed7471a9b5cd2cbc2a47bf22cad30d3 central
+artifact com.lihaoyi geny_3 1.1.0 45663793503bb2acf44736d74f1dbbcb69c953ba6c0bf91a50b640cb3bfd69b5 central
+artifact org.scalameta trees_3 4.17.3 59796996a4dd2dc6cf33e70e283296cb0dc12c2c3e9d6f328160e13048ed677c central
+artifact org.scalameta metaconfig-core_3 0.18.7 7d9306989f345b5509571d98eb389f1885bf22a008fb105311bca3b1450a66fa central
+artifact org.scalameta metaconfig-typesafe-config_3 0.18.7 b29167d5581dff78abd12f2d9a07661d0c3d70d6941db49cf9a754f0b43e621f central
+artifact org.scala-lang scala3-interfaces 3.9.0 64dfde1d2c6309d65a01c5f3ea836137eb84338dcadeb16f85764561ef4e10db central
+artifact org.scala-lang tasty-core_3 3.9.0 66e12dda98bb23e864f3a31f8527c8338bf47bce9b85cc380b368c69c1ba8d0f central
+artifact org.scala-lang.modules scala-asm 9.9.0-scala-1 75ac366e8ecb691e06a7e85041eed0f67919a646e5262fa0901225698c104375 central
+artifact org.scala-sbt compiler-interface 1.12.0 92f487a505eafdd0a033e4ff4f38a81509a655c76257c64e6808dd873cc145c3 central
+artifact rocks.earlyeffect ascent-dom-core_3 0.11.1 7f7229226d8ec0bace1797b02205cab5bd414e258b53e12d05493f7c18544a79 central
+artifact org.scalameta common_3 4.17.3 96e571322821ff3574357a5eb69cdca6409fd3c43c1adca47fd92a11f15d1bd1 central
+artifact org.scalameta io_2.13 4.17.3 c9aa7493cf90a1acafcc96dad84670409aeb3b5e280a38ce40332eb6a21cf49f central
+artifact org.scalameta trees2_2.13 4.17.3 3f3729adf6faa48802f8b7c77ac67a6077cb99073596dc3eaf48d6ca9371fe55 central
+artifact org.scalameta metaconfig-pprint_3 0.18.7 795e95014e7d7ea0e3e796bf7e637531c7d33f82ab07c372d420e0444c754e3e central
+artifact org.typelevel paiges-core_3 0.4.4 e84067f072fa7ccd3e31d491fedbf21267be75dbc7f8736c268c3d4b46f88d81 central
+artifact org.scala-lang scala-reflect 2.13.18 6935ff1982b2ac93d695f15aa66921be2f602921277afe002f018fd8c7d6e29b central
+artifact com.typesafe config 1.4.9 47d13e3196c84f2a8ccd014ae563738c3da5b7406b38e03505ec0601a2f4fc37 central
+artifact org.scala-sbt util-interface 1.11.5 1fc950a9e1a35385e79316e23c120d4fd184f6a7af0274e00a703b0dc76376af central
+artifact org.scalameta common2_2.13 4.17.3 d16050f3557e472ac3489501edd4d941d975bc0a6f72a54363b6598e29a972d0 central
+artifact com.lihaoyi fansi_3 0.5.1 df4b447704664563cb0fba9cf52d3fc7509654ab592824d5c2eb4647e6701ac4 central
+evict com.lihaoyi sourcecode_3 0.4.0 0.4.4
+evict dev.zio zio-json_3 1.1.0 1.1.1
+evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
+evict dev.zio zio-test_3 2.1.26 2.1.27
+evict dev.zio zio_3 2.1.26 2.1.27
+evict org.scala-lang scala-library 2.12.20 3.9.0
+evict org.scala-lang scala-library 2.13.15 3.9.0
+evict org.scala-lang scala-library 2.13.18 3.9.0
+evict org.scala-lang scala-library 2.13.4 3.9.0
+evict org.scala-lang scala-reflect 2.13.15 2.13.18
+evict org.scala-lang scala-reflect 2.13.4 2.13.18
+evict org.scala-lang scala3-compiler_3 3.3.8 3.9.0
+evict org.scala-lang scala3-library_3 3.3.1 3.9.0
+evict org.scala-lang scala3-library_3 3.3.3 3.9.0
+evict org.scala-lang scala3-library_3 3.3.6 3.9.0
+evict org.scala-lang scala3-library_3 3.3.8 3.9.0
+evict rocks.earlyeffect heddle_3 0.12.0 0.14.2
 tool compiler 3.10.0 jvm
 root org.scala-lang scala3-compiler_3 3.10.0 closure build
 root org.scala-lang scala3-sbt-bridge 3.10.0 closure build

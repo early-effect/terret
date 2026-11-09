@@ -55,7 +55,7 @@ The first runnable speaks both MCP stdio and local Streamable HTTP. Config choos
 | 1. Core | Library with no network and no Grok required: harness, session, prompt, streamed events, workspace, capability traits, and config | Tests against a fake in-memory harness; customization hooks live here |
 | 2. Grok Build adapter | One adapter with three configurable transports: `grok -p` / `--prompt-file`, ACP stdio (`grok agent stdio`), and WebSocket ACP (`grok agent serve`) | The adapter contract against a real harness; the user picks the transport |
 | 3. MCP inbound | A heddle `Api` whose jobs `Mcp.from` serves on `mcp.routes` and `mcp.stdio()` | Hosts can attach without grok-specific tool names leaking through |
-| 4. Packaging | A runnable process, Warp.local defaults, and the specular docs site with attach guides for other hosts | Config picks HTTP or stdio; HTTP is the documented attach path, and every snippet on the docs site is proven by the build |
+| 4. Packaging | A runnable process, Warp's `.warp/.mcp.json`, and specular docs pages | Config picks HTTP or stdio; HTTP is the documented attach path, and every snippet is proven by the build. The site task waits on a plugin jar that carries the API digest |
 | 5. More adapters | dsh and later harnesses implement the same traits | The MCP jobs do not change |
 
 Phase 2 is not a CLI-then-ACP sequence. All three Grok Build transports ship in that adapter phase, behind one hook, so a user can pick one, switch, or set defaults.
@@ -127,7 +127,7 @@ The first jobs are `run`, `resume`, `export`, and `cancel`. `run` sends a prompt
 
 Permissions are `ReadWorkspace`, `WriteWorkspace`, `RunCommands`, and `Network`. `PermissionPolicy` is `Closed`, `Clamp`, or `Inherit`. Nothing set is `Closed`, which caps a session at `ReadWorkspace`. A request is intersected with that cap, and the session records what was dropped. A workspace outside the configured root is rejected.
 
-`TerretConfig` carries the policy and an optional workspace root. Listener and adapter transport are not part of it. An unset root means the opened workspace is its own root. The packaged process will require a root.
+`TerretConfig` carries the policy and an optional workspace root. Listener and adapter transport are not part of it. An unset root means the opened workspace is its own root. The packaged process keeps that: `root` is optional.
 
 `Harness.open` takes the workspace, the requested ceiling, and the policy. Terret passes `config.policy`. The harness clamps the request against that policy's ceiling and records the ceiling that was applied.
 
@@ -143,11 +143,17 @@ MCP inbound is a heddle `Api`. `TerretMcp.mcp` runs `Mcp.from` on it, and the re
 
 A tool payload is JSON text on that wire. Heddle's schema has no open JSON value, so the payload is a string. The tool names are the job names. Nothing in the catalog is named for a harness.
 
+The packaged process is `terret.app.Main`. Config is nested under `terret`. `listen` is `http` or `stdio`. The default is HTTP on `127.0.0.1`, port 8080, path `/mcp`. `policy`, `allow`, `root`, and `version` are the session facts. The Grok keys (`command`, `transport`, `approval`, and the bind triple) stay on `GrokConfig`. An empty version is rejected. A relative root is rejected.
+
+Warp's local agent reads `.warp/.mcp.json` from the project or from the home directory. There is no Warp.local library and no Warp.local type. The document is `mcpServers.terret.url`. A wildcard bind (`0.0.0.0` or `::`) is rewritten to `127.0.0.1`, and an IPv6 address is bracketed. HTTP is the documented attach path. The process does not write the file.
+
+The docs pages are DocSpecs: attach, jobs, ceiling, and config. `./histos test` runs them. A test builds the site and checks the index for that URL. The index does not advertise a library coordinate, because nothing is published yet. The published specular-histos jar contains the plugin entry and does not contain the API digest resource this histos requires. The loader reads that resource from the binary before it will compile the plugin from sources, so neither link loads. The site task and the docs CI job wait on a plugin jar that carries the digest. Publishing the site stays with the release.
+
 ## Later
 
 dsh and any later harness implement the same core traits. Their protocols are not specified here yet. The MCP jobs should not change when a new adapter lands.
 
-Packaging on Warp.local, histos catalog shipping, and a published process come after the core and first adapter feel honest. Docs follow early-effect practice, as set out in Build and docs: proven snippets on a specular site, not a second story beside the code. Exact job names, config keys, and the first heddle enhancement issues can be added to this document as they are decided, and move to the docs site once it exists.
+A published process and histos catalog shipping wait until the library is released. The site task waits on the plugin digest above. Docs stay proven snippets, as set out in Build and docs.
 
 ## Sources
 
