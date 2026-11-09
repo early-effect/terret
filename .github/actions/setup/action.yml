@@ -1,0 +1,32 @@
+name: Setup Histos
+description: Install the Histos shim and restore toolchains and Coursier
+inputs:
+  version:
+    description: Histos version. Empty reads build.properties when a command runs.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Toolchains
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.histos/toolchains
+        key: histos-toolchains-${{ inputs.version }}-${{ hashFiles('build.properties') }}-${{ runner.os }}-${{ runner.arch }}
+    - name: Coursier
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/coursier/v1
+        key: coursier-${{ hashFiles('dependencies.lock', 'histos.scala') }}-${{ runner.os }}-${{ runner.arch }}
+    - name: Install
+      shell: bash
+      env:
+        HISTOS_VERSION: ${{ inputs.version }}
+      run: |
+        shim="${GITHUB_ACTION_PATH}/histos"
+        "$shim"
+        echo "$HOME/.histos/bin" >> "$GITHUB_PATH"
+        if [ -n "$HISTOS_VERSION" ]; then
+          "$HOME/.histos/bin/histos" toolchain install "$HISTOS_VERSION"
+          printf '%s\n' "$HISTOS_VERSION" > "$HOME/.histos/default"
+        fi

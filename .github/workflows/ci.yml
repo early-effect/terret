@@ -125,6 +125,8 @@ jobs:
       - uses: ./.github/actions/setup
       - run: ./histos doctor --preflight workflow
       - run: ./histos doctor
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: "./histos workflow --check"
   supply-chain:
     runs-on: ubuntu-26.04
@@ -146,6 +148,8 @@ jobs:
           restore-keys: histos-osv-
       - run: ./histos doctor --preflight supply-chain
       - run: ./histos doctor
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: ./histos workflow --check
       - run: ./histos resolve --check
       - run: ./histos deps audit
