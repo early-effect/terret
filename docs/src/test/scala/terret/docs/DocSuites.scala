@@ -13,3 +13,6 @@ object CeilingSuite extends DocSpecSuite:
 
 object ConfigSuite extends DocSpecSuite:
   def doc = Config.doc
+
+object DshSuite extends DocSpecSuite:
+  def doc = DshAdapter.doc

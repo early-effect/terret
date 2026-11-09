@@ -103,6 +103,18 @@ Terret depends on `heddle-mcp` rather than inventing another stack. When a neede
 
 The user picks the transport in config. The adapter should not hide one behind another. `grok mcp` is Grok Build consuming MCP servers, not exposing itself as MCP; terret is the other direction.
 
+## Dsh adapter
+
+The dsh adapter speaks the headless profile's `--json` projection. One invocation answers one task and exits. The command is `dsh --profile headless --json`, and the task is one positional argument. The working directory is the opened workspace.
+
+The CLI mints a fresh session id and reports it on the opening `session` event (`sessionId`, `cwd`). The adapter keeps that id and passes `--session-id` on the next prompt. A fresh prompt omits `--session-id`: an id with no stored session fails before the task runs. Resume replays the retained log and does not spawn. A lone `-` is the CLI's stdin marker, so the adapter rejects that prompt instead of writing stdin.
+
+Stdout is newline-delimited JSON. `text` becomes an assistant event. `thinking` becomes a thought. `tool_call` (`callId`, `tool`, `input`) starts a tool. `tool_result` (`callId`, `status`, `result`) updates it. `status` lines with phase `turn_start`, `step_start`, `step_end`, or any other phase are progress. `turn_end` carries `reason.kind`: `completed` finishes the turn, `aborted` cancels it, `blocked` is a refusal, and `error`, `max-tokens`, `interrupted`, `forked`, and any other kind fail the turn. The `error` object's message is not control. An `error` event (`message`) fails the turn the same way and ends the stream without `final`. `final` (`text`) is the runner's uncapped answer and does not add a second assistant event. Unknown event types are skipped. A non-JSON line is malformed.
+
+A `turn_end` or an `error` event decides the turn, so the process exit code is not a second failure. Exit 0 with neither is incomplete. A non-zero exit with neither is that exit code. Headless exits 0 only when the last reason kind is `completed`.
+
+Headless has no permission flag. The adapter records the ceiling it was given and does not invent a deny list. The core still clamps before `open`. The packaged process still wires the Grok adapter. The MCP jobs do not change.
+
 ## Build and docs
 
 Terret uses two early-effect tools together. histos is the build: it compiles, tests, publishes, and generates the CI. specular is the documentation: it now ships a histos plugin, so the docs build and the docs tests run inside the same `./histos` workflow as the library.
@@ -151,7 +163,7 @@ The docs pages are DocSpecs: attach, jobs, ceiling, and config. `./histos test` 
 
 ## Later
 
-dsh and any later harness implement the same core traits. Their protocols are not specified here yet. The MCP jobs should not change when a new adapter lands.
+The dsh headless protocol is specified above. Any later harness implements the same core traits. The MCP jobs should not change when a new adapter lands.
 
 A published process and histos catalog shipping wait until the library is released. The site task waits on the plugin digest above. Docs stay proven snippets, as set out in Build and docs.
 
