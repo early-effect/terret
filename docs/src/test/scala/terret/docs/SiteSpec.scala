@@ -8,13 +8,13 @@ import scala.jdk.CollectionConverters.*
 
 object SiteSpec extends ZIOSpecDefault:
   def spec = suite("site")(
-    test("the index names the local HTTP endpoint") {
+    test("the index tells why, how to run, and the ship coordinate") {
       ZIO.scoped {
         ZIO.acquireRelease(ZIO.attempt(Files.createTempDirectory("terret-site")))(remove).flatMap { dir =>
           val props = Map(
             "specular.meta.name"         -> "terret",
             "specular.meta.organization" -> "rocks.earlyeffect",
-            "specular.meta.version"      -> "unreleased",
+            "specular.meta.version"      -> "0.0.1",
             "specular.meta.scalaVersion" -> "3",
             "specular.meta.title"        -> "Terret",
             "specular.meta.description"  -> "Hosts talk to coding harnesses.",
@@ -28,8 +28,14 @@ object SiteSpec extends ZIOSpecDefault:
             }
           }.map { (index, jobs) =>
             assertTrue(
+              index.contains("the ring a rein passes through"),
+              index.contains("a guide on a loom"),
+              index.contains("It is not the host"),
               index.contains("http://127.0.0.1:8080/mcp"),
-              !index.contains("libraryDependencies"),
+              index.contains("rocks.earlyeffect::terret:0.0.1"),
+              index.contains("rocks.earlyeffect::terret-app:0.0.1"),
+              index.contains("./histos run terret.app.Main"),
+              index.contains("images/logo.png"),
               !index.contains("unreleased"),
               jobs.contains("open"),
               jobs.contains("run"),

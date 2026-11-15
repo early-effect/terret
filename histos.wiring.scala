@@ -13,6 +13,9 @@ object HistosWiring:
       .docsUrl("https://www.earlyeffect.rocks/terret/")
       .name("terret")
       .organization("rocks.earlyeffect")
-      .version("unreleased")
+      .title("Terret")
+      .description("Hosts talk to coding harnesses.")
+      .homepage("https://github.com/early-effect/terret")
+      .libraryShip
       .ci(SiteCi.Publish(SitePublish.Automatic))
 end HistosWiring

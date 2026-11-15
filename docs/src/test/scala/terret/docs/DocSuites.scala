@@ -2,6 +2,9 @@ package terret.docs
 
 import specular.ziotest.DocSpecSuite
 
+object RunSuite extends DocSpecSuite:
+  def doc = Run.doc
+
 object AttachSuite extends DocSpecSuite:
   def doc = Attach.doc
 

@@ -1,0 +1,23 @@
+name: release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release-terret:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: early-effect/histos/.github/actions/setup@496d78a846d47fc30a1c7c1f9f6264327660886d # 496d78a846d47fc30a1c7c1f9f6264327660886d
+      - run: ./histos doctor --preflight release-terret
+      - run: "./histos publish release terret"
+        env:
+          HISTOS_SESSION: release
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+          PGP_KEY_HEX: ${{ secrets.PGP_KEY_HEX }}

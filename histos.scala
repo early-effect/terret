@@ -1,7 +1,9 @@
 import histos.*
+import histos.plugin.{NoteKey, NoteText, PluginId}
 
 object build extends HistosBuild:
   def graph =
+    val library = Ship("terret").next(0, 0, 1)
     val scala3     = scala"3.10.1"
     val zio        = dep"dev.zio::zio:2.1.27"
     val zioStreams = dep"dev.zio::zio-streams:2.1.27"
@@ -81,11 +83,13 @@ object build extends HistosBuild:
         dep"rocks.earlyeffect::specular-core:0.21.4",
         dep"rocks.earlyeffect::specular-zio-test:0.21.4",
         dep"rocks.earlyeffect::specular-site:0.21.4",
+        dep"rocks.earlyeffect::early-effect-docs-theme:0.21.4",
         dep"rocks.earlyeffect::heddle:0.15.0",
         zio,
         zioJson,
       )
       .testDependencies(zioTest, zioTestSbt)
+      .note(PluginId("dev.earlyeffect.specular"), NoteKey("library"), shipNote(library.released.revision))
     Projects
       .organization(organization"rocks.earlyeffect")
       .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
@@ -93,6 +97,7 @@ object build extends HistosBuild:
       .description(pom"Terret lets coding hosts talk to coding harnesses.")
       .locked
       .plugins(PluginSources.ship(dep"rocks.earlyeffect::specular-histos:0.0.2"))(
+        ships(library(core, grok, dsh, mcp, app)),
         core,
         grok,
         dsh,
@@ -100,3 +105,9 @@ object build extends HistosBuild:
         app,
         docs,
       )
+
+  /** A ship revision is one line. `not-a-ship` is the branch a revision cannot take. */
+  private def shipNote(revision: String): NoteText =
+    NoteText.from(revision) match
+      case Right(text) => text
+      case Left(_)     => NoteText("not-a-ship")
