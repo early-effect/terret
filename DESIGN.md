@@ -159,13 +159,13 @@ The packaged process is `terret.app.Main`. Config is nested under `terret`. `lis
 
 Warp's local agent reads `.warp/.mcp.json` from the project or from the home directory. There is no Warp.local library and no Warp.local type. The document is `mcpServers.terret.url`. A wildcard bind (`0.0.0.0` or `::`) is rewritten to `127.0.0.1`, and an IPv6 address is bracketed. HTTP is the documented attach path. The process does not write the file.
 
-The docs pages are DocSpecs: attach, jobs, ceiling, and config. `./histos test` runs them. A test builds the site and checks the index for that URL. The index does not advertise a library coordinate, because nothing is published yet. The site task pins specular-histos 0.0.2. That jar carries the API digest, so the plugin loads from Central. CI builds the site and does not publish it. Publishing the site stays with the release.
+The docs pages are DocSpecs: attach, jobs, ceiling, and config. `./histos test` runs them. A test builds the site and checks the index for that URL. The index does not advertise a library coordinate, because nothing is published yet. The site task pins specular-histos 0.0.2. That jar carries the API digest, so the plugin loads from Central. A push to `main` publishes `target/site` to GitHub Pages at `/terret`. A pull request does not deploy.
 
 ## Later
 
 The dsh headless protocol is specified above. Any later harness implements the same core traits. The MCP jobs should not change when a new adapter lands.
 
-A published process and histos catalog shipping wait until the library is released. The site task is on the 0.0.2 pin above. Docs stay proven snippets, as set out in Build and docs.
+A published process and histos catalog shipping wait until the library is released. The site publishes from `main` as set out above. Docs stay proven snippets, as set out in Build and docs.
 
 ## Sources
 
