@@ -6,7 +6,7 @@ import terret.dsh.DshConfig
 import terret.grok.GrokConfig
 import zio.test.*
 
-/** Why Terret exists, how to run it, and the coordinate of the next ship. */
+/** Why Terret exists, how to run it, and the latest stable coordinate. */
 object Run extends DocSpec:
   def doc = page("Terret")(
     md"""
@@ -20,7 +20,7 @@ through an adapter. The core never learns a harness's name. The jobs a host call
 a second tool DSL. It is the outbound edge: one adapter per harness, then those same jobs promoted
 through heddle.
 
-From this repository, `./histos test` proves the suites. `./histos run terret.app.Main` listens on
+From this repository, `./histos test` proves the suites. `./histos run app` listens on
 `http://127.0.0.1:8080/mcp`. The default harness is Grok: command `grok`, transport `Cli`, approval
 `Ask`. Nothing else is required.
 
@@ -30,8 +30,7 @@ URL. A bind on `0.0.0.0` is written as `127.0.0.1`.
 Keys live under `terret`. `harness` `dsh` selects the dsh adapter and the command becomes `dsh`.
 `listen` `stdio` is the other pipe. The same five jobs are on both.
 
-The coordinates are the next ship, `<terret ship>`. The jars publish with that release. This site
-uses that number now.
+The coordinates are the latest stable, `<terret ship>`.
 
 ```scala
 dep"rocks.earlyeffect::terret:<terret ship>"

@@ -26,18 +26,32 @@ object CliHarnessSpec extends ZIOSpecDefault:
     test("closed ask spawns once per prompt, resumes from the log, and the second prompt uses -r") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead)
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          calls    <- Ref.make(Chunk.empty[SpawnCall])
+          harness  <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead)
+          root     <- workspace
+          id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
           exported <- harness.transcript(id)
           replayed <- harness.resume(id).runCollect
           mid      <- calls.get
           _        <- harness.prompt(id, Prompt("again")).runDrain
           spawned  <- calls.get
-          first = Launch.cli(GrokConfig.cli, id, Prompt("hello"), resume = false, PermissionPolicy.Closed, Ceiling.closed)
-          second = Launch.cli(GrokConfig.cli, id, Prompt("again"), resume = true, PermissionPolicy.Closed, Ceiling.closed)
+          first = Launch.cli(
+            GrokConfig.cli,
+            id,
+            Prompt("hello"),
+            resume = false,
+            PermissionPolicy.Closed,
+            Ceiling.closed,
+          )
+          second = Launch.cli(
+            GrokConfig.cli,
+            id,
+            Prompt("again"),
+            resume = true,
+            PermissionPolicy.Closed,
+            Ceiling.closed,
+          )
         yield assertTrue(
           streamed == Chunk(
             Event.Thought("thinking"),
@@ -57,10 +71,14 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, recording("""{"type":"text","data":"partial"}""", 3, calls), dead)
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          events  <- harness.prompt(id, Prompt("hello")).either.runCollect
+          harness <- GrokHarness.make(
+            GrokConfig.cli,
+            recording("{\"type\":\"text\",\"data\":\"par\"}\n{\"type\":\"text\",\"data\":\"tial\"}", 3, calls),
+            dead,
+          )
+          root   <- workspace
+          id     <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          events <- harness.prompt(id, Prompt("hello")).either.runCollect
         yield assertTrue(
           events.exists {
             case Right(Event.Assistant("partial")) => true
@@ -82,6 +100,34 @@ object CliHarnessSpec extends ZIOSpecDefault:
           id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           failed  <- harness.prompt(id, Prompt("hello")).runCollect.flip
         yield assertTrue(failed == HarnessFailure.Protocol(ProtocolFault.Incomplete))
+      }
+    },
+    test("contiguous text joins, and a nameless update keeps the tool") {
+      val body =
+        """{"type":"text","data":"Look "}
+          |{"type":"text","data":"in"}
+          |{"type":"tool_call","toolCallId":"call_1","toolName":"grep","rawInput":{}}
+          |{"type":"tool_call_update","toolCallId":"call_1","rawOutput":{"stdout":[60,119,111,114,107]}}
+          |{"type":"end","stopReason":"end_turn"}
+          |""".stripMargin
+      val printed = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj("stdout" -> Json.Str("<work")))
+      ZIO.scoped {
+        for
+          calls    <- Ref.make(Chunk.empty[SpawnCall])
+          harness  <- GrokHarness.make(GrokConfig.cli, recording(body, 0, calls), dead)
+          root     <- workspace
+          id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          streamed <- harness.prompt(id, Prompt("hello")).runCollect
+          exported <- harness.transcript(id)
+        yield assertTrue(
+          streamed == Chunk(
+            Event.Assistant("Look in"),
+            Event.ToolStarted(ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj())),
+            Event.ToolUpdated(printed),
+            Event.TurnFinished(TurnOutcome.Completed),
+          ),
+          exported.events == streamed,
+        )
       }
     },
     test("a non-json line is malformed") {

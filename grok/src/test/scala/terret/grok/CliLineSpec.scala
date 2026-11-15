@@ -32,7 +32,7 @@ object CliLineSpec extends ZIOSpecDefault:
           Right(Chunk.empty),
           Right(Chunk.empty),
           Right(Chunk.empty),
-        ),
+        )
       )
     },
     test("an empty tool id is skipped and a bad line is malformed") {
@@ -45,21 +45,57 @@ object CliLineSpec extends ZIOSpecDefault:
     test("end and error lines finish the turn") {
       assertTrue(
         CliLine.parse("""{"type":"end","stopReason":"end_turn"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Completed)),
+          Chunk(Event.TurnFinished(TurnOutcome.Completed))
         ),
         CliLine.parse("""{"type":"end","stopReason":"cancelled"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Cancelled)),
+          Chunk(Event.TurnFinished(TurnOutcome.Cancelled))
         ),
         CliLine.parse("""{"type":"end","stopReason":"refusal"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Refused)))),
+          Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Refused))))
         ),
         CliLine.parse("""{"type":"end","stopReason":"max_tokens"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Completed)),
+          Chunk(Event.TurnFinished(TurnOutcome.Completed))
         ),
         CliLine.parse("""{"type":"error","message":"boom"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete)))),
+          Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete))))
+        ),
+      )
+    },
+    test("a nameless update keeps the started name and reads stdout bytes as text") {
+      val lines = List(
+        """{"type":"tool_call","toolCallId":"call_1","toolName":"grep","rawInput":{}}""",
+        """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":""" +
+          """{"type":"GrepSearch","stdout":[60,119,111,114,107],"hits":[1,2]}}""",
+        """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":null}""",
+      )
+      val started = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj())
+      val printed = ToolCall(
+        CallId("call_1"),
+        ToolName("grep"),
+        Json.Obj(
+          "type"   -> Json.Str("GrepSearch"),
+          "stdout" -> Json.Str("<work"),
+          "hits"   -> Json.Arr(Json.Num(1), Json.Num(2)),
+        ),
+      )
+      val cleared = ToolCall(CallId("call_1"), ToolName("grep"), Json.Null)
+      assertTrue(
+        replay(lines) == Right(
+          Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed), Event.ToolUpdated(cleared))
+        ),
+        CliLine.parse("""{"type":"tool_call","toolCallId":"call_2","rawInput":{}}""") == Right(Chunk.empty),
+        CliLine.parse("""{"type":"tool_call_update","toolCallId":"never","rawOutput":{"stdout":[60]}}""") == Right(
+          Chunk.empty
         ),
       )
     },
   )
+
+  private def replay(lines: List[String]): Either[ProtocolFault, Chunk[Event]] =
+    lines
+      .foldLeft[Either[ProtocolFault, (Map[String, ToolName], Chunk[Event])]](Right((Map.empty, Chunk.empty))) {
+        case (Right((seen, acc)), line) => CliLine.parse(line, seen).map((next, events) => (next, acc ++ events))
+        case (failed, _)                => failed
+      }
+      .map(_._2)
 end CliLineSpec

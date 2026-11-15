@@ -6,7 +6,7 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.Transcript
+import terret.transcript.{Retain, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.{Chunk, IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
@@ -21,8 +21,10 @@ final class DshHarness private (
   def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
-      id   <- ZIO.fromEither(SessionId.from(uuid.toString)).mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
-      _    <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy)))
+      id   <- ZIO
+        .fromEither(SessionId.from(uuid.toString))
+        .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
+      _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -33,7 +35,10 @@ final class DshHarness private (
         else
           Promise.make[HarnessFailure, Unit].flatMap { gate =>
             gates.update(_.updated(id, gate)).as {
-              turn(id, slot, prompt).interruptWhen(gate).ensuring(gates.update(_.removed(id))).tap(append(id, _))
+              Retain
+                .coalesce(turn(id, slot, prompt).interruptWhen(gate))(append(id, _))
+                .tap(append(id, _))
+                .ensuring(gates.update(_.removed(id)))
             }
           }
       }
@@ -65,7 +70,7 @@ final class DshHarness private (
 
   private def remember(id: SessionId, adopted: Ref[Option[String]]): UIO[Unit] =
     adopted.get.flatMap {
-      case None => ZIO.unit
+      case None         => ZIO.unit
       case Some(remote) =>
         sessions.update { rows =>
           rows.get(id) match
@@ -100,7 +105,6 @@ object DshHarness:
   private[dsh] object Slot:
     def empty(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): Slot =
       Slot(workspace, ceiling, policy, Chunk.empty, None)
-  end Slot
 
   def make(config: DshConfig, spawner: Spawner): ZIO[Scope, Nothing, DshHarness] =
     for

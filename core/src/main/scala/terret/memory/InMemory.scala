@@ -5,7 +5,7 @@ import terret.harness.{Harness, HarnessFailure}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.Transcript
+import terret.transcript.{Retain, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.{Chunk, IO, Promise, Random, Ref, UIO, ZIO, ZLayer}
@@ -18,7 +18,6 @@ object Script:
       Event.Assistant(prompt.text),
       Event.TurnFinished(TurnOutcome.Completed),
     )
-end Script
 
 final case class Applied(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy)
 
@@ -47,9 +46,8 @@ final class InMemory private (
         for
           gate <- Promise.make[HarnessFailure, Unit]
           _    <- gates.update(_.updated(id, gate))
-        yield script
-          .onPrompt(id, prompt)
-          .interruptWhen(gate)
+        yield Retain
+          .coalesce(script.onPrompt(id, prompt).interruptWhen(gate))(append(id, _))
           .tap(event => append(id, event))
           .ensuring(gates.update(_.removed(id)))
       }

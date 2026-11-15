@@ -13,28 +13,29 @@ import zio.durationInt
 import zio.{Chunk, Promise, Ref, Scope, UIO, ZIO}
 
 object AcpHarnessSpec extends ZIOSpecDefault:
-  private val edit = ToolCall(CallId("call_1"), ToolName("Edit"), Json.Obj("path" -> Json.Str("a")))
+  private val edit    = ToolCall(CallId("call_1"), ToolName("Edit"), Json.Obj("path" -> Json.Str("a")))
+  private val printed = ToolCall(CallId("call_1"), ToolName("Edit"), Json.Obj("stdout" -> Json.Str("<work")))
 
   def spec = suite("ACP harness")(
     test("closed denies an edit, unknown methods get -32601, and an empty log loads once") {
       scripted(reply = true).flatMap { (harness, seen, _, _) =>
         for
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          loaded  <- harness.resume(id).runCollect
-          again   <- harness.resume(id).runCollect
+          root     <- workspace
+          id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          loaded   <- harness.resume(id).runCollect
+          again    <- harness.resume(id).runCollect
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
-          record  <- seen.get.repeatUntil(_.payloads.length >= 2)
+          record   <- seen.get.repeatUntil(_.payloads.length >= 2)
           methods = record.methods
         yield assertTrue(
           id.value == "sess-1",
-          loaded == Chunk(Event.Assistant("welcome back")),
+          loaded == Chunk(Event.Assistant("welcome back"), Event.ToolStarted(edit)),
           again == loaded,
           methods.count(_ == "session/load") == 1,
           streamed == Chunk(
             Event.Thought("hmm"),
             Event.Assistant("hello"),
-            Event.ToolStarted(edit),
+            Event.ToolUpdated(printed),
             Event.TurnFinished(TurnOutcome.Completed),
           ),
           record.payloads.exists(hasCode(_, -32601)),
@@ -45,9 +46,9 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     test("inherit allows the edit") {
       scripted(reply = true).flatMap { (harness, seen, _, _) =>
         for
-          root <- workspace
-          id   <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
-          _    <- harness.prompt(id, Prompt("hello")).runDrain
+          root   <- workspace
+          id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
+          _      <- harness.prompt(id, Prompt("hello")).runDrain
           record <- seen.get.repeatUntil(_.payloads.exists(option(_, "allow-once")))
         yield assertTrue(record.payloads.exists(option(_, "allow-once")))
       }
@@ -55,13 +56,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     test("cancel tells the agent") {
       scripted(reply = false).flatMap { (harness, seen, started, cancelled) =>
         for
-          root  <- workspace
-          id    <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
-          fiber <- harness.prompt(id, Prompt("stay")).runCollect.fork
-          _     <- started.await
-          _     <- harness.cancel(id)
-          _     <- cancelled.await
-          got   <- fiber.join
+          root   <- workspace
+          id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
+          fiber  <- harness.prompt(id, Prompt("stay")).runCollect.fork
+          _      <- started.await
+          _      <- harness.cancel(id)
+          _      <- cancelled.await
+          got    <- fiber.join
           record <- seen.get
         yield assertTrue(
           got.exists {
@@ -78,7 +79,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
 
   private def scripted(
-      reply: Boolean,
+      reply: Boolean
   ): ZIO[Scope, Nothing, (GrokHarness, Ref[Seen], Promise[Nothing, Unit], Promise[Nothing, Unit])] =
     for
       seen      <- Ref.make(Seen(Chunk.empty, Chunk.empty))
@@ -139,23 +140,32 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         note(seen, "initialize") *> send(agent, Wire.ok(id, Json.Obj("protocolVersion" -> Json.Num(BigDecimal(1)))))
       case Wire.Call(id, "session/new", _) =>
         note(seen, "session/new") *>
-          send(agent, Wire.notify("session/update", Json.Obj("update" -> Json.Obj("sessionUpdate" -> Json.Str("available_commands_update"))))) *>
+          send(
+            agent,
+            Wire.notify(
+              "session/update",
+              Json.Obj("update" -> Json.Obj("sessionUpdate" -> Json.Str("available_commands_update"))),
+            ),
+          ) *>
           send(agent, Wire.ok(id, Json.Obj("sessionId" -> Json.Str("sess-1"))))
       case Wire.Call(id, "session/load", _) =>
         note(seen, "session/load") *>
           send(agent, update("agent_message_chunk", "welcome back")) *>
+          send(agent, tool) *>
           send(agent, Wire.ok(id, Json.Obj("sessionId" -> Json.Str("sess-1"))))
       case Wire.Call(id, "session/prompt", _) =>
         note(seen, "session/prompt") *>
           send(agent, update("agent_thought_chunk", "hmm")) *>
           started.succeed(()).unit *>
-          ZIO.when(reply) {
-            send(agent, update("agent_message_chunk", "hello")) *>
-              send(agent, Wire.request(Json.Str("ping-1"), "custom/ping", Json.Obj())) *>
-              send(agent, permission) *>
-              send(agent, tool) *>
-              send(agent, Wire.ok(id, Json.Obj("stopReason" -> Json.Str("end_turn"))))
-          }.unit
+          ZIO
+            .when(reply) {
+              send(agent, update("agent_message_chunk", "hello")) *>
+                send(agent, Wire.request(Json.Str("ping-1"), "custom/ping", Json.Obj())) *>
+                send(agent, permission) *>
+                send(agent, toolUpdate) *>
+                send(agent, Wire.ok(id, Json.Obj("stopReason" -> Json.Str("end_turn"))))
+            }
+            .unit
       case Wire.Call(_, method, _) =>
         note(seen, method)
       case Wire.Note(method, _) =>
@@ -188,10 +198,26 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       Json.Str("perm-1"),
       "session/request_permission",
       Json.Obj(
-        "toolCall" -> Json.Obj("toolCallId" -> Json.Str("call_1"), "title" -> Json.Str("Edit"), "kind" -> Json.Str("edit")),
-        "options"  -> Json.Arr(
-          Json.Obj("optionId" -> Json.Str("allow-once"), "kind" -> Json.Str("allow_once")),
+        "toolCall" -> Json
+          .Obj("toolCallId" -> Json.Str("call_1"), "title" -> Json.Str("Edit"), "kind" -> Json.Str("edit")),
+        "options" -> Json.Arr(
+          Json.Obj("optionId" -> Json.Str("allow-once"), "kind"  -> Json.Str("allow_once")),
           Json.Obj("optionId" -> Json.Str("reject-once"), "kind" -> Json.Str("reject_once")),
+        ),
+      ),
+    )
+
+  private val toolUpdate: Json =
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(
+          "sessionUpdate" -> Json.Str("tool_call_update"),
+          "toolCallId"    -> Json.Str("call_1"),
+          "rawOutput"     -> Json.Obj(
+            "stdout" -> Json.Arr(Json.Num(60), Json.Num(119), Json.Num(111), Json.Num(114), Json.Num(107))
+          ),
         ),
       ),
     )
