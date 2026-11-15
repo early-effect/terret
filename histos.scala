@@ -91,6 +91,7 @@ object build extends HistosBuild:
       .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
       .developer(Developer(developer"russwyte", pom"Russ White"))
       .description(pom"Terret lets coding hosts talk to coding harnesses.")
+      .locked
       .plugins(PluginSources.ship(dep"rocks.earlyeffect::specular-histos:0.0.2"))(
         core,
         grok,
