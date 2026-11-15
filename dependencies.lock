@@ -41,11 +41,11 @@ cell grok 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
@@ -56,20 +56,19 @@ artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
 test grok 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
@@ -84,7 +83,6 @@ artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict org.scala-lang scala-library 2.13.4 3.9.0
@@ -94,11 +92,11 @@ cell dsh 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
@@ -109,20 +107,19 @@ artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
 test dsh 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
@@ -137,7 +134,6 @@ artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict org.scala-lang scala-library 2.13.4 3.9.0
@@ -147,37 +143,36 @@ cell mcp 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle-mcp 0.15.0 binary
+direct rocks.earlyeffect heddle-mcp 0.15.1 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle-mcp_3 0.15.0 2d2c768d2f1ce25cf36fb6ae55d8d201a1ba72e80bad58e03495b1b15615e75e central
+artifact rocks.earlyeffect heddle-mcp_3 0.15.1 1b74271ed5a7bdac5b52f4c1d85d6c0e736fd113d5509bb4b95c255cb83f3c81 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.0 a887648c4c48419853144665b0d4f1ac5829a9745d741d0e9f4fbec65ba4ae4d central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.1 f3b4cc8cdd424c388282c212a0b95b3ec0066d7f274b6c6aa2e5758c13f19595 central
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
 test mcp 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle-mcp 0.15.0 binary
+direct rocks.earlyeffect heddle-mcp 0.15.1 binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle-mcp_3 0.15.0 2d2c768d2f1ce25cf36fb6ae55d8d201a1ba72e80bad58e03495b1b15615e75e central
+artifact rocks.earlyeffect heddle-mcp_3 0.15.1 1b74271ed5a7bdac5b52f4c1d85d6c0e736fd113d5509bb4b95c255cb83f3c81 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
@@ -185,8 +180,8 @@ artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.0 a887648c4c48419853144665b0d4f1ac5829a9745d741d0e9f4fbec65ba4ae4d central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.1 f3b4cc8cdd424c388282c212a0b95b3ec0066d7f274b6c6aa2e5758c13f19595 central
 artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
 artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
@@ -194,7 +189,6 @@ artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict org.scala-lang scala-library 2.13.4 3.9.0
@@ -204,40 +198,39 @@ cell app 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
-direct rocks.earlyeffect heddle-mcp 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
+direct rocks.earlyeffect heddle-mcp 0.15.1 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
-artifact rocks.earlyeffect heddle-mcp_3 0.15.0 2d2c768d2f1ce25cf36fb6ae55d8d201a1ba72e80bad58e03495b1b15615e75e central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
+artifact rocks.earlyeffect heddle-mcp_3 0.15.1 1b74271ed5a7bdac5b52f4c1d85d6c0e736fd113d5509bb4b95c255cb83f3c81 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.0 a887648c4c48419853144665b0d4f1ac5829a9745d741d0e9f4fbec65ba4ae4d central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.1 f3b4cc8cdd424c388282c212a0b95b3ec0066d7f274b6c6aa2e5758c13f19595 central
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
 test app 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
-direct rocks.earlyeffect heddle-mcp 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
+direct rocks.earlyeffect heddle-mcp 0.15.1 binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
-artifact rocks.earlyeffect heddle-mcp_3 0.15.0 2d2c768d2f1ce25cf36fb6ae55d8d201a1ba72e80bad58e03495b1b15615e75e central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
+artifact rocks.earlyeffect heddle-mcp_3 0.15.1 1b74271ed5a7bdac5b52f4c1d85d6c0e736fd113d5509bb4b95c255cb83f3c81 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
@@ -246,14 +239,13 @@ artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd23041
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.0 a887648c4c48419853144665b0d4f1ac5829a9745d741d0e9f4fbec65ba4ae4d central
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.15.1 f3b4cc8cdd424c388282c212a0b95b3ec0066d7f274b6c6aa2e5758c13f19595 central
 artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
 artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
 artifact io.github.kitlangton comptime_3 0.7.2 c200237eb2220429cebe7088a65ee44786532e0762906c29cb52c15845befb1a central
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict org.scala-lang scala-library 2.13.4 3.9.0
@@ -264,14 +256,14 @@ direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
 direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
 artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced5685f734e0995a561947463f6645f3650bc6 central
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
 artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
@@ -329,7 +321,6 @@ artifact org.scalameta common2_2.13 4.17.3 d16050f3557e472ac3489501edd4d941d975b
 artifact com.lihaoyi fansi_3 0.5.1 df4b447704664563cb0fba9cf52d3fc7509654ab592824d5c2eb4647e6701ac4 central
 evict com.lihaoyi sourcecode_3 0.4.0 0.4.4
 evict dev.zio zio-json_3 1.1.0 1.1.2
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict dev.zio zio_3 2.1.26 2.1.27
@@ -344,13 +335,13 @@ evict org.scala-lang scala3-library_3 3.3.1 3.9.0
 evict org.scala-lang scala3-library_3 3.3.3 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
-evict rocks.earlyeffect heddle_3 0.12.0 0.15.0
+evict rocks.earlyeffect heddle_3 0.12.0 0.15.1
 test docs 3.10.1 jvm
 direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
 direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
-direct rocks.earlyeffect heddle 0.15.0 binary
+direct rocks.earlyeffect heddle 0.15.1 binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
 direct dev.zio zio-test 2.1.27 binary
@@ -359,7 +350,7 @@ artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced56
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
 artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
-artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
+artifact rocks.earlyeffect heddle_3 0.15.1 cf53006fdb362281bba4b59115109ee79646c39a55ff419a36eb8d057b6cada3 central
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
@@ -417,7 +408,6 @@ artifact org.scalameta common2_2.13 4.17.3 d16050f3557e472ac3489501edd4d941d975b
 artifact com.lihaoyi fansi_3 0.5.1 df4b447704664563cb0fba9cf52d3fc7509654ab592824d5c2eb4647e6701ac4 central
 evict com.lihaoyi sourcecode_3 0.4.0 0.4.4
 evict dev.zio zio-json_3 1.1.0 1.1.2
-evict dev.zio zio-json_3 1.1.1 1.1.2
 evict dev.zio zio-test-sbt_3 2.1.26 2.1.27
 evict dev.zio zio-test_3 2.1.26 2.1.27
 evict dev.zio zio_3 2.1.26 2.1.27
@@ -432,7 +422,7 @@ evict org.scala-lang scala3-library_3 3.3.1 3.9.0
 evict org.scala-lang scala3-library_3 3.3.3 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
-evict rocks.earlyeffect heddle_3 0.12.0 0.15.0
+evict rocks.earlyeffect heddle_3 0.12.0 0.15.1
 plugin rocks.earlyeffect specular-histos 0.0.2 binary-or-source
 direct rocks.earlyeffect specular-histos 0.0.2 binary
 artifact rocks.earlyeffect specular-histos_3 0.0.2 6470879bde2cc423ecd9955f0e3c76bb6c2b3f77237c5406825632b4c397aeec central
