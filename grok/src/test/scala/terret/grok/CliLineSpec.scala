@@ -61,12 +61,12 @@ object CliLineSpec extends ZIOSpecDefault:
         ),
       )
     },
-    test("a nameless update keeps the started name and reads stdout bytes as text") {
+    test("a null tool update is dropped and a nameless update keeps the started name") {
       val lines = List(
         """{"type":"tool_call","toolCallId":"call_1","toolName":"grep","rawInput":{}}""",
+        """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":null}""",
         """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":""" +
           """{"type":"GrepSearch","stdout":[60,119,111,114,107],"hits":[1,2]}}""",
-        """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":null}""",
       )
       val started = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj())
       val printed = ToolCall(
@@ -78,16 +78,21 @@ object CliLineSpec extends ZIOSpecDefault:
           "hits"   -> Json.Arr(Json.Num(1), Json.Num(2)),
         ),
       )
-      val cleared = ToolCall(CallId("call_1"), ToolName("grep"), Json.Null)
       assertTrue(
-        replay(lines) == Right(
-          Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed), Event.ToolUpdated(cleared))
-        ),
+        replay(lines) == Right(Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed))),
         CliLine.parse("""{"type":"tool_call","toolCallId":"call_2","rawInput":{}}""") == Right(Chunk.empty),
         CliLine.parse("""{"type":"tool_call_update","toolCallId":"never","rawOutput":{"stdout":[60]}}""") == Right(
           Chunk.empty
         ),
       )
+    },
+    test("a null update records a name and emits nothing") {
+      val lines = List(
+        """{"type":"tool_call_update","toolCallId":"call_1","toolName":"grep","rawOutput":null}""",
+        """{"type":"tool_call_update","toolCallId":"call_1","rawOutput":{"stdout":[60]}}""",
+      )
+      val printed = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj("stdout" -> Json.Str("<")))
+      assertTrue(replay(lines) == Right(Chunk(Event.ToolUpdated(printed))))
     },
   )
 
