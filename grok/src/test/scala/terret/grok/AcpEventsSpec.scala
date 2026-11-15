@@ -47,13 +47,18 @@ object AcpEventsSpec extends ZIOSpecDefault:
         AcpEvents.fromUpdate(Json.Obj("sessionUpdate" -> Json.Str("brand_new"))) == Right(Chunk.empty),
       )
     },
-    test("a nameless update keeps the started name and reads stdout bytes as text") {
+    test("a null tool update is dropped and a nameless update keeps the started name") {
       val bytes = Json.Arr(Json.Num(60), Json.Num(119), Json.Num(111), Json.Num(114), Json.Num(107))
       val start = Json.Obj(
         "sessionUpdate" -> Json.Str("tool_call"),
         "toolCallId"    -> Json.Str("call_1"),
         "toolName"      -> Json.Str("grep"),
         "rawInput"      -> Json.Obj(),
+      )
+      val cleared = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str("call_1"),
+        "rawOutput"     -> Json.Null,
       )
       val update = Json.Obj(
         "sessionUpdate" -> Json.Str("tool_call_update"),
@@ -64,18 +69,12 @@ object AcpEventsSpec extends ZIOSpecDefault:
           "hits"   -> Json.Arr(Json.Num(1)),
         ),
       )
-      val cleared = Json.Obj(
-        "sessionUpdate" -> Json.Str("tool_call_update"),
-        "toolCallId"    -> Json.Str("call_1"),
-        "rawOutput"     -> Json.Null,
-      )
       val started = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj())
       val printed = ToolCall(
         CallId("call_1"),
         ToolName("grep"),
         Json.Obj("type" -> Json.Str("GrepSearch"), "stdout" -> Json.Str("<work"), "hits" -> Json.Arr(Json.Num(1))),
       )
-      val empty  = ToolCall(CallId("call_1"), ToolName("grep"), Json.Null)
       val orphan = Json.Obj(
         "sessionUpdate" -> Json.Str("tool_call_update"),
         "toolCallId"    -> Json.Str("never"),
@@ -86,8 +85,8 @@ object AcpEventsSpec extends ZIOSpecDefault:
         "toolCallId"    -> Json.Str("call_2"),
       )
       assertTrue(
-        replay(List(start, update, cleared)) == Right(
-          Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed), Event.ToolUpdated(empty))
+        replay(List(start, cleared, update)) == Right(
+          Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed))
         ),
         AcpEvents.fromUpdate(orphan) == Right(Chunk.empty),
         AcpEvents.fromUpdate(unnamed) == Right(Chunk.empty),

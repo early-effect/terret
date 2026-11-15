@@ -20,9 +20,12 @@ object ToolEvent:
         val input = raw.as[ToolPayload] match
           case Right(value) => value.json
           case Left(_)      => raw
-        val call  = ToolCall(id, name, input)
-        val event = if started then Event.ToolStarted(call) else Event.ToolUpdated(call)
-        (next, Chunk(event))
+        val call   = ToolCall(id, name, input)
+        val events =
+          if started then Chunk(Event.ToolStarted(call))
+          else if input == Json.Null then Chunk.empty
+          else Chunk(Event.ToolUpdated(call))
+        (next, events)
       case _ => (seen, Chunk.empty)
 
   private def choose(explicit: Option[String], remembered: Option[ToolName]): Option[ToolName] =
