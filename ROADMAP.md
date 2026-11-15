@@ -4,7 +4,7 @@ Decisions live in [DESIGN.md](DESIGN.md). This file is status only. The change t
 
 ## Where we are
 
-Phase 5, more adapters. The dsh headless adapter is in. The process defaults to Grok and selects dsh with `harness`. Phase 4's site tells why Terret exists, how to run it, and the `0.0.1` ship coordinates. A push to `main` publishes that site at `/terret`.
+Phase 5, more adapters. The dsh headless adapter is in. The process defaults to Grok and selects dsh with `harness`. `0.0.1` is published. The open follow-up is the 0.0.1 trial: the run command, tool output, and per-token events. A push to `main` publishes that site at `/terret`.
 
 ## Phases
 

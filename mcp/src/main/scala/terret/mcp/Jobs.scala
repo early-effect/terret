@@ -5,6 +5,7 @@ import terret.Terret
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
+import terret.transcript.Retain
 import terret.workspace.Workspace
 import zio.{Chunk, IO, ZIO}
 
@@ -70,11 +71,13 @@ private[mcp] object Jobs:
   private def runTurn(terret: Terret, job: RunJob): IO[JobFailure, RunDone] =
     for
       id     <- sessionOf(job.session)
-      events <- terret
-                  .run(id, Prompt(job.prompt))
-                  .mapZIO(event => Notice.publish(event).as(WireEvent.from(event)))
-                  .runCollect
-                  .mapError(JobFailure.from)
+      events <- Retain.deliver.locally(event => Notice.publish(event)) {
+        terret
+          .run(id, Prompt(job.prompt))
+          .mapZIO(event => Notice.publish(event).as(WireEvent.from(event)))
+          .runCollect
+          .mapError(JobFailure.from)
+      }
       outcome <- finished(job.session, events)
     yield RunDone(job.session, outcome)
 

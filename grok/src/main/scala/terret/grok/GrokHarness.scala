@@ -1,12 +1,12 @@
 package terret.grok
 
 import heddle.LinePipe
-import terret.event.Event
+import terret.event.{Event, ToolName}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.Transcript
+import terret.transcript.{Retain, Transcript}
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.stream.ZStream
@@ -31,7 +31,10 @@ final class GrokHarness private (
       require(id).flatMap { slot =>
         Promise.make[HarnessFailure, Unit].flatMap { gate =>
           gates.update(_.updated(id, gate)).as {
-            turn(id, slot, prompt).interruptWhen(gate).ensuring(gates.update(_.removed(id))).tap(append(id, _))
+            Retain
+              .coalesce(turn(id, slot, prompt).interruptWhen(gate))(append(id, _))
+              .tap(append(id, _))
+              .ensuring(gates.update(_.removed(id)))
           }
         }
       }
@@ -41,8 +44,9 @@ final class GrokHarness private (
     ZStream.unwrap {
       require(id).flatMap { slot =>
         slot.pipe match
-          case Some(pipe) if slot.events.isEmpty => reload(id, slot, pipe).map(_.tap(append(id, _)))
-          case _                                 => ZIO.succeed(ZStream.fromChunk(slot.events))
+          case Some(pipe) if slot.events.isEmpty =>
+            reload(id, slot, pipe).map(stream => Retain.coalesce(stream)(append(id, _)).tap(append(id, _)))
+          case _ => ZIO.succeed(ZStream.fromChunk(slot.events))
       }
     }
 
@@ -60,8 +64,11 @@ final class GrokHarness private (
   private def openCli(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
-      id   <- ZIO.fromEither(SessionId.from(uuid.toString)).mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
-      _ <- sessions.update(_.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy)))
+      id   <- ZIO
+        .fromEither(SessionId.from(uuid.toString))
+        .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
+      names <- Ref.make(Map.empty[String, ToolName])
+      _     <- sessions.update(_.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names)))
     yield id
 
   private def openAcp(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
@@ -70,7 +77,10 @@ final class GrokHarness private (
         pipe   <- acp.open(workspace, policy, ceiling)
         result <- handshake(pipe, workspace, ceiling).tapError(_ => pipe.close)
         id     <- ZIO.fromEither(AcpEvents.sessionId(result)).mapError(HarnessFailure.Protocol(_))
-        _      <- sessions.update(_.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy).copy(pipe = Some(pipe), nextId = 3)))
+        names  <- Ref.make(Map.empty[String, ToolName])
+        _      <- sessions.update(
+          _.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names).copy(pipe = Some(pipe), nextId = 3))
+        )
       yield id
     }
 
@@ -85,7 +95,7 @@ final class GrokHarness private (
   private def turn(id: SessionId, slot: GrokHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     slot.pipe match
       case None       => cliTurn(id, slot, prompt)
-      case Some(pipe) => acpTurn(id, prompt, pipe, slot.policy, slot.ceiling)
+      case Some(pipe) => acpTurn(id, prompt, pipe, slot)
 
   private def cliTurn(id: SessionId, slot: GrokHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrapScoped {
@@ -101,18 +111,21 @@ final class GrokHarness private (
       id: SessionId,
       prompt: Prompt,
       pipe: RpcPipe,
-      policy: PermissionPolicy,
-      ceiling: Ceiling,
+      slot: GrokHarness.Slot,
   ): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
       nextId(id).map { number =>
         val expect = Json.Num(BigDecimal(number))
         ZStream.fromZIO(pipe.write(Wire.request(number, "session/prompt", promptBody(id, prompt)))) *>
-          AcpTurn.prompt(pipe, expect, policy, ceiling)
+          AcpTurn.prompt(pipe, expect, slot.policy, slot.ceiling, slot.names)
       }
     }
 
-  private def reload(id: SessionId, slot: GrokHarness.Slot, pipe: RpcPipe): ZIO[Any, HarnessFailure, ZStream[Any, HarnessFailure, Event]] =
+  private def reload(
+      id: SessionId,
+      slot: GrokHarness.Slot,
+      pipe: RpcPipe,
+  ): ZIO[Any, HarnessFailure, ZStream[Any, HarnessFailure, Event]] =
     nextId(id).map { number =>
       val expect = Json.Num(BigDecimal(number))
       val body   = Json.Obj(
@@ -121,7 +134,7 @@ final class GrokHarness private (
         "mcpServers" -> Json.Arr(),
       )
       ZStream.fromZIO(pipe.write(Wire.request(number, "session/load", body))) *>
-        AcpTurn.load(pipe, expect, slot.policy, slot.ceiling)
+        AcpTurn.load(pipe, expect, slot.policy, slot.ceiling, slot.names)
     }
 
   private def promptBody(id: SessionId, prompt: Prompt): Json =
@@ -131,11 +144,13 @@ final class GrokHarness private (
     )
 
   private def nextId(id: SessionId): IO[HarnessFailure, Int] =
-    sessions.modify { rows =>
-      rows.get(id) match
-        case None       => (Left(HarnessFailure.UnknownSession(id)), rows)
-        case Some(slot) => (Right(slot.nextId), rows.updated(id, slot.copy(nextId = slot.nextId + 1)))
-    }.flatMap(ZIO.fromEither)
+    sessions
+      .modify { rows =>
+        rows.get(id) match
+          case None       => (Left(HarnessFailure.UnknownSession(id)), rows)
+          case Some(slot) => (Right(slot.nextId), rows.updated(id, slot.copy(nextId = slot.nextId + 1)))
+      }
+      .flatMap(ZIO.fromEither)
 
   private def markPrompted(id: SessionId): UIO[Unit] =
     sessions.update { rows =>
@@ -167,12 +182,17 @@ object GrokHarness:
       prompted: Boolean,
       pipe: Option[RpcPipe],
       nextId: Int,
+      names: Ref[Map[String, ToolName]],
   )
 
   private[grok] object Slot:
-    def empty(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): Slot =
-      Slot(workspace, ceiling, policy, Chunk.empty, prompted = false, pipe = None, nextId = 1)
-  end Slot
+    def empty(
+        workspace: Workspace,
+        ceiling: Ceiling,
+        policy: PermissionPolicy,
+        names: Ref[Map[String, ToolName]],
+    ): Slot =
+      Slot(workspace, ceiling, policy, Chunk.empty, prompted = false, pipe = None, nextId = 1, names)
 
   def make(config: GrokConfig, spawner: Spawner, acp: AcpOpen): ZIO[Scope, Nothing, GrokHarness] =
     for

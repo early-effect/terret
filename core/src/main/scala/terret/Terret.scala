@@ -11,14 +11,13 @@ import terret.session.{Session, SessionId, SessionStatus}
 import terret.transcript.Transcript
 import terret.workspace.Workspace
 import zio.stream.ZStream
-import zio.{IO, Promise, Ref, UIO, ZIO, ZLayer}
+import zio.{IO, Ref, UIO, ZIO, ZLayer}
 
 final class Terret private (
     harness: Harness,
     config: TerretConfig,
     hooks: Hooks,
     sessions: Ref[Map[SessionId, Session]],
-    turns: Ref[Map[SessionId, Promise[TerretError, Unit]]],
 ):
   def open(workspace: Workspace, requested: Ceiling = Ceiling.all): IO[TerretError, Session] =
     confine(workspace).flatMap { _ =>
@@ -34,12 +33,11 @@ final class Terret private (
       for
         (session, previous) <- begin(id)
         started             <- Ref.make(false)
-        gate                <- Promise.make[TerretError, Unit]
-        _                   <- turns.update(_.updated(id, gate))
-        _                   <- ZIO.addFinalizer(release(id, previous, started) *> turns.update(_.removed(id)))
+        _                   <- ZIO.addFinalizer(release(id, previous, started))
         revised             <- hooks.beforePrompt(session, prompt)
         _                   <- started.set(true)
-      yield live(session, revised).interruptWhen(gate)
+      // The harness finalizer flushes an open text run. A gate around this stream would discard that run.
+      yield live(session, revised)
     }
 
   def resume(id: SessionId): ZStream[Any, TerretError, Event] =
@@ -65,26 +63,28 @@ final class Terret private (
   private def observe(session: Session, event: Event): UIO[Unit] =
     val status = event match
       case Event.TurnFinished(outcome) => finished(outcome)
-      case _                            => SessionStatus.Running
+      case _                           => SessionStatus.Running
     setStatus(session.id, status) *> hooks.onEvent(session, event)
 
   private def finished(outcome: TurnOutcome): SessionStatus =
     outcome match
-      case TurnOutcome.Completed  => SessionStatus.Finished
-      case TurnOutcome.Cancelled  => SessionStatus.Cancelled
+      case TurnOutcome.Completed => SessionStatus.Finished
+      case TurnOutcome.Cancelled => SessionStatus.Cancelled
       case TurnOutcome.Failed(_) => SessionStatus.Failed
 
   private def begin(id: SessionId): IO[TerretError, (Session, SessionStatus)] =
-    sessions.modify { rows =>
-      rows.get(id) match
-        case None =>
-          (Left(TerretError.UnknownSession(id)), rows)
-        case Some(session) if session.status == SessionStatus.Running =>
-          (Left(TerretError.Busy(id)), rows)
-        case Some(session) =>
-          val running = session.copy(status = SessionStatus.Running)
-          (Right((running, session.status)), rows.updated(id, running))
-    }.flatMap(ZIO.fromEither)
+    sessions
+      .modify { rows =>
+        rows.get(id) match
+          case None =>
+            (Left(TerretError.UnknownSession(id)), rows)
+          case Some(session) if session.status == SessionStatus.Running =>
+            (Left(TerretError.Busy(id)), rows)
+          case Some(session) =>
+            val running = session.copy(status = SessionStatus.Running)
+            (Right((running, session.status)), rows.updated(id, running))
+      }
+      .flatMap(ZIO.fromEither)
 
   private def release(id: SessionId, previous: SessionStatus, started: Ref[Boolean]): UIO[Unit] =
     started.get.flatMap {
@@ -98,12 +98,7 @@ final class Terret private (
     }
 
   private def halt(id: SessionId): IO[TerretError, Unit] =
-    for
-      _    <- setStatus(id, SessionStatus.Cancelled)
-      gate <- turns.get.map(_.get(id))
-      _    <- ZIO.foreachDiscard(gate)(_.succeed(()))
-      _    <- harness.cancel(id).mapError(TerretError.Harness(_))
-    yield ()
+    setStatus(id, SessionStatus.Cancelled) *> harness.cancel(id).mapError(TerretError.Harness(_))
 
   private def require(id: SessionId): IO[TerretError, Session] =
     sessions.get.map(_.get(id)).flatMap {
@@ -120,7 +115,7 @@ final class Terret private (
 
   private def confine(workspace: Workspace): IO[TerretError, Unit] =
     config.root match
-      case None => ZIO.unit
+      case None       => ZIO.unit
       case Some(root) =>
         if workspace.path.normalize.startsWith(root.path.normalize) then ZIO.unit
         else ZIO.fail(TerretError.WorkspaceDenied(workspace, root))
@@ -128,10 +123,8 @@ end Terret
 
 object Terret:
   def make(harness: Harness, config: TerretConfig, hooks: Hooks): UIO[Terret] =
-    for
-      sessions <- Ref.make(Map.empty[SessionId, Session])
-      turns    <- Ref.make(Map.empty[SessionId, Promise[TerretError, Unit]])
-    yield Terret(harness, config, hooks, sessions, turns)
+    for sessions <- Ref.make(Map.empty[SessionId, Session])
+    yield Terret(harness, config, hooks, sessions)
 
   val layer: ZLayer[Harness & TerretConfig & Hooks, Nothing, Terret] =
     ZLayer.fromZIO {

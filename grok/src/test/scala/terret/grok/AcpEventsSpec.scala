@@ -41,10 +41,56 @@ object AcpEventsSpec extends ZIOSpecDefault:
         AcpEvents.fromUpdate(thought) == Right(Chunk(Event.Thought("hmm"))),
         AcpEvents.fromUpdate(user) == Right(Chunk.empty),
         AcpEvents.fromUpdate(tool) == Right(
-          Chunk(Event.ToolStarted(ToolCall(CallId("call_1"), ToolName("Edit"), Json.Obj("path" -> Json.Str("a"))))),
+          Chunk(Event.ToolStarted(ToolCall(CallId("call_1"), ToolName("Edit"), Json.Obj("path" -> Json.Str("a")))))
         ),
         AcpEvents.fromUpdate(plan) == Right(Chunk(Event.Plan(Chunk(PlanStep("look"))))),
         AcpEvents.fromUpdate(Json.Obj("sessionUpdate" -> Json.Str("brand_new"))) == Right(Chunk.empty),
+      )
+    },
+    test("a nameless update keeps the started name and reads stdout bytes as text") {
+      val bytes = Json.Arr(Json.Num(60), Json.Num(119), Json.Num(111), Json.Num(114), Json.Num(107))
+      val start = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call"),
+        "toolCallId"    -> Json.Str("call_1"),
+        "toolName"      -> Json.Str("grep"),
+        "rawInput"      -> Json.Obj(),
+      )
+      val update = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str("call_1"),
+        "rawOutput"     -> Json.Obj(
+          "type"   -> Json.Str("GrepSearch"),
+          "stdout" -> bytes,
+          "hits"   -> Json.Arr(Json.Num(1)),
+        ),
+      )
+      val cleared = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str("call_1"),
+        "rawOutput"     -> Json.Null,
+      )
+      val started = ToolCall(CallId("call_1"), ToolName("grep"), Json.Obj())
+      val printed = ToolCall(
+        CallId("call_1"),
+        ToolName("grep"),
+        Json.Obj("type" -> Json.Str("GrepSearch"), "stdout" -> Json.Str("<work"), "hits" -> Json.Arr(Json.Num(1))),
+      )
+      val empty  = ToolCall(CallId("call_1"), ToolName("grep"), Json.Null)
+      val orphan = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call_update"),
+        "toolCallId"    -> Json.Str("never"),
+        "rawOutput"     -> Json.Obj("stdout" -> bytes),
+      )
+      val unnamed = Json.Obj(
+        "sessionUpdate" -> Json.Str("tool_call"),
+        "toolCallId"    -> Json.Str("call_2"),
+      )
+      assertTrue(
+        replay(List(start, update, cleared)) == Right(
+          Chunk(Event.ToolStarted(started), Event.ToolUpdated(printed), Event.ToolUpdated(empty))
+        ),
+        AcpEvents.fromUpdate(orphan) == Right(Chunk.empty),
+        AcpEvents.fromUpdate(unnamed) == Right(Chunk.empty),
       )
     },
     test("stop reasons and session ids stay typed") {
@@ -57,4 +103,12 @@ object AcpEventsSpec extends ZIOSpecDefault:
       )
     },
   )
+
+  private def replay(lines: List[Json]): Either[ProtocolFault, Chunk[Event]] =
+    lines
+      .foldLeft[Either[ProtocolFault, (Map[String, ToolName], Chunk[Event])]](Right((Map.empty, Chunk.empty))) {
+        case (Right((seen, acc)), line) => AcpEvents.fromUpdate(line, seen).map((next, events) => (next, acc ++ events))
+        case (failed, _)                => failed
+      }
+      .map(_._2)
 end AcpEventsSpec

@@ -1,6 +1,6 @@
 package terret.grok
 
-import terret.event.{Event, TurnOutcome}
+import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import zio.json.ast.Json
@@ -23,19 +23,34 @@ object AcpTurn:
         }
     }
 
-  def prompt(pipe: RpcPipe, expect: Json, policy: PermissionPolicy, ceiling: Ceiling): ZStream[Any, HarnessFailure, Event] =
+  def prompt(
+      pipe: RpcPipe,
+      expect: Json,
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      names: Ref[Map[String, ToolName]],
+  ): ZStream[Any, HarnessFailure, Event] =
     collect(
       pipe,
       expect,
+      names,
       (requestId, method, params) => answer(pipe, requestId, method, params, policy, ceiling),
       result => AcpEvents.stop(result).map(outcome => Chunk(Event.TurnFinished(outcome))),
-      code => Right(Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Rejected(code)))))),
+      code =>
+        Right(Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Rejected(code)))))),
     )
 
-  def load(pipe: RpcPipe, expect: Json, policy: PermissionPolicy, ceiling: Ceiling): ZStream[Any, HarnessFailure, Event] =
+  def load(
+      pipe: RpcPipe,
+      expect: Json,
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      names: Ref[Map[String, ToolName]],
+  ): ZStream[Any, HarnessFailure, Event] =
     collect(
       pipe,
       expect,
+      names,
       (requestId, method, params) => answer(pipe, requestId, method, params, policy, ceiling),
       _ => Right(Chunk.empty),
       code => Left(HarnessFailure.Protocol(ProtocolFault.Rejected(code))),
@@ -57,6 +72,7 @@ object AcpTurn:
   private def collect(
       pipe: RpcPipe,
       expect: Json,
+      names: Ref[Map[String, ToolName]],
       onCall: (Json, String, Json) => IO[HarnessFailure, Chunk[Event]],
       onOk: Json => Either[ProtocolFault, Chunk[Event]],
       onErr: Int => Either[HarnessFailure, Chunk[Event]],
@@ -67,7 +83,7 @@ object AcpTurn:
           done.get.flatMap {
             case true  => ZIO.fail(None)
             case false =>
-              step(pipe, expect, onCall, onOk, onErr).mapError(Some(_)).flatMap {
+              step(pipe, expect, names, onCall, onOk, onErr).mapError(Some(_)).flatMap {
                 case Step.Emit(events) => ZIO.succeed(events)
                 case Step.Done(events) => done.set(true).as(events)
               }
@@ -79,6 +95,7 @@ object AcpTurn:
   private def step(
       pipe: RpcPipe,
       expect: Json,
+      names: Ref[Map[String, ToolName]],
       onCall: (Json, String, Json) => IO[HarnessFailure, Chunk[Event]],
       onOk: Json => Either[ProtocolFault, Chunk[Event]],
       onErr: Int => Either[HarnessFailure, Chunk[Event]],
@@ -88,15 +105,20 @@ object AcpTurn:
       case Some(json) =>
         ZIO.fromEither(Wire.parse(json)).mapError(HarnessFailure.Protocol(_)).flatMap {
           case Wire.Note(method, params) if Wire.isUpdate(method) =>
-            ZIO.fromEither(AcpEvents.fromParams(params)).mapBoth(HarnessFailure.Protocol(_), Step.Emit(_))
-          case Wire.Note(_, _)                                    => ZIO.succeed(Step.Emit(Chunk.empty))
-          case Wire.Call(requestId, method, params)               => onCall(requestId, method, params).map(Step.Emit(_))
-          case Wire.Ok(got, result) if Wire.sameId(got, expect)   =>
+            names.get.flatMap { seen =>
+              ZIO.fromEither(AcpEvents.fromParams(params, seen)).mapError(HarnessFailure.Protocol(_)).flatMap {
+                (next, events) =>
+                  names.set(next).as(Step.Emit(events))
+              }
+            }
+          case Wire.Note(_, _)                                  => ZIO.succeed(Step.Emit(Chunk.empty))
+          case Wire.Call(requestId, method, params)             => onCall(requestId, method, params).map(Step.Emit(_))
+          case Wire.Ok(got, result) if Wire.sameId(got, expect) =>
             ZIO.fromEither(onOk(result)).mapBoth(HarnessFailure.Protocol(_), Step.Done(_))
-          case Wire.Err(got, code) if Wire.sameId(got, expect)    =>
+          case Wire.Err(got, code) if Wire.sameId(got, expect) =>
             ZIO.fromEither(onErr(code)).map(Step.Done(_))
-          case Wire.Ok(_, _)                                      => ZIO.succeed(Step.Emit(Chunk.empty))
-          case Wire.Err(_, _)                                     => ZIO.succeed(Step.Emit(Chunk.empty))
+          case Wire.Ok(_, _)  => ZIO.succeed(Step.Emit(Chunk.empty))
+          case Wire.Err(_, _) => ZIO.succeed(Step.Emit(Chunk.empty))
         }
     }
 
