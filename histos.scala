@@ -2,13 +2,13 @@ import histos.*
 
 object build extends HistosBuild:
   def graph =
-    val scala3     = scala"3.10.0"
+    val scala3     = scala"3.10.1"
     val zio        = dep"dev.zio::zio:2.1.27"
     val zioStreams = dep"dev.zio::zio-streams:2.1.27"
-    val zioJson    = dep"dev.zio::zio-json:1.1.1"
+    val zioJson    = dep"dev.zio::zio-json:1.1.2"
     val zioTest    = dep"dev.zio::zio-test:2.1.27"
     val zioTestSbt = dep"dev.zio::zio-test-sbt:2.1.27"
-    val core = module("core", Jvm)(scala3)
+    val core       = module("core", Jvm)(scala3)
       .artifact(artifact"terret")
       .scalac(
         ScalacFlag.Deprecation,
@@ -27,7 +27,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.14.2")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.15.0")
       .testDependencies(zioTest, zioTestSbt)
     val dsh = module("dsh", Jvm)(scala3)
       .artifact(artifact"terret-dsh")
@@ -38,7 +38,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.14.2")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.15.0")
       .testDependencies(zioTest, zioTestSbt)
     val mcp = module("mcp", Jvm)(scala3)
       .artifact(artifact"terret-mcp")
@@ -49,7 +49,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.14.2")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.15.0")
       .testDependencies(zioTest, zioTestSbt)
     val app = module("app", Jvm)(scala3)
       .artifact(artifact"terret-app")
@@ -65,8 +65,8 @@ object build extends HistosBuild:
         zio,
         zioStreams,
         zioJson,
-        dep"rocks.earlyeffect::heddle:0.14.2",
-        dep"rocks.earlyeffect::heddle-mcp:0.14.2",
+        dep"rocks.earlyeffect::heddle:0.15.0",
+        dep"rocks.earlyeffect::heddle-mcp:0.15.0",
       )
       .testDependencies(zioTest, zioTestSbt)
     val docs = module("docs", Jvm)(scala3)
@@ -78,10 +78,10 @@ object build extends HistosBuild:
         ScalacFlag.ImplicitConversions,
       )
       .libraryDependencies(
-        dep"rocks.earlyeffect::specular-core:0.21.3",
-        dep"rocks.earlyeffect::specular-zio-test:0.21.3",
-        dep"rocks.earlyeffect::specular-site:0.21.3",
-        dep"rocks.earlyeffect::heddle:0.14.2",
+        dep"rocks.earlyeffect::specular-core:0.21.4",
+        dep"rocks.earlyeffect::specular-zio-test:0.21.4",
+        dep"rocks.earlyeffect::specular-site:0.21.4",
+        dep"rocks.earlyeffect::heddle:0.15.0",
         zio,
         zioJson,
       )
@@ -90,4 +90,13 @@ object build extends HistosBuild:
       .organization(organization"rocks.earlyeffect")
       .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
       .developer(Developer(developer"russwyte", pom"Russ White"))
-      .description(pom"Terret lets coding hosts talk to coding harnesses.")(core, grok, dsh, mcp, app, docs)
+      .description(pom"Terret lets coding hosts talk to coding harnesses.")
+      .locked
+      .plugins(PluginSources.ship(dep"rocks.earlyeffect::specular-histos:0.0.2"))(
+        core,
+        grok,
+        dsh,
+        mcp,
+        app,
+        docs,
+      )
