@@ -77,6 +77,17 @@ jobs:
         with:
           path: "~/.cache/histos"
           key: "histos-store-${{ case(github.event_name == 'pull_request', format('pr-{0}', github.event.pull_request.number), 'main') }}-${{ runner.os }}-${{ runner.arch }}"
+  versions:
+    if: "github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'"
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: early-effect/histos/.github/actions/setup@496d78a846d47fc30a1c7c1f9f6264327660886d # 496d78a846d47fc30a1c7c1f9f6264327660886d
+      - run: ./histos doctor --preflight versions
+      - run: "./histos run versions"
   docs:
     if: "github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
     runs-on: ubuntu-26.04

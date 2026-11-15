@@ -263,12 +263,14 @@ cell docs 3.10.1 jvm
 direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
+direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
 direct rocks.earlyeffect heddle 0.15.0 binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
 artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced5685f734e0995a561947463f6645f3650bc6 central
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
+artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
 artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
@@ -347,6 +349,7 @@ test docs 3.10.1 jvm
 direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
+direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
 direct rocks.earlyeffect heddle 0.15.0 binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
@@ -355,6 +358,7 @@ direct dev.zio zio-test-sbt 2.1.27 binary
 artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced5685f734e0995a561947463f6645f3650bc6 central
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
+artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
 artifact rocks.earlyeffect heddle_3 0.15.0 4ec6c0e6a38f234df74ad470e7b31b83f7a12018eb94b208a5807e1523e92106 central
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
