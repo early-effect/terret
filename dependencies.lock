@@ -423,15 +423,13 @@ evict org.scala-lang scala3-library_3 3.3.3 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
 evict rocks.earlyeffect heddle_3 0.12.0 0.15.1
-plugin rocks.earlyeffect specular-histos 0.0.2 binary-or-source
-direct rocks.earlyeffect specular-histos 0.0.2 binary
-artifact rocks.earlyeffect specular-histos_3 0.0.2 6470879bde2cc423ecd9955f0e3c76bb6c2b3f77237c5406825632b4c397aeec central
-source rocks.earlyeffect specular-histos_3 0.0.2 139ff12b0976b606e83f87a6f94dc85e7ae074248daa8eac49011a5e7e6f1641 central
 tool compiler 3.10.1 jvm
 root org.scala-lang scala3-compiler_3 3.10.1 closure build
 root org.scala-lang scala3-sbt-bridge 3.10.1 closure build
 root org.jline jline-reader 4.3.1 closure build
 root org.jline jline-terminal-jni 4.3.1 closure build
+resolver ivy-local
+resolver maven:https://central.sonatype.com/repository/maven-snapshots/
 resolver central
 artifact org.scala-lang scala3-compiler_3 3.10.1 786e93def1988c1c59d6348d335333f3624cfaee0d4191cbcc9040b46aa11992 central
 artifact org.scala-lang scala3-sbt-bridge 3.10.1 5b4e5f158d08206b357ccb3d4640af7b5969d73f7b8d034cc69e88f8fa5806dc central

@@ -1,5 +1,7 @@
+import dev.earlyeffect.specular.{Site, SiteCi, Specular}
 import histos.*
-import histos.plugin.{NoteKey, NoteText, PluginId}
+import histos.plugin.{BuildServices, NoteKey, NoteText, PluginId, Site as _, SitePublish}
+import zio.*
 
 object build extends HistosBuild:
   def graph =
@@ -102,8 +104,7 @@ object build extends HistosBuild:
       )
       .description(pom"Terret lets coding hosts talk to coding harnesses.")
       .url(url"https://github.com/early-effect/terret")
-      .locked
-      .plugins(PluginSources.ship(dep"rocks.earlyeffect::specular-histos:0.0.2"))(
+      .locked(
         ships(library(core, grok, dsh, mcp, app)),
         core,
         grok,
@@ -112,6 +113,24 @@ object build extends HistosBuild:
         app,
         docs,
       )
+
+  override def services =
+    BuildServices.default
+      .add[Specular](ZLayer.succeed(site) >>> Specular.layer)
+      .tasks[Specular](ZLayer.succeed(site) >>> Specular.layer)
+
+  private val site =
+    Site
+      .forProject("docs", "terret.docs.BuildSite")
+      .basePath("/terret")
+      .docsUrl("https://www.earlyeffect.rocks/terret/")
+      .name("terret")
+      .organization("rocks.earlyeffect")
+      .title("Terret")
+      .description("Hosts talk to coding harnesses.")
+      .homepage("https://github.com/early-effect/terret")
+      .libraryShip
+      .ci(SiteCi.Publish(SitePublish.Automatic))
 
   /** A ship revision is one line. `not-a-ship` is the branch a revision cannot take. */
   private def shipNote(revision: String): NoteText =
