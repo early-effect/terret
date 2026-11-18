@@ -28,7 +28,7 @@ jobs:
           fetch-tags: "true"
           persist-credentials: false
       - run: git remote set-head origin --auto
-      - uses: early-effect/histos/.github/actions/setup@496d78a846d47fc30a1c7c1f9f6264327660886d # 496d78a846d47fc30a1c7c1f9f6264327660886d
+      - uses: early-effect/histos/.github/actions/setup@003ce4864e3dae86a7d6125524d4bcea27e0bd6a # 003ce4864e3dae86a7d6125524d4bcea27e0bd6a
       - run: ./histos doctor --preflight histos-deps
         env:
           GH_TOKEN: ${{ github.token }}
