@@ -104,7 +104,15 @@ object build extends HistosBuild:
       )
       .description(pom"Terret lets coding hosts talk to coding harnesses.")
       .url(url"https://github.com/early-effect/terret")
+<<<<<<< HEAD
       .locked(
+=======
+      .plugins(
+        PluginSources
+          .ship(dep"rocks.earlyeffect::specular-histos:0.0.3-782bbef123b1-SNAPSHOT")
+          .link(histos.plugin.LinkStrategy.ExactBinary)
+      )(
+>>>>>>> dba4d17 (updates)
         ships(library(core, grok, dsh, mcp, app)),
         core,
         grok,

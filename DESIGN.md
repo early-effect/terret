@@ -55,7 +55,7 @@ The first runnable speaks both MCP stdio and local Streamable HTTP. Config choos
 | 1. Core | Library with no network and no Grok required: harness, session, prompt, streamed events, workspace, capability traits, and config | Tests against a fake in-memory harness; customization hooks live here |
 | 2. Grok Build adapter | One adapter with three configurable transports: `grok -p` / `--prompt-file`, ACP stdio (`grok agent stdio`), and WebSocket ACP (`grok agent serve`) | The adapter contract against a real harness; the user picks the transport |
 | 3. MCP inbound | A heddle `Api` whose jobs `Mcp.from` serves on `mcp.routes` and `mcp.stdio()` | Hosts can attach without grok-specific tool names leaking through |
-| 4. Packaging | A runnable process, Warp's `.warp/.mcp.json`, and specular docs pages | Config picks HTTP or stdio; HTTP is the documented attach path, and every snippet is proven by the build. The site task pins specular-histos 0.0.2 |
+| 4. Packaging | A runnable process, Warp's `.warp/.mcp.json`, and specular docs pages | Config picks HTTP or stdio; HTTP is the documented attach path, and every snippet is proven by the build. The catalog names specular-histos and the build turns the site service on |
 | 5. More adapters | dsh and later harnesses implement the same traits | The MCP jobs do not change |
 
 Phase 2 is not a CLI-then-ACP sequence. All three Grok Build transports ship in that adapter phase, behind one hook, so a user can pick one, switch, or set defaults.
@@ -159,7 +159,7 @@ The packaged process is `terret.app.Main`. Config is nested under `terret`. `lis
 
 Warp's local agent reads `.warp/.mcp.json` from the project or from the home directory. There is no Warp.local library and no Warp.local type. The document is `mcpServers.terret.url`. A wildcard bind (`0.0.0.0` or `::`) is rewritten to `127.0.0.1`, and an IPv6 address is bracketed. HTTP is the documented attach path. The process does not write the file.
 
-The docs pages are DocSpecs. The index tells why Terret exists, how to run the app module (`terret.app.Main`), and the install coordinates. `./histos test` proves the snippets and builds the site. The Early Effect theme brands the pages. The site task pins specular-histos 0.0.2. That jar carries the API digest, so the plugin loads from Central. `0.0.1` is published. The pages say latest stable. `.libraryShip` writes the shipped revision into the install lines. A push to `main` publishes `target/site` to GitHub Pages at `/terret`. A pull request does not deploy.
+The docs pages are DocSpecs. The index tells why Terret exists, how to run the app module (`terret.app.Main`), and the install coordinates. `./histos test` proves the snippets and builds the site. The Early Effect theme brands the pages. The catalog names specular-histos. `services` turns the site on. The pages say latest stable. `.libraryShip` writes the shipped revision into the install lines. A push to `main` publishes `target/site` to GitHub Pages at `/terret`. A pull request does not deploy.
 
 ## Later
 
