@@ -5,15 +5,13 @@ import terret.event.{Event, TurnOutcome}
 import terret.error.TerretError
 import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.permission.Permission
-import terret.session.SessionStatus
+import terret.session.SessionState
 import terret.workspace.WorkspaceError
 import zio.json.*
 import zio.Chunk
 
-given Schema[Permission]       = Schema.derived
-given JsonCodec[Permission]    = JsonCodec.derived
-given Schema[SessionStatus]    = Schema.derived
-given JsonCodec[SessionStatus] = JsonCodec.derived
+given Schema[Permission]    = Schema.derived
+given JsonCodec[Permission] = JsonCodec.derived
 
 enum WorkspaceProblem derives Schema, JsonCodec:
   case Empty
@@ -26,7 +24,6 @@ object WorkspaceProblem:
       case WorkspaceError.Empty         => Empty
       case WorkspaceError.Relative(raw) => Relative(raw)
       case WorkspaceError.Invalid(raw)  => Invalid(raw)
-end WorkspaceProblem
 
 enum WireFault derives Schema, JsonCodec:
   case Malformed
@@ -38,12 +35,11 @@ enum WireFault derives Schema, JsonCodec:
 object WireFault:
   def from(fault: ProtocolFault): WireFault =
     fault match
-      case ProtocolFault.Malformed    => Malformed
-      case ProtocolFault.BindMissing  => BindMissing
+      case ProtocolFault.Malformed      => Malformed
+      case ProtocolFault.BindMissing    => BindMissing
       case ProtocolFault.Rejected(code) => Rejected(code)
-      case ProtocolFault.Incomplete   => Incomplete
-      case ProtocolFault.Refused      => Refused
-end WireFault
+      case ProtocolFault.Incomplete     => Incomplete
+      case ProtocolFault.Refused        => Refused
 
 enum WireFailure derives Schema, JsonCodec:
   case UnknownSession(id: String)
@@ -58,12 +54,30 @@ object WireFailure:
       case HarnessFailure.Cancelled          => Cancelled
       case HarnessFailure.Exited(code)       => Exited(code)
       case HarnessFailure.Protocol(fault)    => Protocol(WireFault.from(fault))
-end WireFailure
 
 enum WireOutcome derives Schema, JsonCodec:
   case Completed
   case Cancelled
   case Failed(failure: WireFailure)
+
+object WireOutcome:
+  def from(outcome: TurnOutcome): WireOutcome =
+    outcome match
+      case TurnOutcome.Completed     => Completed
+      case TurnOutcome.Cancelled     => Cancelled
+      case TurnOutcome.Failed(error) => Failed(WireFailure.from(error))
+
+enum WireState derives Schema, JsonCodec:
+  case Open
+  case Running
+  case Ended(outcome: WireOutcome)
+
+object WireState:
+  def from(state: SessionState): WireState =
+    state match
+      case SessionState.Open           => Open
+      case SessionState.Running        => Running
+      case SessionState.Ended(outcome) => Ended(WireOutcome.from(outcome))
 
 enum WireEvent derives Schema, JsonCodec:
   case Assistant(text: String)
@@ -76,17 +90,12 @@ enum WireEvent derives Schema, JsonCodec:
 object WireEvent:
   def from(event: Event): WireEvent =
     event match
-      case Event.Assistant(text)     => Assistant(text)
-      case Event.Thought(text)       => Thought(text)
-      case Event.ToolStarted(call)   => ToolStarted(call.id.value, call.name.value, call.input.toJson)
-      case Event.ToolUpdated(call)   => ToolUpdated(call.id.value, call.name.value, call.input.toJson)
-      case Event.Plan(steps)         => Plan(steps.map(_.text))
-      case Event.TurnFinished(outcome) =>
-        outcome match
-          case TurnOutcome.Completed     => TurnFinished(WireOutcome.Completed)
-          case TurnOutcome.Cancelled     => TurnFinished(WireOutcome.Cancelled)
-          case TurnOutcome.Failed(error) => TurnFinished(WireOutcome.Failed(WireFailure.from(error)))
-end WireEvent
+      case Event.Assistant(text)       => Assistant(text)
+      case Event.Thought(text)         => Thought(text)
+      case Event.ToolStarted(call)     => ToolStarted(call.id.value, call.name.value, call.input.toJson)
+      case Event.ToolUpdated(call)     => ToolUpdated(call.id.value, call.name.value, call.input.toJson)
+      case Event.Plan(steps)           => Plan(steps.map(_.text))
+      case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
 
 enum JobFailure derives Schema, JsonCodec:
   case WorkspaceDenied(workspace: String, root: String)
@@ -94,7 +103,6 @@ enum JobFailure derives Schema, JsonCodec:
   case UnknownSession(id: String)
   case Busy(id: String)
   case EmptySession
-  case Unfinished(session: String)
   case Harness(failure: WireFailure)
 
 object JobFailure:
@@ -106,7 +114,6 @@ object JobFailure:
       case TerretError.UnknownSession(id)        => UnknownSession(id.value)
       case TerretError.Busy(id)                  => Busy(id.value)
       case TerretError.Harness(failure)          => Harness(WireFailure.from(failure))
-end JobFailure
 
 final case class OpenJob(workspace: String, allow: Chunk[Permission]) derives Schema, JsonCodec
 
@@ -118,10 +125,13 @@ final case class Opened(
     session: String,
     effective: Chunk[Permission],
     dropped: Chunk[Permission],
-    status: SessionStatus,
-) derives Schema, JsonCodec
+    state: WireState,
+) derives Schema,
+      JsonCodec
 
-final case class RunDone(session: String, outcome: WireOutcome) derives Schema, JsonCodec
+final case class RunAccepted(session: String, state: WireState) derives Schema, JsonCodec
+
+final case class StatusView(session: String, state: WireState) derives Schema, JsonCodec
 
 final case class Log(session: String, events: Chunk[WireEvent]) derives Schema, JsonCodec
 

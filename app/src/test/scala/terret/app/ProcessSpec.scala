@@ -55,7 +55,9 @@ object ProcessSpec extends ZIOSpecDefault:
         parsed.map(_.listen) == Right(Listen.Stdio),
         parsed.map(_.policy) == Right(
           PermissionPolicy.Clamp(
-            terret.permission.Ceiling(Set(terret.permission.Permission.ReadWorkspace, terret.permission.Permission.Network))
+            terret.permission.Ceiling(
+              Set(terret.permission.Permission.ReadWorkspace, terret.permission.Permission.Network)
+            )
           )
         ),
         parsed.map(_.root) == Workspace.from("/work").map(Some(_)),
@@ -78,9 +80,9 @@ object ProcessSpec extends ZIOSpecDefault:
         defaults.copy(harness = "dsh", command = None, profile = Some(""), transport = None, approval = None)
       )
       val profile = ProcessConfig.load(defaults.copy(profile = Some("headless")))
-      val keys = ProcessConfig.load(defaults.copy(harness = "dsh"))
+      val keys    = ProcessConfig.load(defaults.copy(harness = "dsh"))
       val unknown = ProcessConfig.load(defaults.copy(harness = "codex"))
-      val made = terret.dsh.DshConfig.make("dsh", "sdk").map(ProcessHarness.Dsh(_)).left.map(ProcessError.Dsh(_))
+      val made    = terret.dsh.DshConfig.make("dsh", "sdk").map(ProcessHarness.Dsh(_)).left.map(ProcessError.Dsh(_))
       assertTrue(
         selected.map(_.harness) == made,
         blank == Left(ProcessError.Dsh(terret.dsh.DshConfigError.EmptyProfile)),
@@ -90,7 +92,7 @@ object ProcessSpec extends ZIOSpecDefault:
       )
     },
     test("an empty version and a relative root are refused") {
-      val empty = ProcessConfig.load(defaults.copy(version = ""))
+      val empty    = ProcessConfig.load(defaults.copy(version = ""))
       val relative = ProcessConfig.load(defaults.copy(root = Some("work")))
       assertTrue(
         empty == Left(ProcessError.Version),
@@ -113,7 +115,7 @@ object ProcessSpec extends ZIOSpecDefault:
           server <- Process.bind(config, memory)
           port   <- server.port
           status <- listed(port)
-        yield assertTrue(status == Right(Set("open", "run", "resume", "export", "cancel")))
+        yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel")))
       }
     },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
@@ -125,7 +127,7 @@ object ProcessSpec extends ZIOSpecDefault:
           case Some(servers: Json.Obj) =>
             servers.get("terret") match
               case Some(entry: Json.Obj) => entry.get("url")
-              case _                      => None
+              case _                     => None
           case _ => None
       case _ => None
 
@@ -153,7 +155,7 @@ object ProcessSpec extends ZIOSpecDefault:
         .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
         .flatMap: client =>
           ZIO.attemptBlocking:
-            val tool = Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None))
+            val tool    = Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None))
             val request = HttpRequest
               .newBuilder(URI.create(s"http://127.0.0.1:$port/mcp"))
               .header("Content-Type", "application/json")
@@ -172,16 +174,16 @@ object ProcessSpec extends ZIOSpecDefault:
       json    <- body.fromJson[Json]
       message <- Message.decode(json).left.map(_.json.toJson)
       result  <- message match
-                   case Message.Result(_, result) => Right(result)
-                   case other                     => Left(other.json.toJson)
-      tools   <- result.get("tools") match
-                   case Some(Json.Arr(values)) => Right(values)
-                   case _                      => Left("missing tools")
+        case Message.Result(_, result) => Right(result)
+        case other                     => Left(other.json.toJson)
+      tools <- result.get("tools") match
+        case Some(Json.Arr(values)) => Right(values)
+        case _                      => Left("missing tools")
     yield tools.flatMap {
       case obj: Json.Obj =>
         obj.get("name") match
           case Some(Json.Str(name)) => Set(name)
-          case _                     => Set.empty
+          case _                    => Set.empty
       case _ => Set.empty
     }.toSet
 end ProcessSpec

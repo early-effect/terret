@@ -5,7 +5,6 @@ import terret.Terret
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
-import terret.transcript.Retain
 import terret.workspace.Workspace
 import zio.{Chunk, IO, ZIO}
 
@@ -14,6 +13,7 @@ private[mcp] object Jobs:
     Api(TerretMcp.name, version, Some(TerretMcp.summary))
       .job(open)(openSession(terret, _))
       .job(run)(runTurn(terret, _))
+      .job(status)(reported(terret, _))
       .job(resume)(replay(terret, _))
       .job(exportLog)(exported(terret, _))
       .job(cancel)(stop(terret, _))
@@ -25,7 +25,6 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.UnknownSession](Status.NotFound),
       ErrorCase[JobFailure.Busy](Status.Conflict),
       ErrorCase[JobFailure.EmptySession.type](Status.BadRequest),
-      ErrorCase[JobFailure.Unfinished](Status.BadGateway),
       ErrorCase[JobFailure.Harness](Status.BadGateway),
     )
 
@@ -35,11 +34,23 @@ private[mcp] object Jobs:
       .summary("Open a session on a workspace")
       .mcp("open")
 
+  private val runSummary =
+    "Accept a prompt and start the turn. Returns when the turn is running, not when it finishes. " +
+      "The turn keeps going if this call is cancelled. Poll status until the state is Ended, then export for the log. " +
+      "cancel stops the turn."
+
   private val run =
-    fallible(Endpoint.post("sessions" / "run").in[RunJob].out[RunDone])
+    fallible(Endpoint.post("sessions" / "run").in[RunJob].out[RunAccepted])
       .name("run")
-      .summary("Send a prompt")
+      .summary(runSummary)
       .mcp("run")
+
+  private val status =
+    fallible(Endpoint.post("sessions" / "status").in[SessionJob].out[StatusView])
+      .name("status")
+      .summary("Return the session state, including the outcome once the turn has ended.")
+      .hints(Hint.ReadOnly, Hint.Idempotent)
+      .mcp("status")
 
   private val resume =
     fallible(Endpoint.post("sessions" / "resume").in[SessionJob].out[Log])
@@ -66,20 +77,24 @@ private[mcp] object Jobs:
     for
       workspace <- workspaceOf(job.workspace)
       session   <- terret.open(workspace, Ceiling(job.allow.toSet)).mapError(JobFailure.from)
-    yield Opened(session.id.value, named(session.effective.allow), named(session.dropped), session.status)
+    yield Opened(
+      session.id.value,
+      named(session.effective.allow),
+      named(session.dropped),
+      WireState.from(session.state),
+    )
 
-  private def runTurn(terret: Terret, job: RunJob): IO[JobFailure, RunDone] =
+  private def runTurn(terret: Terret, job: RunJob): IO[JobFailure, RunAccepted] =
     for
-      id     <- sessionOf(job.session)
-      events <- Retain.deliver.locally(event => Notice.publish(event)) {
-        terret
-          .run(id, Prompt(job.prompt))
-          .mapZIO(event => Notice.publish(event).as(WireEvent.from(event)))
-          .runCollect
-          .mapError(JobFailure.from)
-      }
-      outcome <- finished(job.session, events)
-    yield RunDone(job.session, outcome)
+      id      <- sessionOf(job.session)
+      session <- terret.start(id, Prompt(job.prompt)).mapError(JobFailure.from)
+    yield RunAccepted(job.session, WireState.from(session.state))
+
+  private def reported(terret: Terret, job: SessionJob): IO[JobFailure, StatusView] =
+    for
+      id      <- sessionOf(job.session)
+      session <- terret.status(id).mapError(JobFailure.from)
+    yield StatusView(job.session, WireState.from(session.state))
 
   private def replay(terret: Terret, job: SessionJob): IO[JobFailure, Log] =
     for
@@ -98,10 +113,6 @@ private[mcp] object Jobs:
       id <- sessionOf(job.session)
       _  <- terret.cancel(id).mapError(JobFailure.from)
     yield Stopped(job.session)
-
-  private def finished(session: String, events: Chunk[WireEvent]): IO[JobFailure, WireOutcome] =
-    val outcomes = events.collect { case WireEvent.TurnFinished(outcome) => outcome }
-    ZIO.fromOption(outcomes.lastOption).orElseFail(JobFailure.Unfinished(session))
 
   private def sessionOf(raw: String): IO[JobFailure, SessionId] =
     ZIO.fromEither(SessionId.from(raw)).mapError { case SessionIdError.Empty =>

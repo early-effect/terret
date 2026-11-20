@@ -46,6 +46,7 @@ object SiteSpec extends ZIOSpecDefault:
                 jobs.contains("resume"),
                 jobs.contains("export"),
                 jobs.contains("cancel"),
+                jobs.contains("status"),
               )
             }
         }
