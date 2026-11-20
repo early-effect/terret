@@ -24,7 +24,7 @@ object Process:
   /** Bind HTTP and leave the socket open until the scope closes. */
   def bind(config: ProcessConfig, harness: Harness): ZIO[Scope, ProcessError, Server] =
     config.listen match
-      case Listen.Stdio              => ZIO.fail(ProcessError.Listen("stdio"))
+      case Listen.Stdio            => ZIO.fail(ProcessError.Listen("stdio"))
       case Listen.Http(host, port) => assemble(config, harness).flatMap(bind(_, host, port))
 
   private def bind(mcp: Mcp[Any], host: String, port: Int): ZIO[Scope, ProcessError, Server] =
@@ -35,7 +35,7 @@ object Process:
         .mapError(ProcessError.Server(_))
     yield server
 
-  private def assemble(config: ProcessConfig, harness: Harness): ZIO[Any, ProcessError, Mcp[Any]] =
+  private def assemble(config: ProcessConfig, harness: Harness): ZIO[Scope, ProcessError, Mcp[Any]] =
     for
       terret <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity)
       mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, config.version)).mapError(ProcessError.Mcp(_))

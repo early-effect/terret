@@ -16,7 +16,7 @@ the way a heddle is a guide on a loom. It is not the host, and it is not the har
 A coding host speaks MCP. Cursor, Claude Code, Grok Bot, and Warp are hosts. A coding harness does
 not speak MCP. Grok Build and dsh are harnesses. Terret takes MCP in and talks to the harness
 through an adapter. The core never learns a harness's name. The jobs a host calls stay `open`,
-`run`, `resume`, `export`, and `cancel`. heddle already owns HTTP and MCP, so Terret does not grow
+`run`, `status`, `resume`, `export`, and `cancel`. heddle already owns HTTP and MCP, so Terret does not grow
 a second tool DSL. It is the outbound edge: one adapter per harness, then those same jobs promoted
 through heddle.
 
@@ -28,7 +28,7 @@ Warp's local agent reads `.warp/.mcp.json` in the project or the home directory.
 URL. A bind on `0.0.0.0` is written as `127.0.0.1`.
 
 Keys live under `terret`. `harness` `dsh` selects the dsh adapter and the command becomes `dsh`.
-`listen` `stdio` is the other pipe. The same five jobs are on both.
+`listen` `stdio` is the other pipe. The same six jobs are on both.
 
 The coordinates are the latest stable, `<terret ship>`.
 

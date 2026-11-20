@@ -8,5 +8,5 @@ final case class Session(
     workspace: Workspace,
     effective: Ceiling,
     dropped: Set[Permission],
-    status: SessionStatus,
+    state: SessionState,
 )

@@ -13,5 +13,9 @@ object plugins extends HistosPlugins:
     )
 
   def sources =
-    PluginCatalog(PluginSources.ship(dep"rocks.earlyeffect::specular-histos:0.0.3-782bbef123b1-SNAPSHOT"))
+    PluginCatalog(
+      PluginSources
+        .ship(dep"rocks.earlyeffect::specular-histos:0.0.3-782bbef123b1-SNAPSHOT")
+        .link(LinkStrategy.ExactBinary)
+    )
 end plugins

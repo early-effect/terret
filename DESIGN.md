@@ -64,15 +64,16 @@ Phase 2 is not a CLI-then-ACP sequence. All three Grok Build transports ship in 
 
 The goal is a richer catalog than a handful of verbs, including inspect, list, status, and harness knobs, exposed through modular adapter capabilities. Knobs must not appear as Grok-specific tool names.
 
-The first ship implements a subset we can prove. Run, resume, export, and cancel are the natural start. More jobs appear when an adapter actually supports them. This document is where the intended catalog stays visible so incremental work does not shrink the goal.
+The first ship is `open`, `run`, `status`, `resume`, `export`, and `cancel`. `run` returns when the turn is accepted. `status` is how a host waits for the outcome. More jobs appear when an adapter actually supports them. This document is where the intended catalog stays visible so incremental work does not shrink the goal.
 
 | Job | First ship | Goal |
 | --- | --- | --- |
 | run / prompt | Yes | Yes |
+| status | Yes | Yes |
 | resume | Yes | Yes |
 | export | Yes | Yes |
 | cancel | Yes | Yes |
-| inspect, list, status | When the adapter can prove them | Yes |
+| inspect, list | When the adapter can prove them | Yes |
 | Further harness knobs | As capability traits land | Yes |
 
 Follow heddle's authoring rule: the tool is the job. Promote coarse operations agents should call. Keep transport, inspect details, and fine harness steps as config, HTTP resources, or later read-only tools, not a pile of internal steps.
@@ -135,7 +136,7 @@ Specular also writes a manifest beside each site, so terret's docs can appear as
 
 ## Decided names
 
-The first jobs are `run`, `resume`, `export`, and `cancel`. `run` sends a prompt. `resume` replays the retained log and does not send a prompt. `export` returns that log. `cancel` interrupts the open turn. The Scala method for that job is `transcript`, because `export` is a Scala 3 keyword. The job name stays `export`.
+The first jobs are `open`, `run`, `status`, `resume`, `export`, and `cancel`. `run` accepts a prompt and returns while the turn is running. `status` returns the session state, and the outcome once the turn has ended. `resume` replays the retained log and does not send a prompt. `export` returns that log. `cancel` is the only stop. The Scala method for export is `transcript`, because `export` is a Scala 3 keyword. The job name stays `export`.
 
 Permissions are `ReadWorkspace`, `WriteWorkspace`, `RunCommands`, and `Network`. `PermissionPolicy` is `Closed`, `Clamp`, or `Inherit`. Nothing set is `Closed`, which caps a session at `ReadWorkspace`. A request is intersected with that cap, and the session records what was dropped. A workspace outside the configured root is rejected.
 
@@ -151,7 +152,7 @@ The CLI transport mints the session id. The first prompt uses `-s`. A later prom
 
 Heddle speaks the WebSocket upgrade on the server and newline JSON-RPC on stdio. It does not ship a WebSocket client, so the socket transport uses the JDK client. ACP stdio reuses `LinePipe`. Neither wire is folded into heddle as ACP.
 
-MCP inbound is a heddle `Api`. `TerretMcp.mcp` runs `Mcp.from` on it, and the result is what hosts attach to: `mcp.routes` and `mcp.stdio()`. The jobs are `open`, `run`, `resume`, `export`, and `cancel`. `open` starts a session from a workspace and a requested ceiling. The other four are the catalog. `run` publishes each event as `notifications/message` while the tool is in flight, then returns the outcome. `resume` and `export` return the retained log. `export` calls `transcript`. `cancel` calls the core cancel. An empty server version is rejected. `notifications/cancelled` interrupts the in-flight `run`, and the core finalizer cancels the harness.
+MCP inbound is a heddle `Api`. `TerretMcp.mcp` runs `Mcp.from` on it, and the result is what hosts attach to: `mcp.routes` and `mcp.stdio()`. The jobs are `open`, `run`, `status`, `resume`, `export`, and `cancel`. `open` starts a session from a workspace and a requested ceiling. `run` calls `start`: the prompt is accepted, the turn is forked into Terret's scope, and the job returns `Running`. The turn keeps running when the host drops the request. `status` returns that state, and the outcome once the turn has ended. `resume` and `export` return the retained log. A log read during `Running` returns what the adapter has retained so far. `export` calls `transcript`. `cancel` is the only stop. `notifications/cancelled` interrupts the MCP request and does not cancel the harness. An empty server version is rejected. A session moves through `SessionState`: `Open`, `Running`, or `Ended` with its `TurnOutcome`.
 
 A tool payload is JSON text on that wire. Heddle's schema has no open JSON value, so the payload is a string. The tool names are the job names. Nothing in the catalog is named for a harness.
 
