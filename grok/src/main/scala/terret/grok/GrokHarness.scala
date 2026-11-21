@@ -304,7 +304,12 @@ object GrokHarness:
     yield GrokHarness(config, spawner, acp, scope, sessions, gates, journal, writeRoots)
 
   def layer(config: GrokConfig, writeRoots: Chunk[Workspace] = Chunk.empty): ZLayer[Scope, Nothing, Harness] =
-    ZLayer.scoped {
-      make(config, Spawner.jdk, AcpOpen.live(config, Spawner.jdk), writeRoots).map(harness => harness: Harness)
+    val services = ZLayer.succeed(config) ++ Spawner.layer
+    (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
+      for
+        acp     <- ZIO.service[AcpOpen]
+        spawner <- ZIO.service[Spawner]
+        harness <- make(config, spawner, acp, writeRoots)
+      yield harness: Harness
     }
 end GrokHarness
