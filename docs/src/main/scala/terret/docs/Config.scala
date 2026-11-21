@@ -12,7 +12,16 @@ import terret.app.{
   WarpLocal,
 }
 import terret.dsh.DshConfig
-import terret.grok.{AcpBind, GrokConfig, GrokTransport, McpGrant, McpGrantError, McpPolicy}
+import terret.grok.{
+  AcpBind,
+  GrokConfig,
+  GrokTransport,
+  McpGrant,
+  McpGrantError,
+  McpPolicy,
+  NetworkGrantError,
+  NetworkPolicy,
+}
 import terret.workspace.WorkspaceError
 import zio.Chunk
 import zio.test.*
@@ -33,7 +42,9 @@ optional comma-separated list of absolute paths a shell write may use besides th
 A socket transport needs `bindHost`, `bindPort`, and `bindSecret`. Bind fields on any other transport
 are rejected. `mcp` is an opt-in grant for harness MCP calls. Empty denies them. `histos` grants
 every tool on that server. `histos:version` grants only `version`. dsh stores the value and does
-not pass servers. An allowed server comes from the workspace `.mcp.json`.
+not pass servers. An allowed server comes from the workspace `.mcp.json`. `network` is a host
+allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does
+not apply it.
 
 An empty version is rejected. A relative root is rejected. The packaged process does not spawn
 `grok agent serve`. It connects to a serve the user already started.
@@ -92,6 +103,12 @@ when it starts. Restart waits use `restart.pace`, `restart.exit`, `restart.port`
     },
     exampleValue(ProcessConfig.load(base.copy(mcp = Some("histos:")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.McpGrant(McpGrantError.EmptyTool("histos"))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(network = Some("example.com"))).map(_.network)).assert { policy =>
+      assertTrue(policy == Right(NetworkPolicy(Set("example.com"))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(network = Some("example.com,")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.NetworkGrant(NetworkGrantError.BadToken(""))))
     },
     exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
       assertTrue(supervisor == Right(SupervisorChoice.None))

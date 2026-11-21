@@ -13,6 +13,7 @@ trait AcpOpen:
       policy: PermissionPolicy,
       ceiling: Ceiling,
       mcp: McpPolicy,
+      network: NetworkPolicy,
   ): ZIO[Scope, HarnessFailure, RpcPipe]
 
 object AcpOpen:
@@ -22,10 +23,11 @@ object AcpOpen:
         policy: PermissionPolicy,
         ceiling: Ceiling,
         mcp: McpPolicy,
+        network: NetworkPolicy,
     ): ZIO[Scope, HarnessFailure, RpcPipe] =
       config.transport match
         case GrokTransport.AcpStdio =>
-          val argv = Launch.stdio(config, policy, ceiling, mcp)
+          val argv = Launch.stdio(config, policy, ceiling, mcp, network)
           for
             spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, workspace))(_.destroy)
             // stderr's read ignores interruption. Do not join it from this scope.

@@ -20,6 +20,7 @@ object PermissionChoice:
       writeRoots: Chunk[Workspace],
       params: Json,
       access: McpAccess = McpAccess.closed,
+      hosts: NetworkPolicy = NetworkPolicy.empty,
   ): PermissionAnswer =
     val tool = JsonFields
       .obj(params)
@@ -27,7 +28,7 @@ object PermissionChoice:
       .flatMap(JsonFields.obj)
       .getOrElse(Json.Obj())
     val kind  = JsonFields.str(tool, "kind").getOrElse("")
-    val allow = allows(policy, ceiling, workspace, writeRoots, tool, kind, access)
+    val allow = allows(policy, ceiling, workspace, writeRoots, tool, kind, access, hosts)
     pick(options(params), allow, callId(tool))
 
   def body(answer: PermissionAnswer): Json =
@@ -52,16 +53,17 @@ object PermissionChoice:
       tool: Json.Obj,
       kind: String,
       access: McpAccess,
+      hosts: NetworkPolicy,
   ): Decision =
-    val call = mcpCall(tool)
-    policy match
-      case PermissionPolicy.Inherit =>
-        call match
-          case Some(found) => mcpDecision(access, found)
-          case None        => Decision.Allow
-      case _ =>
-        if networkKind(kind) || webTool(tool) then grant(policy, ceiling, Permission.Network, label(tool, kind))
-        else
+    if networkKind(kind) || webTool(tool) then networkDecision(policy, ceiling, tool, kind, hosts)
+    else
+      val call = mcpCall(tool)
+      policy match
+        case PermissionPolicy.Inherit =>
+          call match
+            case Some(found) => mcpDecision(access, found)
+            case None        => Decision.Allow
+        case _ =>
           call match
             case Some(found) => mcpDecision(access, found)
             case None        =>
@@ -82,6 +84,46 @@ object PermissionChoice:
                   shell(policy, ceiling, tool, workspace, writeRoots)
                 case "think" | "thought" => Decision.Allow
                 case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
+
+  private def networkDecision(
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      tool: Json.Obj,
+      kind: String,
+      hosts: NetworkPolicy,
+  ): Decision =
+    val name = label(tool, kind)
+    policy match
+      case PermissionPolicy.Inherit => hostDecision(hosts, tool, name)
+      case _                        =>
+        grant(policy, ceiling, Permission.Network, name) match
+          case Decision.Allow        => hostDecision(hosts, tool, name)
+          case denied: Decision.Deny => denied
+
+  private def hostDecision(hosts: NetworkPolicy, tool: Json.Obj, name: String): Decision =
+    hostOf(tool) match
+      case Some(host) if hosts.allows(host) => Decision.Allow
+      case Some(host)                       => Decision.Deny(s"$host needs a network grant in terret.network")
+      case None                             => Decision.Deny(s"$name needs a host grant in terret.network")
+
+  private def hostOf(tool: Json.Obj): Option[String] =
+    JsonFields.field(tool, "rawInput").flatMap(JsonFields.obj).flatMap { raw =>
+      urlHost(raw).orElse {
+        JsonFields.field(raw, "tool_input").flatMap(JsonFields.obj).flatMap(urlHost)
+      }
+    }
+
+  private def urlHost(raw: Json.Obj): Option[String] =
+    JsonFields.str(raw, "url").filter(_.nonEmpty).flatMap(hostIn)
+
+  private def hostIn(raw: String): Option[String] =
+    try
+      val host = java.net.URI.create(raw).getHost
+      if host == null || host.isEmpty then None
+      else
+        val folded = host.toLowerCase.stripSuffix(".")
+        if folded.isEmpty then None else Some(folded)
+    catch case _: IllegalArgumentException => None
 
   private def shell(
       policy: PermissionPolicy,

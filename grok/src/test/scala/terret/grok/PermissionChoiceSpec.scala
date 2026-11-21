@@ -135,7 +135,12 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         search  <- checked(PermissionPolicy.Clamp(open), open, hosted("web_search"))
         image   <- checked(PermissionPolicy.Clamp(open), open, hosted("image_gen"))
         plain   <- checked(PermissionPolicy.Clamp(open), open, hosted("list_dir"))
-        granted <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"))
+        granted <- checked(
+          PermissionPolicy.Clamp(Ceiling.all),
+          Ceiling.all,
+          hosted("web_fetch"),
+          hosts = NetworkPolicy(Set("example.com")),
+        )
       yield assertTrue(
         fetch == PermissionAnswer.Refused(
           "reject-once",
@@ -175,7 +180,12 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         Json.Obj("optionId" -> Json.Str("reject-always-domain"), "kind" -> Json.Str("reject_always_domain")),
       )
       for
-        granted <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, fetch(domain))
+        granted <- checked(
+          PermissionPolicy.Clamp(Ceiling.all),
+          Ceiling.all,
+          fetch(domain),
+          hosts = NetworkPolicy(Set("example.com")),
+        )
         clamped <- checked(PermissionPolicy.Clamp(open), open, fetch(domain))
         session <- checked(PermissionPolicy.Clamp(Ceiling.all), open, fetch(domain))
         bare    <- checked(PermissionPolicy.Clamp(open), open, params("fetch"))
@@ -245,6 +255,35 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         ),
         unqualified == PermissionAnswer.Refused("reject-once", "call_1", "use_tool needs a granted permission"),
         network == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "web_fetch needs Network, clamped by server policy",
+        ),
+      )
+    },
+    test("a host must be granted, and a missing Network still names Network") {
+      val open    = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val example = NetworkPolicy(Set("example.com"))
+      for
+        allowed  <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"), hosts = example)
+        other    <- checked(PermissionPolicy.Inherit, Ceiling.all, hosted("web_fetch"), hosts = example)
+        missing  <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"))
+        hostless <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, searchTool, hosts = example)
+        closed   <- checked(PermissionPolicy.Clamp(open), open, hosted("web_fetch"), hosts = example)
+      yield assertTrue(
+        allowed == PermissionAnswer.Selected("allow-once"),
+        other == PermissionAnswer.Selected("allow-once"),
+        missing == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "example.com needs a network grant in terret.network",
+        ),
+        hostless == PermissionAnswer.Refused(
+          "reject-once",
+          "",
+          "web_search needs a host grant in terret.network",
+        ),
+        closed == PermissionAnswer.Refused(
           "reject-once",
           "call_1",
           "web_fetch needs Network, clamped by server policy",
@@ -377,11 +416,12 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
       params: Json,
       roots: Chunk[Workspace] = Chunk.empty,
       access: McpAccess = McpAccess.closed,
+      hosts: NetworkPolicy = NetworkPolicy.empty,
   ) =
     ZIO
       .fromEither(Workspace.from("/work"))
       .map { root =>
-        PermissionChoice.decide(policy, ceiling, root, roots, params, access)
+        PermissionChoice.decide(policy, ceiling, root, roots, params, access, hosts)
       }
       .orDieWith(_ => new IllegalArgumentException("workspace"))
 end PermissionChoiceSpec

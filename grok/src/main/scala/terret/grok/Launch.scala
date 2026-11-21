@@ -17,6 +17,7 @@ object Launch:
       policy: PermissionPolicy,
       ceiling: Ceiling,
       mcp: McpPolicy = McpPolicy.empty,
+      network: NetworkPolicy = NetworkPolicy.empty,
   ): Argv =
     val session = if resume then Chunk("-r", id.value) else Chunk("-s", id.value)
     Argv(
@@ -26,6 +27,7 @@ object Launch:
         policy,
         ceiling,
         mcp,
+        network,
       ),
     )
 
@@ -34,14 +36,16 @@ object Launch:
       policy: PermissionPolicy,
       ceiling: Ceiling,
       mcp: McpPolicy = McpPolicy.empty,
+      network: NetworkPolicy = NetworkPolicy.empty,
   ): Argv =
-    Argv(config.command, flags(config, policy, ceiling, mcp) ++ Chunk("agent", "stdio"))
+    Argv(config.command, flags(config, policy, ceiling, mcp, network) ++ Chunk("agent", "stdio"))
 
   def flags(
       config: GrokConfig,
       policy: PermissionPolicy,
       ceiling: Ceiling,
       mcp: McpPolicy = McpPolicy.empty,
+      network: NetworkPolicy = NetworkPolicy.empty,
   ): Chunk[String] =
     val always =
       if config.approval == GrokApproval.Always then Chunk("--always-approve") else Chunk.empty
@@ -50,16 +54,27 @@ object Launch:
       case _                        =>
         val mode =
           if config.approval == GrokApproval.Ask then Chunk("--permission-mode", "default") else Chunk.empty
-        val tools = denied(ceiling, mcp)
+        val tools = denied(ceiling, mcp, network)
         val deny  =
           if tools.isEmpty then Chunk.empty else Chunk("--disallowed-tools", tools.mkString(","))
         val search =
-          if ceiling.allow.contains(Permission.Network) then Chunk.empty else Chunk("--disable-web-search")
+          if networkOpen(ceiling, network) then Chunk.empty else Chunk("--disable-web-search")
         always ++ mode ++ deny ++ search
 
-  def denied(ceiling: Ceiling, mcp: McpPolicy = McpPolicy.empty): Chunk[String] =
-    val names = gates.filterNot(gate => ceiling.allow.contains(gate.permission)).flatMap(_.deny) ++ ungoverned(mcp)
+  // Network tools stay denied until a host is granted, so Always cannot reach them with an empty allowlist.
+  def denied(
+      ceiling: Ceiling,
+      mcp: McpPolicy = McpPolicy.empty,
+      network: NetworkPolicy = NetworkPolicy.empty,
+  ): Chunk[String] =
+    val names = gates.filterNot(gate => open(ceiling, network, gate)).flatMap(_.deny) ++ ungoverned(mcp)
     Chunk.fromIterable(names.distinct.sorted)
+
+  private def open(ceiling: Ceiling, network: NetworkPolicy, gate: Gate): Boolean =
+    ceiling.allow.contains(gate.permission) && (gate.permission != Permission.Network || network.hosts.nonEmpty)
+
+  private def networkOpen(ceiling: Ceiling, network: NetworkPolicy): Boolean =
+    ceiling.allow.contains(Permission.Network) && network.hosts.nonEmpty
 
   // Ids and the names the model sees both have to be listed. Grok removes a tool by either spelling.
   private val commandTools = Chunk(

@@ -22,8 +22,10 @@ object ShutdownSpec extends ZIOSpecDefault:
           spawner <- ZIO.service[Spawner]
           pending <- Ref.make(handshake)
           trace   <- Ref.make(Chunk.empty[String])
-          _       <- stub[AcpOpen](_.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy])) {
-            (_, _, _, _) => ZIO.succeed(pipe)
+          _       <- stub[AcpOpen](
+            _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
+          ) { (_, _, _, _, _) =>
+            ZIO.succeed(pipe)
           }
           _       <- stub[RpcPipe](_.read)(pull(pending))
           _       <- stub[RpcPipe](_.write(any[Json]))(json => record(trace, json))

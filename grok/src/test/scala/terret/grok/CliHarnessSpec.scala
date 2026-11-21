@@ -185,6 +185,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
         policy: PermissionPolicy,
         ceiling: Ceiling,
         mcp: McpPolicy,
+        network: NetworkPolicy,
     ): ZIO[Scope, HarnessFailure, RpcPipe] =
       ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
 

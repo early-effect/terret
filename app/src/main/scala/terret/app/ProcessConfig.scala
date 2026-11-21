@@ -1,7 +1,17 @@
 package terret.app
 
 import terret.dsh.{DshConfig, DshConfigError}
-import terret.grok.{AcpBind, GrokApproval, GrokConfig, GrokConfigError, GrokTransport, McpGrantError, McpPolicy}
+import terret.grok.{
+  AcpBind,
+  GrokApproval,
+  GrokConfig,
+  GrokConfigError,
+  GrokTransport,
+  McpGrantError,
+  McpPolicy,
+  NetworkGrantError,
+  NetworkPolicy,
+}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
 import zio.{Chunk, Config}
@@ -18,6 +28,7 @@ final case class ProcessConfig(
     harness: ProcessHarness,
     writeRoots: Chunk[Workspace] = Chunk.empty,
     mcp: McpPolicy = McpPolicy.empty,
+    network: NetworkPolicy = NetworkPolicy.empty,
 )
 
 object ProcessConfig:
@@ -47,7 +58,8 @@ object ProcessConfig:
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional ++
         Config.string("writeRoots").optional ++
-        Config.string("mcp").optional
+        Config.string("mcp").optional ++
+        Config.string("network").optional
     ).nested("terret").map {
       (
           listen,
@@ -67,6 +79,7 @@ object ProcessConfig:
           bindSecret,
           writeRoots,
           mcp,
+          network,
       ) =>
         Raw(
           listen,
@@ -86,6 +99,7 @@ object ProcessConfig:
           bindSecret,
           writeRoots,
           mcp,
+          network,
         )
     }
 
@@ -98,7 +112,8 @@ object ProcessConfig:
       harness <- harnessOf(raw, policy)
       roots   <- rootsOf(raw.writeRoots)
       grants  <- grantsOf(raw.mcp)
-    yield ProcessConfig(listen, policy, root, version, harness, roots, grants)
+      network <- hostsOf(raw.network)
+    yield ProcessConfig(listen, policy, root, version, harness, roots, grants, network)
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -247,12 +262,18 @@ object ProcessConfig:
       bindSecret: Option[String],
       writeRoots: Option[String] = None,
       mcp: Option[String] = None,
+      network: Option[String] = None,
   )
 
   private def grantsOf(raw: Option[String]): Either[ProcessError, McpPolicy] =
     raw match
       case None       => Right(McpPolicy.empty)
       case Some(text) => McpPolicy.parse(text).left.map(ProcessError.McpGrant(_))
+
+  private def hostsOf(raw: Option[String]): Either[ProcessError, NetworkPolicy] =
+    raw match
+      case None       => Right(NetworkPolicy.empty)
+      case Some(text) => NetworkPolicy.parse(text).left.map(ProcessError.NetworkGrant(_))
 end ProcessConfig
 
 enum ProcessError:
@@ -273,6 +294,7 @@ enum ProcessError:
   case Workspace(error: WorkspaceError)
   case Grok(error: GrokConfigError)
   case Dsh(error: DshConfigError)
+  case NetworkGrant(error: NetworkGrantError)
   case Mcp(error: terret.mcp.TerretMcpError)
   case McpGrant(error: McpGrantError)
   case Server(error: heddle.error.ServerError)
@@ -280,26 +302,27 @@ enum ProcessError:
   case Config(error: zio.Config.Error)
 
   def render: String = this match
-    case Listen(value)     => s"listen is http or stdio, got $value"
-    case Host              => "host is empty"
-    case Port(value)       => s"port is 0 to 65535, got $value"
-    case Version           => "version is empty"
-    case Policy(value)     => s"policy is Closed, Inherit, or Clamp, got $value"
-    case Permission(value) => s"unknown permission $value"
-    case Transport(value)  => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
-    case Approval(value)   => s"approval is Ask or Always, got $value"
-    case Harness(value)    => s"harness is grok or dsh, got $value"
-    case ProfileUnexpected => "profile belongs on the dsh harness"
-    case GrokKeys          => "transport, approval, and bind belong on the grok harness"
-    case BindIncomplete    => "a socket transport needs bindHost, bindPort, and bindSecret"
-    case BindUnexpected    => "bind fields belong on a socket transport"
-    case CliAsk            => "the CLI transport cannot answer a permission prompt"
-    case Workspace(error)  => s"workspace ${error.toString}"
-    case Grok(error)       => s"grok ${error.toString}"
-    case Dsh(error)        => s"dsh ${error.toString}"
-    case Mcp(error)        => s"mcp ${error.toString}"
-    case McpGrant(error)   => error.render
-    case Server(error)     => error.message
-    case Stdio(cause)      => s"stdio ${cause.toString}"
-    case Config(error)     => error.toString
+    case Listen(value)       => s"listen is http or stdio, got $value"
+    case Host                => "host is empty"
+    case Port(value)         => s"port is 0 to 65535, got $value"
+    case Version             => "version is empty"
+    case Policy(value)       => s"policy is Closed, Inherit, or Clamp, got $value"
+    case Permission(value)   => s"unknown permission $value"
+    case Transport(value)    => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
+    case Approval(value)     => s"approval is Ask or Always, got $value"
+    case Harness(value)      => s"harness is grok or dsh, got $value"
+    case ProfileUnexpected   => "profile belongs on the dsh harness"
+    case GrokKeys            => "transport, approval, and bind belong on the grok harness"
+    case BindIncomplete      => "a socket transport needs bindHost, bindPort, and bindSecret"
+    case BindUnexpected      => "bind fields belong on a socket transport"
+    case CliAsk              => "the CLI transport cannot answer a permission prompt"
+    case Workspace(error)    => s"workspace ${error.toString}"
+    case Grok(error)         => s"grok ${error.toString}"
+    case Dsh(error)          => s"dsh ${error.toString}"
+    case NetworkGrant(error) => error.render
+    case Mcp(error)          => s"mcp ${error.toString}"
+    case McpGrant(error)     => error.render
+    case Server(error)       => error.message
+    case Stdio(cause)        => s"stdio ${cause.toString}"
+    case Config(error)       => error.toString
 end ProcessError
