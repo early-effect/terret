@@ -5,7 +5,7 @@ import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
-import zio.{Scope, ZIO}
+import zio.{Scope, ZIO, ZLayer}
 
 trait AcpOpen:
   def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe]
@@ -29,6 +29,9 @@ object AcpOpen:
             case Some(bind) => WsClient.connect(bind)
         case GrokTransport.Cli =>
           ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
+
+  val layer: ZLayer[GrokConfig & Spawner, Nothing, AcpOpen] =
+    ZLayer.fromFunction(live(_, _))
 
   def initialize: Json =
     Json.Obj(

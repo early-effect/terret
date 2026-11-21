@@ -80,10 +80,11 @@ final class GrokHarness private (
         .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
       names      <- Ref.make(Map.empty[String, ToolName])
       refusals   <- Ref.make(Map.empty[String, String])
+      printed    <- Ref.make(Map.empty[String, String])
       hostCancel <- Ref.make(false)
       _          <- journal.open(id)
       _          <- sessions.update(
-        _.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names, refusals, hostCancel))
+        _.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names, refusals, printed, hostCancel))
       )
     yield id
 
@@ -95,13 +96,14 @@ final class GrokHarness private (
         id         <- ZIO.fromEither(AcpEvents.sessionId(result)).mapError(HarnessFailure.Protocol(_))
         names      <- Ref.make(Map.empty[String, ToolName])
         refusals   <- Ref.make(Map.empty[String, String])
+        printed    <- Ref.make(Map.empty[String, String])
         hostCancel <- Ref.make(false)
         _          <- journal.open(id)
         _          <- sessions.update(
           _.updated(
             id,
             GrokHarness.Slot
-              .empty(workspace, ceiling, policy, names, refusals, hostCancel)
+              .empty(workspace, ceiling, policy, names, refusals, printed, hostCancel)
               .copy(pipe = Some(pipe), nextId = 3),
           )
         )
@@ -230,7 +232,16 @@ final class GrokHarness private (
     }
 
   private def scope(slot: GrokHarness.Slot): AcpTurn.Scope =
-    AcpTurn.Scope(slot.policy, slot.ceiling, slot.workspace, writeRoots, slot.names, slot.refusals, slot.hostCancel)
+    AcpTurn.Scope(
+      slot.policy,
+      slot.ceiling,
+      slot.workspace,
+      writeRoots,
+      slot.names,
+      slot.refusals,
+      slot.printed,
+      slot.hostCancel,
+    )
 
   private def append(id: SessionId, event: Event): UIO[Unit] =
     journal.append(id, event)
@@ -252,6 +263,7 @@ object GrokHarness:
       nextId: Int,
       names: Ref[Map[String, ToolName]],
       refusals: Ref[Map[String, String]],
+      printed: Ref[Map[String, String]],
       hostCancel: Ref[Boolean],
   )
 
@@ -262,9 +274,21 @@ object GrokHarness:
         policy: PermissionPolicy,
         names: Ref[Map[String, ToolName]],
         refusals: Ref[Map[String, String]],
+        printed: Ref[Map[String, String]],
         hostCancel: Ref[Boolean],
     ): Slot =
-      Slot(workspace, ceiling, policy, prompted = false, pipe = None, nextId = 1, names, refusals, hostCancel)
+      Slot(
+        workspace,
+        ceiling,
+        policy,
+        prompted = false,
+        pipe = None,
+        nextId = 1,
+        names,
+        refusals,
+        printed,
+        hostCancel,
+      )
 
   def make(
       config: GrokConfig,
@@ -280,7 +304,12 @@ object GrokHarness:
     yield GrokHarness(config, spawner, acp, scope, sessions, gates, journal, writeRoots)
 
   def layer(config: GrokConfig, writeRoots: Chunk[Workspace] = Chunk.empty): ZLayer[Scope, Nothing, Harness] =
-    ZLayer.scoped {
-      make(config, Spawner.jdk, AcpOpen.live(config, Spawner.jdk), writeRoots).map(harness => harness: Harness)
+    val services = ZLayer.succeed(config) ++ Spawner.layer
+    (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
+      for
+        acp     <- ZIO.service[AcpOpen]
+        spawner <- ZIO.service[Spawner]
+        harness <- make(config, spawner, acp, writeRoots)
+      yield harness: Harness
     }
 end GrokHarness

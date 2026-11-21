@@ -32,7 +32,7 @@ object build extends HistosBuild:
         ScalacFlag.ImplicitConversions,
       )
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
-      .testDependencies(zioTest, zioTestSbt)
+      .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val dsh = module("dsh", Jvm)(scala3)
       .artifact(artifact"terret-dsh")
       .dependsOn(core)

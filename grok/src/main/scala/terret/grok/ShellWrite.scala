@@ -9,7 +9,7 @@ enum ShellEffect:
 
 object ShellWrite:
   def effect(command: String): ShellEffect =
-    val trimmed = command.trim
+    val trimmed = stripHeredocs(command.trim)
     if trimmed.isEmpty then ShellEffect.Opaque
     else
       splitSegments(trimmed) match
@@ -34,6 +34,85 @@ object ShellWrite:
             val paths = fromRedirect ++ fromCommand
             if paths.nonEmpty then ShellEffect.Writes(Chunk.fromIterable(paths))
             else ShellEffect.ReadOnly
+
+  private def stripHeredocs(raw: String): String =
+    rewrite(raw, 0, None, "").getOrElse(raw)
+
+  private def rewrite(raw: String, index: Int, quote: Option[Char], out: String): Option[String] =
+    if index >= raw.length then Some(out)
+    else
+      val ch = raw.charAt(index)
+      quote match
+        case Some(mark) =>
+          val next = if ch == mark then None else quote
+          rewrite(raw, index + 1, next, out + ch)
+        case None if ch == '<' && heredocAt(raw, index) =>
+          closeHeredoc(raw, index) match
+            case None                 => None
+            case Some((kept, resume)) => rewrite(raw, resume, None, out + kept)
+        case None =>
+          val next = if ch == '\'' || ch == '"' then Some(ch) else None
+          rewrite(raw, index + 1, next, out + ch)
+
+  private def heredocAt(raw: String, index: Int): Boolean =
+    index + 1 < raw.length && raw.charAt(index + 1) == '<' &&
+      (index + 2 >= raw.length || raw.charAt(index + 2) != '<')
+
+  private def closeHeredoc(raw: String, index: Int): Option[(String, Int)] =
+    val dashed  = index + 2 < raw.length && raw.charAt(index + 2) == '-'
+    val tokenAt = if dashed then index + 3 else index + 2
+    skipInline(raw, tokenAt).flatMap { start =>
+      readDelim(raw, start).flatMap { (word, after) =>
+        if word.isEmpty then None
+        else
+          findEnd(raw, after, word, dashed).map { resume =>
+            val lineEnd = raw.indexOf('\n', after)
+            val keptEnd = if lineEnd < 0 then raw.length else lineEnd
+            (raw.substring(after, keptEnd), resume)
+          }
+      }
+    }
+
+  private def skipInline(raw: String, index: Int): Option[Int] =
+    if index >= raw.length then None
+    else
+      raw.charAt(index) match
+        case ' ' | '\t'  => skipInline(raw, index + 1)
+        case '\n' | '\r' => None
+        case _           => Some(index)
+
+  private def readDelim(raw: String, index: Int): Option[(String, Int)] =
+    if index >= raw.length then None
+    else
+      val ch = raw.charAt(index)
+      if ch == '\'' || ch == '"' then
+        val end = raw.indexOf(ch, index + 1)
+        if end < 0 then None else Some((raw.substring(index + 1, end), end + 1))
+      else
+        val end = inlineEnd(raw, index)
+        Some((raw.substring(index, end), end))
+
+  private def inlineEnd(raw: String, index: Int): Int =
+    if index >= raw.length then index
+    else
+      raw.charAt(index) match
+        case ' ' | '\t' | '\n' | '\r' => index
+        case _                        => inlineEnd(raw, index + 1)
+
+  private def findEnd(raw: String, after: Int, delim: String, dashed: Boolean): Option[Int] =
+    val body = raw.indexOf('\n', after)
+    if body < 0 then None else matchLine(raw, body + 1, delim, dashed)
+
+  private def matchLine(raw: String, line: Int, delim: String, dashed: Boolean): Option[Int] =
+    if line > raw.length then None
+    else
+      val next      = raw.indexOf('\n', line)
+      val end       = if next < 0 then raw.length else next
+      val text      = raw.substring(line, end)
+      val candidate = if dashed then text.dropWhile(_ == '\t') else text
+      if candidate == delim then Some(if next < 0 then end else next + 1)
+      else if next < 0 then None
+      else matchLine(raw, next + 1, delim, dashed)
 
   private def splitSegments(raw: String): Option[List[String]] =
     def loop(index: Int, quote: Option[Char], start: Int, acc: List[String]): Option[List[String]] =

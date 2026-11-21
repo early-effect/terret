@@ -19,6 +19,12 @@ On Grok, `Ask` under `Closed` or `Clamp` is ACP stdio. The ceiling removes every
 grant, and terret answers `session/request_permission`. A shell write needs `RunCommands` and
 `WriteWorkspace`, and the target has to sit in the session workspace or a `writeRoots` path. A
 ceiling without `RunCommands` removes the shell, including both names Grok uses for it.
+`Network` covers `web_fetch` and `web_search`. A ceiling without `Network` removes both and
+passes `--disable-web-search`. A `use_tool` request whose `tool_name` is one of those, or
+another network tool, is `Network` too. A refusal names the missing grant. When server policy
+removed that grant, the refusal says it was clamped by server policy, and the turn continues.
+An edit or a write checks `file_path` and every other path in `rawInput` against the workspace
+roots. A running command reports only new output.
 """,
     exampleValue(PermissionPolicy.Closed.ceiling).assert { cap =>
       assertTrue(cap.allow == Set(Permission.ReadWorkspace))
