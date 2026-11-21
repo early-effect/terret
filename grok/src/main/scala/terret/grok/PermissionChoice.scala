@@ -19,6 +19,7 @@ object PermissionChoice:
       workspace: Workspace,
       writeRoots: Chunk[Workspace],
       params: Json,
+      access: McpAccess = McpAccess.closed,
   ): PermissionAnswer =
     val tool = JsonFields
       .obj(params)
@@ -26,7 +27,7 @@ object PermissionChoice:
       .flatMap(JsonFields.obj)
       .getOrElse(Json.Obj())
     val kind  = JsonFields.str(tool, "kind").getOrElse("")
-    val allow = allows(policy, ceiling, workspace, writeRoots, tool, kind)
+    val allow = allows(policy, ceiling, workspace, writeRoots, tool, kind, access)
     pick(options(params), allow, callId(tool))
 
   def body(answer: PermissionAnswer): Json =
@@ -50,29 +51,37 @@ object PermissionChoice:
       writeRoots: Chunk[Workspace],
       tool: Json.Obj,
       kind: String,
+      access: McpAccess,
   ): Decision =
+    val call = mcpCall(tool)
     policy match
-      case PermissionPolicy.Inherit => Decision.Allow
-      case _                        =>
+      case PermissionPolicy.Inherit =>
+        call match
+          case Some(found) => mcpDecision(access, found)
+          case None        => Decision.Allow
+      case _ =>
         if networkKind(kind) || webTool(tool) then grant(policy, ceiling, Permission.Network, label(tool, kind))
         else
-          normalize(kind) match
-            case "read" | "search" | "grep" | "glob" =>
-              grant(policy, ceiling, Permission.ReadWorkspace, label(tool, kind))
-            case "edit" | "write" | "delete" | "move" | "rename" =>
-              guarded(
-                policy,
-                ceiling,
-                Permission.WriteWorkspace,
-                label(tool, kind),
-                locations(tool),
-                cwd(tool, workspace),
-                roots(workspace, writeRoots),
-              )
-            case "execute" | "bash" | "terminal" =>
-              shell(policy, ceiling, tool, workspace, writeRoots)
-            case "think" | "thought" => Decision.Allow
-            case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
+          call match
+            case Some(found) => mcpDecision(access, found)
+            case None        =>
+              normalize(kind) match
+                case "read" | "search" | "grep" | "glob" =>
+                  grant(policy, ceiling, Permission.ReadWorkspace, label(tool, kind))
+                case "edit" | "write" | "delete" | "move" | "rename" =>
+                  guarded(
+                    policy,
+                    ceiling,
+                    Permission.WriteWorkspace,
+                    label(tool, kind),
+                    locations(tool),
+                    cwd(tool, workspace),
+                    roots(workspace, writeRoots),
+                  )
+                case "execute" | "bash" | "terminal" =>
+                  shell(policy, ceiling, tool, workspace, writeRoots)
+                case "think" | "thought" => Decision.Allow
+                case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
 
   private def shell(
       policy: PermissionPolicy,
@@ -219,6 +228,38 @@ object PermissionChoice:
         Some(abs.normalize)
       catch case _: InvalidPathException => None
 
+  private def mcpDecision(access: McpAccess, call: McpCall): Decision =
+    call match
+      case McpCall.Search =>
+        if access.policy.grants.isEmpty then Decision.Deny("search_tool needs an MCP grant in terret.mcp")
+        else Decision.Allow
+      case McpCall.Named(server, tool) =>
+        access.policy.grant(server) match
+          case None                               => Decision.Deny(s"$server needs an MCP grant in terret.mcp")
+          case Some(grant) if !grant.allows(tool) =>
+            Decision.Deny(s"$tool needs an MCP grant on $server")
+          case Some(_) if !access.defined.contains(server) =>
+            Decision.Deny(s"$server is granted but .mcp.json does not define it")
+          case Some(_) => Decision.Allow
+
+  private def mcpCall(tool: Json.Obj): Option[McpCall] =
+    val own = Chunk(
+      JsonFields.str(tool, "name"),
+      JsonFields.str(tool, "toolName"),
+      metaName(tool),
+      JsonFields.str(tool, "title"),
+    ).flatten
+    if own.exists(name => normalize(name) == "search_tool") then Some(McpCall.Search)
+    else
+      val candidates = own ++ rawToolName(tool).fold(Chunk.empty)(Chunk(_)) ++ variant(tool).fold(Chunk.empty)(Chunk(_))
+      candidates.collectFirst(Function.unlift(splitQualified))
+
+  private def splitQualified(raw: String): Option[McpCall.Named] =
+    val stripped = if raw.startsWith("mcp__") then raw.drop("mcp__".length) else raw
+    val at       = stripped.indexOf("__")
+    if at <= 0 || at + 2 >= stripped.length then None
+    else Some(McpCall.Named(stripped.take(at), stripped.drop(at + 2)))
+
   private def label(tool: Json.Obj, kind: String): String =
     networkLabel(tool)
       .orElse(JsonFields.str(tool, "name").filter(_.nonEmpty))
@@ -335,6 +376,10 @@ object PermissionChoice:
   private enum Decision:
     case Allow
     case Deny(reason: String)
+
+  private enum McpCall:
+    case Search
+    case Named(server: String, tool: String)
 
   private final case class Choice(optionId: String, kind: String)
 end PermissionChoice

@@ -219,6 +219,38 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         ),
       )
     },
+    test("an MCP call needs a grant, and a network use_tool stays Network") {
+      val version = McpAccess(McpPolicy(Chunk(McpGrant("histos", Some(Set("version"))))), Set("histos"))
+      val every   = McpAccess(McpPolicy(Chunk(McpGrant("histos", None))), Set("histos"))
+      val absent  = McpAccess(McpPolicy(Chunk(McpGrant("histos", None))), Set.empty)
+      for
+        search   <- checked(PermissionPolicy.Inherit, Ceiling.all, mcpSearch)
+        allowed  <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__version"), access = version)
+        tool     <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__compile"), access = version)
+        server   <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("metals__graph"), access = version)
+        prefixed <- checked(PermissionPolicy.Inherit, Ceiling.all, hosted("mcp__histos__cache_clean"), access = every)
+        missing  <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__version"), access = absent)
+        unqualified <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("list_dir"), access = every)
+        network     <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("web_fetch"), access = every)
+      yield assertTrue(
+        search == PermissionAnswer.Refused("reject-once", "call_1", "search_tool needs an MCP grant in terret.mcp"),
+        allowed == PermissionAnswer.Selected("allow-once"),
+        tool == PermissionAnswer.Refused("reject-once", "call_1", "compile needs an MCP grant on histos"),
+        server == PermissionAnswer.Refused("reject-once", "call_1", "metals needs an MCP grant in terret.mcp"),
+        prefixed == PermissionAnswer.Selected("allow-once"),
+        missing == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "histos is granted but .mcp.json does not define it",
+        ),
+        unqualified == PermissionAnswer.Refused("reject-once", "call_1", "use_tool needs a granted permission"),
+        network == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "web_fetch needs Network, clamped by server policy",
+        ),
+      )
+    },
     test("a missing matching option cancels") {
       val allowOnly = Json.Obj(
         "toolCall" -> Json.Obj("kind" -> Json.Str("edit")),
@@ -328,16 +360,28 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
       "options" -> options,
     )
 
+  private val mcpSearch: Json =
+    Json.Obj(
+      "toolCall" -> Json.Obj(
+        "toolCallId" -> Json.Str("call_1"),
+        "kind"       -> Json.Str("other"),
+        "title"      -> Json.Str("search_tool"),
+        "_meta"      -> Json.Obj("x.ai/tool" -> Json.Obj("name" -> Json.Str("search_tool"))),
+      ),
+      "options" -> options,
+    )
+
   private def checked(
       policy: PermissionPolicy,
       ceiling: Ceiling,
       params: Json,
       roots: Chunk[Workspace] = Chunk.empty,
+      access: McpAccess = McpAccess.closed,
   ) =
     ZIO
       .fromEither(Workspace.from("/work"))
       .map { root =>
-        PermissionChoice.decide(policy, ceiling, root, roots, params)
+        PermissionChoice.decide(policy, ceiling, root, roots, params, access)
       }
       .orDieWith(_ => new IllegalArgumentException("workspace"))
 end PermissionChoiceSpec

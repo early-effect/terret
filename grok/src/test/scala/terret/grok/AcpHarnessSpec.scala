@@ -327,8 +327,8 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         spawner <- ZIO.service[Spawner]
         pending <- Ref.make(frames)
         seen    <- Ref.make(Seen(Chunk.empty, Chunk.empty))
-        _       <- stub[AcpOpen](_.open(any[Workspace], any[PermissionPolicy], any[Ceiling])) { (_, _, _) =>
-          ZIO.succeed(pipe)
+        _       <- stub[AcpOpen](_.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy])) {
+          (_, _, _, _) => ZIO.succeed(pipe)
         }
         _ <- stub[RpcPipe](_.read)(pull(pending, after))
         _ <- stub[RpcPipe](_.write(any[Json])) { json =>

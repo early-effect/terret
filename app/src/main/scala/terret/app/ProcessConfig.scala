@@ -1,7 +1,7 @@
 package terret.app
 
 import terret.dsh.{DshConfig, DshConfigError}
-import terret.grok.{AcpBind, GrokApproval, GrokConfig, GrokConfigError, GrokTransport}
+import terret.grok.{AcpBind, GrokApproval, GrokConfig, GrokConfigError, GrokTransport, McpGrantError, McpPolicy}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
 import zio.{Chunk, Config}
@@ -17,6 +17,7 @@ final case class ProcessConfig(
     version: String,
     harness: ProcessHarness,
     writeRoots: Chunk[Workspace] = Chunk.empty,
+    mcp: McpPolicy = McpPolicy.empty,
 )
 
 object ProcessConfig:
@@ -45,7 +46,8 @@ object ProcessConfig:
         Config.string("bindHost").optional ++
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional ++
-        Config.string("writeRoots").optional
+        Config.string("writeRoots").optional ++
+        Config.string("mcp").optional
     ).nested("terret").map {
       (
           listen,
@@ -64,6 +66,7 @@ object ProcessConfig:
           bindPort,
           bindSecret,
           writeRoots,
+          mcp,
       ) =>
         Raw(
           listen,
@@ -82,6 +85,7 @@ object ProcessConfig:
           bindPort,
           bindSecret,
           writeRoots,
+          mcp,
         )
     }
 
@@ -93,7 +97,8 @@ object ProcessConfig:
       version <- versionOf(raw.version)
       harness <- harnessOf(raw, policy)
       roots   <- rootsOf(raw.writeRoots)
-    yield ProcessConfig(listen, policy, root, version, harness, roots)
+      grants  <- grantsOf(raw.mcp)
+    yield ProcessConfig(listen, policy, root, version, harness, roots, grants)
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -241,7 +246,13 @@ object ProcessConfig:
       bindPort: Option[Int],
       bindSecret: Option[String],
       writeRoots: Option[String] = None,
+      mcp: Option[String] = None,
   )
+
+  private def grantsOf(raw: Option[String]): Either[ProcessError, McpPolicy] =
+    raw match
+      case None       => Right(McpPolicy.empty)
+      case Some(text) => McpPolicy.parse(text).left.map(ProcessError.McpGrant(_))
 end ProcessConfig
 
 enum ProcessError:
@@ -263,6 +274,7 @@ enum ProcessError:
   case Grok(error: GrokConfigError)
   case Dsh(error: DshConfigError)
   case Mcp(error: terret.mcp.TerretMcpError)
+  case McpGrant(error: McpGrantError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
   case Config(error: zio.Config.Error)
@@ -286,6 +298,7 @@ enum ProcessError:
     case Grok(error)       => s"grok ${error.toString}"
     case Dsh(error)        => s"dsh ${error.toString}"
     case Mcp(error)        => s"mcp ${error.toString}"
+    case McpGrant(error)   => error.render
     case Server(error)     => error.message
     case Stdio(cause)      => s"stdio ${cause.toString}"
     case Config(error)     => error.toString

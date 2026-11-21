@@ -104,6 +104,18 @@ object LiveGrokSpec extends ZIOSpecDefault:
           )
         }
       } @@ TestAspect.timeout(4.minutes),
+      test("a histos grant is sent on session/new and the version tool is attempted") {
+        ZIO.scoped {
+          for
+            (harness, id, log)  <- mcpSession
+            events              <- harness.prompt(id, Prompt(histosVersion)).runCollect
+            advertised          <- advertised(log)
+            permissionRequested <- asked(log, "session/request_permission")
+          yield (assertTrue(advertised) ?? "session/new did not advertise histos") &&
+            (assertTrue(started(events) || permissionRequested) ?? "model never attempted the tool") &&
+            assertTrue(endings(events) == Chunk(TurnOutcome.Completed))
+        }
+      } @@ TestAspect.tag("mcp-optin") @@ TestAspect.timeout(4.minutes),
     ).when(LiveGate.current == LiveGate.Decision.Ready)
     gated @@ TestAspect.beforeAll(prepare) @@ TestAspect.sequential @@ TestAspect.withLiveClock
 
@@ -173,6 +185,49 @@ object LiveGrokSpec extends ZIOSpecDefault:
       harness <- GrokHarness.make(GrokConfig.stdio, spawner, AcpOpen.live(GrokConfig.stdio, spawner))
       id      <- harness.open(root, ceiling, policy)
     yield (root, harness, id)
+
+  private val histosVersion =
+    "Call use_tool with tool_name histos__version and an empty object as tool_input. Then reply with the single word done."
+
+  private val histosGrant = McpPolicy(Chunk(McpGrant("histos", Some(Set("version")))))
+
+  private val histosFile =
+    """{"mcpServers":{"histos":{"command":"histos","args":["mcp"]}}}"""
+
+  private def mcpSession =
+    for
+      dir  <- ZIO.acquireRelease(freshRepo)(deleteTree)
+      _    <- ZIO.attemptBlocking(Files.writeString(dir.resolve(".mcp.json"), histosFile)).orDie
+      root <- ZIO
+        .fromEither(Workspace.from(dir.toString))
+        .orDieWith(_ => new IllegalArgumentException("workspace"))
+      log <- ZIO.acquireRelease(ZIO.attemptBlocking {
+        Files.createDirectories(scratch)
+        Files.deleteIfExists(mcpWire)
+        new FileOutputStream(mcpWire.toFile)
+      }.orDie)(closeLog)
+      spawner = teeBoth(Spawner.jdk, log)
+      harness <- GrokHarness.make(
+        GrokConfig.stdio,
+        spawner,
+        AcpOpen.live(GrokConfig.stdio, spawner),
+        mcp = histosGrant,
+        catalog = McpCatalog.live,
+      )
+      id <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+    yield (harness, id, mcpWire)
+
+  private lazy val mcpWire = scratch.resolve("mcp-wire.log")
+
+  private def advertised(path: Path): ZIO[Any, Nothing, Boolean] =
+    ZIO.attemptBlocking {
+      Files.exists(path) && Files.readString(path).split("\n", -1).exists { line =>
+        line.contains("session/new") && line.contains("mcpServers") && line.contains("histos")
+      }
+    }.orDie
+
+  private def asked(path: Path, needle: String): ZIO[Any, Nothing, Boolean] =
+    ZIO.attemptBlocking(Files.exists(path) && Files.readString(path).contains(needle)).orDie
 
   // Grok keys the permission store on the git root, so each case is its own repository.
   private def freshRepo: ZIO[Any, Nothing, Path] =
@@ -379,6 +434,17 @@ object LiveGrokSpec extends ZIOSpecDefault:
           def destroy             = spawned.destroy
       }
 
+  private def teeBoth(inner: Spawner, log: OutputStream): Spawner = new:
+    def spawn(command: String, args: Chunk[String], cwd: Workspace) =
+      inner.spawn(command, args, cwd).map { spawned =>
+        new Spawned:
+          def stdin: OutputStream = new TeeOutput(spawned.stdin, log)
+          def stdout: InputStream = new TeeInput(spawned.stdout, log)
+          def stderr: InputStream = spawned.stderr
+          def exit                = spawned.exit
+          def destroy             = spawned.destroy
+      }
+
   private final class TeeInput(inner: InputStream, log: OutputStream) extends InputStream:
     override def read(): Int =
       val byte = inner.read()
@@ -398,4 +464,24 @@ object LiveGrokSpec extends ZIOSpecDefault:
         log.flush()
       }
   end TeeInput
+
+  private final class TeeOutput(inner: OutputStream, log: OutputStream) extends OutputStream:
+    override def write(byte: Int): Unit =
+      inner.write(byte)
+      log.synchronized {
+        log.write(byte)
+        log.flush()
+      }
+
+    override def write(buffer: Array[Byte], offset: Int, length: Int): Unit =
+      inner.write(buffer, offset, length)
+      log.synchronized {
+        log.write(buffer, offset, length)
+        log.flush()
+      }
+
+    override def flush(): Unit = inner.flush()
+
+    override def close(): Unit = inner.close()
+  end TeeOutput
 end LiveGrokSpec

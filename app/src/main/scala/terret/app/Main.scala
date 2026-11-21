@@ -53,7 +53,7 @@ object Main extends ZIOAppDefault:
 
   private def wired(config: ProcessConfig): ZLayer[Scope, Nothing, Harness] =
     config.harness match
-      case ProcessHarness.Grok(grok) => GrokHarness.layer(grok, config.writeRoots)
+      case ProcessHarness.Grok(grok) => GrokHarness.layer(grok, config.writeRoots, config.mcp)
       case ProcessHarness.Dsh(dsh)   => DshHarness.layer(dsh)
 end Main
 

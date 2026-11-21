@@ -16,6 +16,7 @@ object Launch:
       resume: Boolean,
       policy: PermissionPolicy,
       ceiling: Ceiling,
+      mcp: McpPolicy = McpPolicy.empty,
   ): Argv =
     val session = if resume then Chunk("-r", id.value) else Chunk("-s", id.value)
     Argv(
@@ -24,13 +25,24 @@ object Launch:
         config,
         policy,
         ceiling,
+        mcp,
       ),
     )
 
-  def stdio(config: GrokConfig, policy: PermissionPolicy, ceiling: Ceiling): Argv =
-    Argv(config.command, flags(config, policy, ceiling) ++ Chunk("agent", "stdio"))
+  def stdio(
+      config: GrokConfig,
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      mcp: McpPolicy = McpPolicy.empty,
+  ): Argv =
+    Argv(config.command, flags(config, policy, ceiling, mcp) ++ Chunk("agent", "stdio"))
 
-  def flags(config: GrokConfig, policy: PermissionPolicy, ceiling: Ceiling): Chunk[String] =
+  def flags(
+      config: GrokConfig,
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      mcp: McpPolicy = McpPolicy.empty,
+  ): Chunk[String] =
     val always =
       if config.approval == GrokApproval.Always then Chunk("--always-approve") else Chunk.empty
     policy match
@@ -38,15 +50,15 @@ object Launch:
       case _                        =>
         val mode =
           if config.approval == GrokApproval.Ask then Chunk("--permission-mode", "default") else Chunk.empty
-        val tools = denied(ceiling)
+        val tools = denied(ceiling, mcp)
         val deny  =
           if tools.isEmpty then Chunk.empty else Chunk("--disallowed-tools", tools.mkString(","))
         val search =
           if ceiling.allow.contains(Permission.Network) then Chunk.empty else Chunk("--disable-web-search")
         always ++ mode ++ deny ++ search
 
-  def denied(ceiling: Ceiling): Chunk[String] =
-    val names = gates.filterNot(gate => ceiling.allow.contains(gate.permission)).flatMap(_.deny) ++ ungoverned
+  def denied(ceiling: Ceiling, mcp: McpPolicy = McpPolicy.empty): Chunk[String] =
+    val names = gates.filterNot(gate => ceiling.allow.contains(gate.permission)).flatMap(_.deny) ++ ungoverned(mcp)
     Chunk.fromIterable(names.distinct.sorted)
 
   // Ids and the names the model sees both have to be listed. Grok removes a tool by either spelling.
@@ -80,8 +92,9 @@ object Launch:
     "web_search",
   )
 
-  // No permission covers MCP calls. Closed and Clamp remove them so always-approve cannot reach them.
-  private val ungoverned = Chunk("search_tool", "use_tool")
+  // search_tool and use_tool stay denied until a grant exists, so Always cannot reach MCP with an empty policy.
+  private def ungoverned(mcp: McpPolicy): Chunk[String] =
+    if mcp.grants.isEmpty then Chunk("search_tool", "use_tool") else Chunk.empty
 
   private val gates = Chunk(
     Gate(Permission.ReadWorkspace, Chunk("grep", "list_dir", "read_file")),

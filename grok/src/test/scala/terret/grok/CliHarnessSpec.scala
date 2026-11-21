@@ -180,7 +180,12 @@ object CliHarnessSpec extends ZIOSpecDefault:
     ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
 
   private val dead: AcpOpen = new:
-    def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =
+    def open(
+        workspace: Workspace,
+        policy: PermissionPolicy,
+        ceiling: Ceiling,
+        mcp: McpPolicy,
+    ): ZIO[Scope, HarnessFailure, RpcPipe] =
       ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
 
   private val deniedTurn =

@@ -143,6 +143,23 @@ object LaunchSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("a grant drops search_tool and use_tool, and an empty policy keeps them") {
+      val granted   = McpPolicy(Chunk(McpGrant("histos", Some(Set("version")))))
+      val withGrant = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, granted)
+      val empty     = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Clamp(Ceiling.all), Ceiling.all)
+      assertTrue(
+        withGrant.rendered == Chunk("grok", "--permission-mode", "default", "agent", "stdio"),
+        empty.rendered == Chunk(
+          "grok",
+          "--permission-mode",
+          "default",
+          "--disallowed-tools",
+          "search_tool,use_tool",
+          "agent",
+          "stdio",
+        ),
+      )
+    },
     test("denied names stay sorted and name the shell the model sees") {
       val onlyNetwork = Ceiling(Set(Permission.Network))
       assertTrue(
