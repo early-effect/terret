@@ -11,6 +11,12 @@ object Retain:
       FiberRef.unsafe.make[Event => UIO[Unit]](_ => ZIO.unit)
     }
 
+  // The open run is in `pending`. The upstream may already be pulling the next chunk.
+  private[terret] val parked: FiberRef[Event => UIO[Unit]] =
+    Unsafe.unsafe { implicit unsafe =>
+      FiberRef.unsafe.make[Event => UIO[Unit]](_ => ZIO.unit)
+    }
+
   def coalesce[R, E](upstream: ZStream[R, E, Event])(onFlush: Event => UIO[Unit]): ZStream[R, E, Event] =
     ZStream.unwrapScoped {
       for
@@ -56,14 +62,20 @@ object Retain:
     }
 
   private def absorb(pending: Ref[Option[Event]], chunk: Chunk[Event]): UIO[Chunk[Event]] =
-    pending.modify { start =>
-      val (emitted, rest) = chunk.foldLeft((Chunk.empty[Event], start)) { (state, event) =>
-        val (out, held)  = state
-        val (next, more) = join(held, event)
-        (out ++ more, next)
+    pending
+      .modify { start =>
+        val (emitted, rest) = chunk.foldLeft((Chunk.empty[Event], start)) { (state, event) =>
+          val (out, held)  = state
+          val (next, more) = join(held, event)
+          (out ++ more, next)
+        }
+        ((emitted, rest), rest)
       }
-      (emitted, rest)
-    }
+      .flatMap { (emitted, rest) =>
+        rest match
+          case Some(event) => parked.get.flatMap(_(event)).as(emitted)
+          case None        => ZIO.succeed(emitted)
+      }
 
   private def join(held: Option[Event], event: Event): (Option[Event], Chunk[Event]) =
     (held, event) match

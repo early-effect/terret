@@ -1,7 +1,7 @@
 package terret.grok
 
 import terret.event.{CallId, Event, PlanStep, ToolCall, ToolName, TurnOutcome}
-import terret.harness.ProtocolFault
+import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.session.SessionId
 import zio.json.ast.Json
 import zio.Chunk
@@ -95,6 +95,12 @@ object AcpEventsSpec extends ZIOSpecDefault:
     test("stop reasons and session ids stay typed") {
       assertTrue(
         AcpEvents.stop(Json.Obj("stopReason" -> Json.Str("cancelled"))) == Right(TurnOutcome.Cancelled),
+        AcpEvents.stop(
+          Json.Obj(
+            "stopReason"           -> Json.Str("cancelled"),
+            "cancellationCategory" -> Json.Str("PermissionCancelled"),
+          )
+        ) == Right(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))),
         AcpEvents.stop(Json.Obj("stopReason" -> Json.Str("end_turn"))) == Right(TurnOutcome.Completed),
         AcpEvents.sessionId(Json.Obj("sessionId" -> Json.Str("sess-1"))) == Right(SessionId("sess-1")),
         AcpEvents.sessionId(Json.Obj("sessionId" -> Json.Str(""))) == Left(ProtocolFault.Incomplete),

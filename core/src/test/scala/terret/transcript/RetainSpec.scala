@@ -4,6 +4,7 @@ import terret.event.{CallId, Event, ToolCall, ToolName}
 import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.test.*
+import zio.durationInt
 import zio.{Chunk, Promise, Ref, ZIO}
 
 object RetainSpec extends ZIOSpecDefault:
@@ -65,6 +66,23 @@ object RetainSpec extends ZIOSpecDefault:
         assertTrue(events == Chunk(Right(Event.Assistant("a b")), Left("boom")))
       }
     },
+    test("a parked text run is visible before cancel emits it") {
+      for
+        parked <- Promise.make[Nothing, Unit]
+        gate   <- Promise.make[Nothing, Unit]
+        fiber  <- Retain.parked.locally(_ => parked.succeed(()).unit) {
+          Retain
+            .coalesce(
+              (ZStream(Event.Thought("hmm")) ++ ZStream.fromZIO(gate.await).drain).interruptWhen(gate)
+            )(ignore)
+            .runCollect
+            .fork
+        }
+        _   <- parked.await
+        _   <- gate.succeed(())
+        got <- fiber.join
+      yield assertTrue(got == Chunk(Event.Thought("hmm")))
+    } @@ TestAspect.timeout(10.seconds) @@ TestAspect.withLiveClock,
     test("interrupting the consumer delivers the open text run") {
       for
         seen    <- Promise.make[Nothing, Unit]

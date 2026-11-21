@@ -5,6 +5,7 @@ import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.HarnessFailure
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
+import terret.transcript.Retain
 import terret.workspace.Workspace
 import zio.json.*
 import zio.json.ast.Json
@@ -18,14 +19,14 @@ object AcpHarnessSpec extends ZIOSpecDefault:
 
   def spec = suite("ACP harness")(
     test("closed denies an edit, unknown methods get -32601, and an empty log loads once") {
-      scripted(reply = true).flatMap { (harness, seen, _, _) =>
+      scripted(reply = true).flatMap { (harness, seen, _) =>
         for
           root     <- workspace
           id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           loaded   <- harness.resume(id).runCollect
           again    <- harness.resume(id).runCollect
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
-          record   <- seen.get.repeatUntil(_.payloads.length >= 2)
+          record   <- awaitSeen(seen)(_.payloads.length >= 2)
           methods = record.methods
         yield assertTrue(
           id.value == "sess-1",
@@ -44,22 +45,25 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       }
     },
     test("inherit allows the edit") {
-      scripted(reply = true).flatMap { (harness, seen, _, _) =>
+      scripted(reply = true).flatMap { (harness, seen, _) =>
         for
           root   <- workspace
           id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
           _      <- harness.prompt(id, Prompt("hello")).runDrain
-          record <- seen.get.repeatUntil(_.payloads.exists(option(_, "allow-once")))
+          record <- awaitSeen(seen)(_.payloads.exists(option(_, "allow-once")))
         yield assertTrue(record.payloads.exists(option(_, "allow-once")))
       }
     },
     test("cancel tells the agent") {
-      scripted(reply = false).flatMap { (harness, seen, started, cancelled) =>
+      scripted(reply = false).flatMap { (harness, seen, cancelled) =>
         for
           root   <- workspace
           id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
-          fiber  <- harness.prompt(id, Prompt("stay")).runCollect.fork
-          _      <- started.await
+          parked <- Promise.make[Nothing, Unit]
+          fiber  <- Retain.parked.locally(_ => parked.succeed(()).unit) {
+            harness.prompt(id, Prompt("stay")).runCollect.fork
+          }
+          _      <- parked.await
           _      <- harness.cancel(id)
           _      <- cancelled.await
           got    <- fiber.join
@@ -80,14 +84,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
 
   private def scripted(
       reply: Boolean
-  ): ZIO[Scope, Nothing, (GrokHarness, Ref[Seen], Promise[Nothing, Unit], Promise[Nothing, Unit])] =
+  ): ZIO[Scope, Nothing, (GrokHarness, Ref[Seen], Promise[Nothing, Unit])] =
     for
       seen      <- Ref.make(Seen(Chunk.empty, Chunk.empty))
-      started   <- Promise.make[Nothing, Unit]
       cancelled <- Promise.make[Nothing, Unit]
       config = GrokConfig.stdio
-      harness <- GrokHarness.make(config, idle, agent(seen, started, cancelled, reply))
-    yield (harness, seen, started, cancelled)
+      harness <- GrokHarness.make(config, idle, agent(seen, cancelled, reply))
+    yield (harness, seen, cancelled)
 
   private val idle: Spawner = new:
     def spawn(command: String, args: Chunk[String], cwd: Workspace) =
@@ -95,7 +98,6 @@ object AcpHarnessSpec extends ZIOSpecDefault:
 
   private def agent(
       seen: Ref[Seen],
-      started: Promise[Nothing, Unit],
       cancelled: Promise[Nothing, Unit],
       reply: Boolean,
   ): AcpOpen = new:
@@ -103,14 +105,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       for
         ends <- LinePipe.connected
         (client, agentEnd) = ends
-        _ <- talk(agentEnd, seen, started, cancelled, reply).forkScoped
+        _ <- talk(agentEnd, seen, cancelled, reply).forkScoped
         _ <- ZIO.addFinalizer(agentEnd.close *> client.close)
       yield LineRpc(client, client.close)
 
   private def talk(
       agent: LinePipe,
       seen: Ref[Seen],
-      started: Promise[Nothing, Unit],
       cancelled: Promise[Nothing, Unit],
       reply: Boolean,
   ): UIO[Unit] =
@@ -123,14 +124,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
             case Some(json) =>
               Wire.parse(json) match
                 case Left(_)     => step
-                case Right(wire) => handle(agent, seen, started, cancelled, reply, wire) *> step
+                case Right(wire) => handle(agent, seen, cancelled, reply, wire) *> step
       }
     step
 
   private def handle(
       agent: LinePipe,
       seen: Ref[Seen],
-      started: Promise[Nothing, Unit],
       cancelled: Promise[Nothing, Unit],
       reply: Boolean,
       wire: Wire,
@@ -156,7 +156,6 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       case Wire.Call(id, "session/prompt", _) =>
         note(seen, "session/prompt") *>
           send(agent, update("agent_thought_chunk", "hmm")) *>
-          started.succeed(()).unit *>
           ZIO
             .when(reply) {
               send(agent, update("agent_message_chunk", "hello")) *>
@@ -177,6 +176,11 @@ object AcpHarnessSpec extends ZIOSpecDefault:
 
   private def note(seen: Ref[Seen], method: String): UIO[Unit] =
     seen.update(found => found.copy(methods = found.methods :+ method))
+
+  private def awaitSeen(seen: Ref[Seen])(ready: Seen => Boolean): UIO[Seen] =
+    seen.get.flatMap { found =>
+      if ready(found) then ZIO.succeed(found) else ZIO.yieldNow *> awaitSeen(seen)(ready)
+    }
 
   private def send(agent: LinePipe, json: Json): UIO[Unit] =
     agent.writeLine(json.toJson).ignore

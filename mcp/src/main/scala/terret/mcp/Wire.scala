@@ -31,15 +31,17 @@ enum WireFault derives Schema, JsonCodec:
   case Rejected(code: Int)
   case Incomplete
   case Refused
+  case PermissionDenied
 
 object WireFault:
   def from(fault: ProtocolFault): WireFault =
     fault match
-      case ProtocolFault.Malformed      => Malformed
-      case ProtocolFault.BindMissing    => BindMissing
-      case ProtocolFault.Rejected(code) => Rejected(code)
-      case ProtocolFault.Incomplete     => Incomplete
-      case ProtocolFault.Refused        => Refused
+      case ProtocolFault.Malformed        => Malformed
+      case ProtocolFault.BindMissing      => BindMissing
+      case ProtocolFault.Rejected(code)   => Rejected(code)
+      case ProtocolFault.Incomplete       => Incomplete
+      case ProtocolFault.Refused          => Refused
+      case ProtocolFault.PermissionDenied => PermissionDenied
 
 enum WireFailure derives Schema, JsonCodec:
   case UnknownSession(id: String)

@@ -25,7 +25,9 @@ edge: one adapter per harness, then those same jobs promoted through heddle.
 
 From this repository, `./histos test` proves the suites. `./histos run app` listens on
 `http://127.0.0.1:8080/mcp`. The default harness is Grok: command `grok`, transport `Cli`, approval
-`Ask`. Nothing else is required.
+`Ask`. Nothing else is required. The CLI transport cannot answer a permission prompt. Under `Closed`
+and `Clamp`, the ceiling is the whole policy: granted tools are allowed up front, and everything
+else is removed. A prompt that is cancelled is not a host cancel.
 
 Warp's local agent reads `.warp/.mcp.json` in the project or the home directory. The file names that
 URL. A bind on `0.0.0.0` is written as `127.0.0.1`.

@@ -7,7 +7,6 @@ enum HarnessFailure:
   case Cancelled
   case Exited(code: Int)
   case Protocol(fault: ProtocolFault)
-end HarnessFailure
 
 enum ProtocolFault:
   case Malformed
@@ -15,4 +14,4 @@ enum ProtocolFault:
   case Rejected(code: Int)
   case Incomplete
   case Refused
-end ProtocolFault
+  case PermissionDenied

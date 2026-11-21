@@ -50,6 +50,14 @@ object CliLineSpec extends ZIOSpecDefault:
         CliLine.parse("""{"type":"end","stopReason":"cancelled"}""") == Right(
           Chunk(Event.TurnFinished(TurnOutcome.Cancelled))
         ),
+        CliLine.parse("""{"type":"end","stopReason":"cancelled","cancellationCategory":"permission_cancelled"}""") ==
+          Right(
+            Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))))
+          ),
+        CliLine.parse("""{"type":"end","stopReason":"cancelled","cancellation_category":"PermissionRejected"}""") ==
+          Right(
+            Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))))
+          ),
         CliLine.parse("""{"type":"end","stopReason":"refusal"}""") == Right(
           Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Refused))))
         ),

@@ -14,6 +14,10 @@ cap, and the session records what was dropped.
 `Clamp` uses the ceiling it was given. `Inherit` uses every permission: `ReadWorkspace`,
 `WriteWorkspace`, `RunCommands`, and `Network`. A workspace outside the configured root is
 rejected. An unset root means the opened workspace is its own root.
+
+On the Grok CLI transport the ceiling is launch flags. `Closed` and `Clamp` do not leave a prompt
+for a person to answer. A ceiling without `RunCommands` removes the shell, including both names
+Grok uses for it.
 """,
     exampleValue(PermissionPolicy.Closed.ceiling).assert { cap =>
       assertTrue(cap.allow == Set(Permission.ReadWorkspace))
@@ -28,4 +32,3 @@ rejected. An unset root means the opened workspace is its own root.
       )
     },
   )
-end CeilingPage

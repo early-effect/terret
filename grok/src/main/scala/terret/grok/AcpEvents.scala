@@ -28,8 +28,10 @@ object AcpEvents:
 
   def stop(result: Json): Either[ProtocolFault, TurnOutcome] =
     result match
-      case obj: Json.Obj => Right(Stop.outcome(JsonFields.str(obj, "stopReason").getOrElse("end_turn")))
-      case _             => Left(ProtocolFault.Malformed)
+      case obj: Json.Obj =>
+        val reason = JsonFields.str(obj, "stopReason").getOrElse("end_turn")
+        Right(Stop.outcome(reason, Stop.category(obj)))
+      case _ => Left(ProtocolFault.Malformed)
 
   def fromUpdate(json: Json): Either[ProtocolFault, Chunk[Event]] =
     fromUpdate(json, Map.empty).map(_._2)

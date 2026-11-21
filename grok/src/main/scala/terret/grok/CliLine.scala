@@ -28,7 +28,8 @@ object CliLine:
           case Some("tool_call_update") => Right(ToolEvent.decode(obj, started = false, seen))
           case Some("plan")             => Right((seen, plan(obj)))
           case Some("end")              =>
-            Right((seen, Chunk(Event.TurnFinished(Stop.outcome(JsonFields.str(obj, "stopReason").getOrElse(""))))))
+            val reason = JsonFields.str(obj, "stopReason").getOrElse("")
+            Right((seen, Chunk(Event.TurnFinished(Stop.outcome(reason, Stop.category(obj))))))
           case Some("error") =>
             Right(
               (
