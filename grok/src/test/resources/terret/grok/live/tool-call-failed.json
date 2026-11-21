@@ -1,0 +1,14 @@
+{
+  "sessionUpdate": "tool_call_update",
+  "toolCallId": "call-029c85f7-8643-4cc5-a332-5c5ecaa190e8-0",
+  "status": "failed",
+  "content": [
+    {
+      "type": "content",
+      "content": {
+        "type": "text",
+        "text": "User rejected the execution for tool `run_terminal_command`"
+      }
+    }
+  ]
+}

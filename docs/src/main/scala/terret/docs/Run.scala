@@ -24,10 +24,11 @@ heddle already owns HTTP and MCP, so Terret does not grow a second tool DSL. It 
 edge: one adapter per harness, then those same jobs promoted through heddle.
 
 From this repository, `./histos test` proves the suites. `./histos run app` listens on
-`http://127.0.0.1:8080/mcp`. The default harness is Grok: command `grok`, transport `Cli`, approval
-`Ask`. Nothing else is required. The CLI transport cannot answer a permission prompt. Under `Closed`
-and `Clamp`, the ceiling is the whole policy: granted tools are allowed up front, and everything
-else is removed. A prompt that is cancelled is not a host cancel.
+`http://127.0.0.1:8080/mcp`. The default harness is Grok: command `grok`, transport `AcpStdio`,
+approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses ACP stdio, because
+the CLI transport cannot answer a permission prompt. The ceiling removes every tool it does not
+grant, and terret answers the prompts that remain. A shell write needs `RunCommands` and
+`WriteWorkspace`. A stop Grok cancels on its own is not a host cancel.
 
 Warp's local agent reads `.warp/.mcp.json` in the project or the home directory. The file names that
 URL. A bind on `0.0.0.0` is written as `127.0.0.1`.
@@ -51,7 +52,7 @@ dep"rocks.earlyeffect::terret-app:<terret ship>"
         case Listen.Stdio      => ""
       assertTrue(
         url == "http://127.0.0.1:8080/mcp",
-        config.harness == ProcessHarness.Grok(GrokConfig.cli),
+        config.harness == ProcessHarness.Grok(GrokConfig.stdio),
         WarpLocal.File == ".warp/.mcp.json",
       )
     },

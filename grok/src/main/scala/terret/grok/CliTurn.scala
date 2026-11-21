@@ -1,13 +1,17 @@
 package terret.grok
 
 import heddle.LinePipe
-import terret.event.{Event, ToolName}
+import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{HarnessFailure, ProtocolFault}
 import zio.stream.ZStream
 import zio.{Chunk, Ref, ZIO}
 
 object CliTurn:
-  def events(stdout: LinePipe, exit: ZIO[Any, HarnessFailure, Int]): ZStream[Any, HarnessFailure, Event] =
+  def events(
+      stdout: LinePipe,
+      exit: ZIO[Any, HarnessFailure, Int],
+      hostCancel: Ref[Boolean],
+  ): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
       for
         done  <- Ref.make(false)
@@ -19,22 +23,29 @@ object CliTurn:
             stdout.readLine.mapError(_ => Some(HarnessFailure.Protocol(ProtocolFault.Incomplete))).flatMap {
               case None       => finish(exit)
               case Some(line) =>
-                names.get.flatMap { seen =>
+                names.get.zip(hostCancel.get).flatMap { (seen, cancelled) =>
                   ZIO
                     .fromEither(CliLine.parse(line, seen))
                     .mapError(fault => Some(HarnessFailure.Protocol(fault)))
                     .flatMap { (next, events) =>
-                      val terminal = events.exists {
+                      val adjusted = if cancelled then events.map(hosted) else events
+                      val terminal = adjusted.exists {
                         case Event.TurnFinished(_) => true
                         case _                     => false
                       }
-                      names.set(next) *> done.set(terminal).as(events)
+                      names.set(next) *> done.set(terminal).as(adjusted)
                     }
                 }
             }
         }
       }
     }
+
+  private def hosted(event: Event): Event =
+    event match
+      case Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))) =>
+        Event.TurnFinished(TurnOutcome.Cancelled)
+      case other => other
 
   private def finish(exit: ZIO[Any, HarnessFailure, Int]): ZIO[Any, Option[HarnessFailure], Chunk[Event]] =
     exit.mapError(Some(_)).flatMap { code =>

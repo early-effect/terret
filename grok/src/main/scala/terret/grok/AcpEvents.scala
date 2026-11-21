@@ -13,9 +13,10 @@ object AcpEvents:
   def fromParams(
       params: Json,
       seen: Map[String, ToolName],
+      refusals: Map[String, String] = Map.empty,
   ): Either[ProtocolFault, (Map[String, ToolName], Chunk[Event])] =
     params match
-      case obj: Json.Obj => fromUpdate(JsonFields.field(obj, "update").getOrElse(params), seen)
+      case obj: Json.Obj => fromUpdate(JsonFields.field(obj, "update").getOrElse(params), seen, refusals)
       case _             => Left(ProtocolFault.Malformed)
 
   def sessionId(result: Json): Either[ProtocolFault, SessionId] =
@@ -26,11 +27,11 @@ object AcpEvents:
           case None      => Left(ProtocolFault.Incomplete)
       case _ => Left(ProtocolFault.Malformed)
 
-  def stop(result: Json): Either[ProtocolFault, TurnOutcome] =
+  def stop(result: Json, hostCancelled: Boolean = false): Either[ProtocolFault, TurnOutcome] =
     result match
       case obj: Json.Obj =>
         val reason = JsonFields.str(obj, "stopReason").getOrElse("end_turn")
-        Right(Stop.outcome(reason, Stop.category(obj)))
+        Right(Stop.outcome(reason, hostCancelled))
       case _ => Left(ProtocolFault.Malformed)
 
   def fromUpdate(json: Json): Either[ProtocolFault, Chunk[Event]] =
@@ -39,6 +40,7 @@ object AcpEvents:
   def fromUpdate(
       json: Json,
       seen: Map[String, ToolName],
+      refusals: Map[String, String] = Map.empty,
   ): Either[ProtocolFault, (Map[String, ToolName], Chunk[Event])] =
     json match
       case obj: Json.Obj =>
@@ -47,7 +49,7 @@ object AcpEvents:
           case Some("agent_thought_chunk") => Right((seen, text(obj, Event.Thought.apply)))
           case Some("user_message_chunk")  => Right((seen, Chunk.empty))
           case Some("tool_call")           => Right(ToolEvent.decode(obj, started = true, seen))
-          case Some("tool_call_update")    => Right(ToolEvent.decode(obj, started = false, seen))
+          case Some("tool_call_update")    => Right(ToolEvent.decode(obj, started = false, seen, refusals))
           case Some("plan")                => Right((seen, plan(obj)))
           case Some(_)                     => Right((seen, Chunk.empty))
           case None                        => Right((seen, Chunk.empty))

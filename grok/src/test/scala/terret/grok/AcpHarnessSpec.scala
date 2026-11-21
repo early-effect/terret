@@ -3,7 +3,7 @@ package terret.grok
 import heddle.LinePipe
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.HarnessFailure
-import terret.permission.{Ceiling, PermissionPolicy}
+import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.transcript.Retain
 import terret.workspace.Workspace
@@ -50,8 +50,82 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           root   <- workspace
           id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
           _      <- harness.prompt(id, Prompt("hello")).runDrain
-          record <- awaitSeen(seen)(_.payloads.exists(option(_, "allow-once")))
-        yield assertTrue(record.payloads.exists(option(_, "allow-once")))
+          record <- awaitSeen(seen)(_.payloads.exists(option(_, "always-allow")))
+        yield assertTrue(record.payloads.exists(option(_, "always-allow")))
+      }
+    },
+    test("a workspace write is allowed when both grants are present") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      shell("echo hi > out.txt").flatMap { (harness, seen) =>
+        turn(harness, seen, ceiling, "always-allow").flatMap { (got, record) =>
+          assertTrue(
+            record.payloads.exists(option(_, "always-allow")),
+            finished(got, TurnOutcome.Completed),
+            got.exists {
+              case Event.ToolUpdated(call) => call.input == Json.Obj("stdout" -> Json.Str("hi"))
+              case _                       => false
+            },
+          )
+        }
+      }
+    },
+    test("tee is allowed inside the workspace and rejected without WriteWorkspace") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val run     = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
+      shell("echo hi | tee out.txt").flatMap { (harness, seen) =>
+        turn(harness, seen, ceiling, "always-allow").flatMap { (got, _) =>
+          shell("echo hi | tee out.txt").flatMap { (narrow, denied) =>
+            turn(narrow, denied, run, "reject-once").map { (refused, record) =>
+              assertTrue(
+                finished(got, TurnOutcome.Completed),
+                record.payloads.exists(option(_, "reject-once")),
+                refused.exists {
+                  case Event.ToolUpdated(call) =>
+                    call.input match
+                      case Json.Str(text) => text.contains("needs WriteWorkspace")
+                      case _              => false
+                  case _ => false
+                },
+                finished(refused, TurnOutcome.Completed),
+                !finished(refused, TurnOutcome.Cancelled),
+              )
+            }
+          }
+        }
+      }
+    },
+    test("a write outside the workspace is rejected until that root is configured") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val command = "echo hi > /tmp/terret-probe.log"
+      shell(command).flatMap { (harness, seen) =>
+        turn(harness, seen, ceiling, "reject-once").flatMap { (refused, _) =>
+          ZIO.fromEither(Workspace.from("/tmp")).orDieWith(_ => new IllegalArgumentException("workspace")).flatMap {
+            scratch =>
+              shell(command, Chunk(scratch)).flatMap { (opened, allowedSeen) =>
+                turn(opened, allowedSeen, ceiling, "always-allow").map { (allowed, record) =>
+                  assertTrue(
+                    refused.exists {
+                      case Event.ToolUpdated(call) =>
+                        call.input match
+                          case Json.Str(text) => text.contains("outside the workspace")
+                          case _              => false
+                      case _ => false
+                    },
+                    record.payloads.exists(option(_, "always-allow")),
+                    finished(allowed, TurnOutcome.Completed),
+                  )
+                }
+              }
+          }
+        }
+      }
+    },
+    test("a redirect to /dev/null does not need WriteWorkspace") {
+      val run = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
+      shell("echo hi > /dev/null").flatMap { (harness, seen) =>
+        turn(harness, seen, run, "always-allow").map { (_, record) =>
+          assertTrue(record.payloads.exists(option(_, "always-allow")))
+        }
       }
     },
     test("cancel tells the agent") {
@@ -73,11 +147,158 @@ object AcpHarnessSpec extends ZIOSpecDefault:
             case Event.Thought("hmm") => true
             case _                    => false
           },
+          got.exists {
+            case Event.TurnFinished(TurnOutcome.Cancelled) => true
+            case _                                         => false
+          },
           record.methods.contains("session/cancel"),
         )
       }
     },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
+
+  private def finished(events: Chunk[Event], outcome: TurnOutcome): Boolean =
+    events.exists {
+      case Event.TurnFinished(found) => found == outcome
+      case _                         => false
+    }
+
+  private def turn(harness: GrokHarness, seen: Ref[Seen], ceiling: Ceiling, optionId: String) =
+    for
+      root   <- workspace
+      id     <- harness.open(root, ceiling, PermissionPolicy.Clamp(ceiling))
+      got    <- harness.prompt(id, Prompt("go")).runCollect
+      record <- awaitSeen(seen)(_.payloads.exists(option(_, optionId)))
+    yield (got, record)
+
+  private def shell(command: String, roots: Chunk[Workspace] = Chunk.empty) =
+    for
+      seen     <- Ref.make(Seen(Chunk.empty, Chunk.empty))
+      promptId <- Ref.make(Option.empty[Json])
+      harness  <- GrokHarness.make(GrokConfig.stdio, idle, shellAgent(seen, promptId, command), roots)
+    yield (harness, seen)
+
+  private def shellAgent(seen: Ref[Seen], promptId: Ref[Option[Json]], command: String): AcpOpen = new:
+    def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =
+      for
+        ends <- LinePipe.connected
+        (client, agentEnd) = ends
+        _    <- shellTalk(agentEnd, seen, promptId, command).forkScoped
+        _    <- ZIO.addFinalizer(agentEnd.close *> client.close)
+        pipe <- LineRpc.make(client, client.close)
+      yield pipe
+
+  private def shellTalk(
+      agent: LinePipe,
+      seen: Ref[Seen],
+      promptId: Ref[Option[Json]],
+      command: String,
+  ): UIO[Unit] =
+    def step: UIO[Unit] =
+      agent.readLine.catchAll(_ => ZIO.succeed(None)).flatMap {
+        case None       => ZIO.unit
+        case Some(line) =>
+          line.fromJson[Json].toOption match
+            case None       => step
+            case Some(json) =>
+              Wire.parse(json) match
+                case Left(_)     => step
+                case Right(wire) => shellHandle(agent, seen, promptId, command, wire) *> step
+      }
+    step
+
+  private def shellHandle(
+      agent: LinePipe,
+      seen: Ref[Seen],
+      promptId: Ref[Option[Json]],
+      command: String,
+      wire: Wire,
+  ): UIO[Unit] =
+    wire match
+      case Wire.Call(id, "initialize", _) =>
+        send(agent, Wire.ok(id, Json.Obj("protocolVersion" -> Json.Num(BigDecimal(1)))))
+      case Wire.Call(id, "session/new", _) =>
+        send(agent, Wire.ok(id, Json.Obj("sessionId" -> Json.Str("sess-1"))))
+      case Wire.Call(id, "session/prompt", _) =>
+        promptId.set(Some(id)) *>
+          send(agent, shellCall(command)) *>
+          send(agent, shellPermission(command))
+      case Wire.Ok(_, result) =>
+        seen.update(found => found.copy(payloads = found.payloads :+ result)) *>
+          promptId.get.flatMap {
+            case Some(id) =>
+              val allowed = option(result, "always-allow") || option(result, "allow-once")
+              promptId.set(None) *>
+                send(agent, if allowed then shellOutput else shellFailed) *>
+                send(agent, Wire.ok(id, Json.Obj("stopReason" -> Json.Str("end_turn"))))
+            case None => ZIO.unit
+          }
+      case Wire.Call(_, _, _) => ZIO.unit
+      case Wire.Note(_, _)    => ZIO.unit
+      case Wire.Err(_, _)     => ZIO.unit
+
+  private def shellCall(command: String): Json =
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(
+          "sessionUpdate" -> Json.Str("tool_call"),
+          "toolCallId"    -> Json.Str("call_9"),
+          "toolName"      -> Json.Str("run_terminal_command"),
+          "kind"          -> Json.Str("execute"),
+          "rawInput"      -> Json.Obj("command" -> Json.Str(command)),
+        ),
+      ),
+    )
+
+  private val recordedOptions = Json.Arr(
+    Json.Obj("optionId" -> Json.Str("always-allow"), "kind"  -> Json.Str("allow_always")),
+    Json.Obj("optionId" -> Json.Str("allow-once"), "kind"    -> Json.Str("allow_once")),
+    Json.Obj("optionId" -> Json.Str("reject-once"), "kind"   -> Json.Str("reject_once")),
+    Json.Obj("optionId" -> Json.Str("reject-always"), "kind" -> Json.Str("reject_always")),
+  )
+
+  private def shellPermission(command: String): Json =
+    Wire.request(
+      Json.Str("perm-9"),
+      "session/request_permission",
+      Json.Obj(
+        "toolCall" -> Json.Obj(
+          "toolCallId" -> Json.Str("call_9"),
+          "kind"       -> Json.Str("execute"),
+          "rawInput"   -> Json.Obj("command" -> Json.Str(command)),
+        ),
+        "options" -> recordedOptions,
+      ),
+    )
+
+  private val shellOutput: Json =
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(
+          "sessionUpdate" -> Json.Str("tool_call_update"),
+          "toolCallId"    -> Json.Str("call_9"),
+          "rawOutput"     -> Json.Obj("stdout" -> Json.Str("hi")),
+        ),
+      ),
+    )
+
+  private val shellFailed: Json =
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(
+          "sessionUpdate" -> Json.Str("tool_call_update"),
+          "toolCallId"    -> Json.Str("call_9"),
+          "status"        -> Json.Str("failed"),
+          "rawOutput"     -> Json.Null,
+        ),
+      ),
+    )
 
   private def workspace =
     ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
@@ -105,9 +326,10 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       for
         ends <- LinePipe.connected
         (client, agentEnd) = ends
-        _ <- talk(agentEnd, seen, cancelled, reply).forkScoped
-        _ <- ZIO.addFinalizer(agentEnd.close *> client.close)
-      yield LineRpc(client, client.close)
+        _    <- talk(agentEnd, seen, cancelled, reply).forkScoped
+        _    <- ZIO.addFinalizer(agentEnd.close *> client.close)
+        pipe <- LineRpc.make(client, client.close)
+      yield pipe
 
   private def talk(
       agent: LinePipe,
@@ -204,10 +426,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       Json.Obj(
         "toolCall" -> Json
           .Obj("toolCallId" -> Json.Str("call_1"), "title" -> Json.Str("Edit"), "kind" -> Json.Str("edit")),
-        "options" -> Json.Arr(
-          Json.Obj("optionId" -> Json.Str("allow-once"), "kind"  -> Json.Str("allow_once")),
-          Json.Obj("optionId" -> Json.Str("reject-once"), "kind" -> Json.Str("reject_once")),
-        ),
+        "options" -> recordedOptions,
       ),
     )
 
