@@ -17,8 +17,6 @@ object LiveRefusalSpec extends ZIOSpecDefault:
       suite("live grok refusals")(
         LiveGrokSpec.ungrantedWrite,
         LiveGrokSpec.heredocOutside,
-        LiveGrokSpec.refusedFetch,
-        LiveGrokSpec.refusedSearch,
       ).when(LiveGate.current == LiveGate.Decision.Ready)
         @@ TestAspect.beforeAll(LiveGrokSpec.prepare)
         @@ TestAspect.sequential

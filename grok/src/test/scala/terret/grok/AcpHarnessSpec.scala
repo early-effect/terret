@@ -129,6 +129,25 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         }
       }
     },
+    test("a refused use_tool web_fetch names the clamp and the turn completes") {
+      checkRecorded(
+        "request-permission-web-fetch.json",
+        "clamped by server policy",
+        "web_fetch needs Network, clamped by server policy",
+        "use_tool",
+      )
+    },
+    test("a refused use_tool web_search names the clamp and the turn completes") {
+      checkRecorded(
+        "request-permission-web-search.json",
+        "clamped by server policy",
+        "web_search needs Network, clamped by server policy",
+        "use_tool",
+      )
+    },
+    test("a refused write outside the workspace names the path on the tool update") {
+      checkWrite("request-permission-heredoc.json")
+    },
     test("cancel tells the agent") {
       scripted(reply = false).flatMap { (harness, seen, cancelled) =>
         for
@@ -158,6 +177,61 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
 
+  private val recordedCeiling =
+    Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+
+  private def checkRecorded(resource: String, phrase: String, reason: String, avoided: String) =
+    LiveBodies.json(resource).orDie.flatMap { params =>
+      replay(params, phrase, recordedCeiling, avoided).map { (got, record) =>
+        refused(got, record, phrase, reason)
+      }
+    }
+
+  private def checkWrite(resource: String) =
+    LiveBodies.json(resource).orDie.flatMap { params =>
+      filePath(params) match
+        case None       => ZIO.dieMessage("recorded write frame has no file_path")
+        case Some(path) =>
+          val reason = s"write writes $path, outside the workspace"
+          replay(params, "outside the workspace", recordedCeiling, "write").map { (got, record) =>
+            refused(got, record, "outside the workspace", reason)
+          }
+    }
+
+  private def refused(got: Chunk[Event], record: Seen, phrase: String, reason: String) =
+    assertTrue(
+      record.payloads.exists(option(_, "reject-once")),
+      record.payloads.exists(followup(_, reason)),
+      refusalText(got, reason),
+      thoughtHas(got, phrase),
+      assistantHas(got, phrase),
+      !thoughtHas(got, reason),
+      !assistantHas(got, reason),
+      finished(got, TurnOutcome.Completed),
+      !finished(got, TurnOutcome.Cancelled),
+    )
+
+  private def refusalText(events: Chunk[Event], needle: String): Boolean =
+    events.exists {
+      case Event.ToolUpdated(call) =>
+        call.input match
+          case Json.Str(text) => text.contains(needle)
+          case _              => false
+      case _ => false
+    }
+
+  private def thoughtHas(events: Chunk[Event], needle: String): Boolean =
+    events.exists {
+      case Event.Thought(text) => text.contains(needle)
+      case _                   => false
+    }
+
+  private def assistantHas(events: Chunk[Event], needle: String): Boolean =
+    events.exists {
+      case Event.Assistant(text) => text.contains(needle)
+      case _                     => false
+    }
+
   private def finished(events: Chunk[Event], outcome: TurnOutcome): Boolean =
     events.exists {
       case Event.TurnFinished(found) => found == outcome
@@ -178,6 +252,157 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       promptId <- Ref.make(Option.empty[Json])
       harness  <- GrokHarness.make(GrokConfig.stdio, idle, shellAgent(seen, promptId, command), roots)
     yield (harness, seen)
+
+  private def replay(params: Json, phrase: String, ceiling: Ceiling, avoided: String) =
+    toolObject(params).flatMap(idOf) match
+      case None     => ZIO.dieMessage("recorded permission frame has no toolCallId")
+      case Some(id) =>
+        for
+          seen     <- Ref.make(Seen(Chunk.empty, Chunk.empty))
+          promptId <- Ref.make(Option.empty[Json])
+          harness  <- GrokHarness.make(
+            GrokConfig.stdio,
+            idle,
+            replayAgent(seen, promptId, params, id, phrase, avoided),
+          )
+          root    <- workspace
+          session <- harness.open(root, ceiling, PermissionPolicy.Clamp(ceiling))
+          got     <- harness.prompt(session, Prompt("go")).runCollect
+          record  <- seen.get
+        yield (got, record)
+
+  private def replayAgent(
+      seen: Ref[Seen],
+      promptId: Ref[Option[Json]],
+      params: Json,
+      id: String,
+      phrase: String,
+      avoided: String,
+  ): AcpOpen = new:
+    def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =
+      for
+        ends <- LinePipe.connected
+        (client, agentEnd) = ends
+        _    <- replayTalk(agentEnd, seen, promptId, params, id, phrase, avoided).forkScoped
+        _    <- ZIO.addFinalizer(agentEnd.close *> client.close)
+        pipe <- LineRpc.make(client, client.close)
+      yield pipe
+
+  private def replayTalk(
+      agent: LinePipe,
+      seen: Ref[Seen],
+      promptId: Ref[Option[Json]],
+      params: Json,
+      id: String,
+      phrase: String,
+      avoided: String,
+  ): UIO[Unit] =
+    def step: UIO[Unit] =
+      agent.readLine.catchAll(_ => ZIO.succeed(None)).flatMap {
+        case None       => ZIO.unit
+        case Some(line) =>
+          line.fromJson[Json].toOption match
+            case None       => step
+            case Some(json) =>
+              Wire.parse(json) match
+                case Left(_)     => step
+                case Right(wire) => replayHandle(agent, seen, promptId, params, id, phrase, avoided, wire) *> step
+      }
+    step
+
+  private def replayHandle(
+      agent: LinePipe,
+      seen: Ref[Seen],
+      promptId: Ref[Option[Json]],
+      params: Json,
+      id: String,
+      phrase: String,
+      avoided: String,
+      wire: Wire,
+  ): UIO[Unit] =
+    wire match
+      case Wire.Call(call, "initialize", _) =>
+        send(agent, Wire.ok(call, Json.Obj("protocolVersion" -> Json.Num(BigDecimal(1)))))
+      case Wire.Call(call, "session/new", _) =>
+        send(agent, Wire.ok(call, Json.Obj("sessionId" -> Json.Str("sess-1"))))
+      case Wire.Call(call, "session/prompt", _) =>
+        promptId.set(Some(call)) *>
+          send(agent, update("agent_thought_chunk", phrase)) *>
+          send(agent, startedCall(id, params)) *>
+          send(agent, Wire.request(Json.Str("perm-recorded"), "session/request_permission", params))
+      case Wire.Ok(_, result) =>
+        seen.update(found => found.copy(payloads = found.payloads :+ result)) *>
+          promptId.get.flatMap {
+            case Some(call) =>
+              promptId.set(None) *>
+                send(agent, failedCall(id, avoided)) *>
+                send(agent, update("agent_message_chunk", phrase)) *>
+                send(agent, Wire.ok(call, Json.Obj("stopReason" -> Json.Str("end_turn"))))
+            case None => ZIO.unit
+          }
+      case Wire.Call(_, _, _) => ZIO.unit
+      case Wire.Note(_, _)    => ZIO.unit
+      case Wire.Err(_, _)     => ZIO.unit
+
+  private def startedCall(id: String, params: Json): Json =
+    val call  = toolObject(params).getOrElse(Json.Obj())
+    val title = JsonFields.str(call, "title").filter(_.nonEmpty).getOrElse("tool")
+    val raw   = JsonFields.field(call, "rawInput").getOrElse(Json.Obj())
+    val kind  = JsonFields.str(call, "kind").filter(_.nonEmpty)
+    val base  = Chunk(
+      "sessionUpdate" -> Json.Str("tool_call"),
+      "toolCallId"    -> Json.Str(id),
+      "title"         -> Json.Str(title),
+      "rawInput"      -> raw,
+    )
+    val fields = kind match
+      case Some(value) => base :+ ("kind" -> Json.Str(value))
+      case None        => base
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(fields*),
+      ),
+    )
+
+  private def failedCall(id: String, avoided: String): Json =
+    Wire.notify(
+      "session/update",
+      Json.Obj(
+        "sessionId" -> Json.Str("sess-1"),
+        "update"    -> Json.Obj(
+          "sessionUpdate" -> Json.Str("tool_call_update"),
+          "toolCallId"    -> Json.Str(id),
+          "status"        -> Json.Str("failed"),
+          "content"       -> Json.Arr(
+            Json.Obj(
+              "type"    -> Json.Str("content"),
+              "content" -> Json.Obj(
+                "type" -> Json.Str("text"),
+                "text" -> Json.Str(
+                  s"The user elected to avoid running the $avoided tool. The tool was not executed. Please refer to the user's message for next steps."
+                ),
+              ),
+            )
+          ),
+        ),
+      ),
+    )
+
+  private def toolObject(params: Json): Option[Json.Obj] =
+    params match
+      case obj: Json.Obj => JsonFields.field(obj, "toolCall").flatMap(JsonFields.obj)
+      case _             => None
+
+  private def idOf(call: Json.Obj): Option[String] =
+    JsonFields.str(call, "toolCallId").filter(_.nonEmpty)
+
+  private def filePath(params: Json): Option[String] =
+    toolObject(params)
+      .flatMap(call => JsonFields.field(call, "rawInput"))
+      .flatMap(JsonFields.obj)
+      .flatMap(raw => JsonFields.str(raw, "file_path").filter(_.nonEmpty))
 
   private def shellAgent(seen: Ref[Seen], promptId: Ref[Option[Json]], command: String): AcpOpen = new:
     def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =

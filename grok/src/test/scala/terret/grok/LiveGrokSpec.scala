@@ -1,6 +1,6 @@
 package terret.grok
 
-import terret.event.{Event, ToolCall, TurnOutcome}
+import terret.event.{Event, TurnOutcome}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.workspace.Workspace
@@ -23,11 +23,7 @@ object LiveGrokSpec extends ZIOSpecDefault:
   private val shell        = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
   private val write        = "echo hi | tee out.txt"
   private val quiet        = "Reply with the single word pong. Do not use tools."
-  private val fetch        =
-    "Fetch https://example.com with the web_fetch tool. If web_fetch is not offered, call it through use_tool with tool_name web_fetch. Do not answer until that call has been made."
-  private val search =
-    "Search for terret with the web_search tool. If web_search is not offered, call it through use_tool with tool_name web_search. Do not answer until that call has been made."
-  private val ticking =
+  private val ticking      =
     "for i in 1 2 3 4; do head -c 20000 /dev/zero | tr '\\0' 'x'; printf '\\n'; sleep 1; done"
 
   def spec =
@@ -123,18 +119,18 @@ object LiveGrokSpec extends ZIOSpecDefault:
           exported            <- harness.transcript(id)
           out = root.path.resolve("out.txt")
           exists <- ZIO.attemptBlocking(Files.exists(out))
-        yield assertTrue(
-          permissionRequested,
-          !exists,
-          endings(events) == Chunk(TurnOutcome.Completed),
-          names(events, "WriteWorkspace") || names(exported.events, "WriteWorkspace"),
-          endings(followed) == Chunk(TurnOutcome.Completed),
-        )
+        yield (assertTrue(permissionRequested) ?? "model never attempted the tool") &&
+          assertTrue(
+            !exists,
+            endings(events) == Chunk(TurnOutcome.Completed),
+            names(events, "WriteWorkspace") || names(exported.events, "WriteWorkspace"),
+            endings(followed) == Chunk(TurnOutcome.Completed),
+          )
       }
     } @@ TestAspect.timeout(4.minutes)
 
   private[grok] val heredocOutside =
-    test("a heredoc write outside the workspace is refused and the turn completes") {
+    test("a heredoc write outside the workspace is refused on the tool update and the turn completes") {
       ZIO.scoped {
         for
           dir                 <- freshDir(outside.resolve("heredoc"))
@@ -146,54 +142,14 @@ object LiveGrokSpec extends ZIOSpecDefault:
           exported            <- harness.transcript(id)
           written = dir.resolve("Probe.java")
           exists <- ZIO.attemptBlocking(Files.exists(written))
-        yield assertTrue(
-          permissionRequested,
-          !exists,
-          started(events),
-          endings(events) == Chunk(TurnOutcome.Completed),
-          names(events, "outside the workspace") || names(exported.events, "outside the workspace"),
-          endings(followed) == Chunk(TurnOutcome.Completed),
-        )
-      }
-    } @@ TestAspect.timeout(4.minutes)
-
-  private[grok] val refusedFetch =
-    test("a refused fetch without Network names the clamp and the turn completes") {
-      ZIO.scoped {
-        for
-          (_, harness, id)    <- session(granted, PermissionPolicy.Clamp(granted))
-          before              <- wireSize
-          events              <- harness.prompt(id, Prompt(fetch)).runCollect
-          permissionRequested <- askedSince(before)
-          followed            <- harness.prompt(id, Prompt(quiet)).runCollect
-          exported            <- harness.transcript(id)
-        yield assertTrue(
-          permissionRequested,
-          endings(events) == Chunk(TurnOutcome.Completed),
-          names(events, "Network") || names(exported.events, "Network"),
-          names(events, "clamped by server policy") || names(exported.events, "clamped by server policy"),
-          endings(followed) == Chunk(TurnOutcome.Completed),
-        )
-      }
-    } @@ TestAspect.timeout(4.minutes)
-
-  private[grok] val refusedSearch =
-    test("a session without Network refuses hosted search and the turn completes") {
-      ZIO.scoped {
-        for
-          (_, harness, id)    <- session(granted, PermissionPolicy.Clamp(granted))
-          before              <- wireSize
-          events              <- harness.prompt(id, Prompt(search)).runCollect
-          permissionRequested <- askedSince(before)
-          exported            <- harness.transcript(id)
-        yield assertTrue(
-          permissionRequested,
-          endings(events) == Chunk(TurnOutcome.Completed),
-          names(events, "Network") || names(exported.events, "Network"),
-          names(events, "clamped by server policy") || names(exported.events, "clamped by server policy"),
-          !deliveredSearch(events),
-          !deliveredSearch(exported.events),
-        )
+        yield (assertTrue(permissionRequested) ?? "model never attempted the tool") &&
+          assertTrue(
+            !exists,
+            started(events),
+            endings(events) == Chunk(TurnOutcome.Completed),
+            refusalText(events, "outside the workspace") || refusalText(exported.events, "outside the workspace"),
+            endings(followed) == Chunk(TurnOutcome.Completed),
+          )
       }
     } @@ TestAspect.timeout(4.minutes)
 
@@ -346,26 +302,14 @@ object LiveGrokSpec extends ZIOSpecDefault:
       case _                       => false
     }
 
-  private def deliveredSearch(events: Chunk[Event]): Boolean =
+  private def refusalText(events: Chunk[Event], needle: String): Boolean =
     events.exists {
-      case Event.ToolUpdated(call) => mentionsSearch(call) && resultBody(call.input).exists(delivered)
-      case _                       => false
+      case Event.ToolUpdated(call) =>
+        call.input match
+          case Json.Str(text) => text.contains(needle)
+          case _              => false
+      case _ => false
     }
-
-  private def mentionsSearch(call: ToolCall): Boolean =
-    val name = call.name.value.toLowerCase.replace("_", "")
-    val raw  = call.input.toJson.toLowerCase.replace("_", "")
-    name.contains("websearch") || raw.contains("websearch")
-
-  private def delivered(text: String): Boolean =
-    text.nonEmpty && !text.contains("needs Network") && !text.contains("clamped by server policy")
-
-  private def resultBody(json: Json): Option[String] =
-    json match
-      case Json.Str(text) => Some(text)
-      case obj: Json.Obj  =>
-        textField(obj, "output").orElse(textField(obj, "stdout")).orElse(textField(obj, "stderr"))
-      case _ => None
 
   private def lengths(events: Chunk[Event]): Chunk[Chunk[Int]] =
     outputRuns(events).map(_.map(_.length))
