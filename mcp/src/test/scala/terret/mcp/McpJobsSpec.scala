@@ -2,7 +2,17 @@ package terret.mcp
 
 import heddle.{Body, LinePipe, Request, Response, Status}
 import heddle.mcp.Mcp
-import heddle.mcp.protocol.{Cancelled, ClientRequest, Message, Methods, ProtocolVersion, RequestId, ToolName}
+import heddle.mcp.protocol.{
+  Cancelled,
+  ClientRequest,
+  Message,
+  Methods,
+  Notifications,
+  ProtocolVersion,
+  RequestId,
+  RpcError,
+  ToolName,
+}
 import heddle.mcp.transport.Http
 import heddle.sse.{ServerSentEvent, SseCodec}
 import terret.config.TerretConfig
@@ -17,7 +27,7 @@ import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.test.*
 import zio.durationInt
-import zio.{Chunk, Promise, Ref, Scope, UIO, ZIO}
+import zio.{Chunk, Promise, Queue, Ref, Scope, UIO, ZIO}
 
 object McpJobsSpec extends ZIOSpecDefault:
   private val jobs = Set("open", "run", "status", "resume", "export", "cancel")
@@ -48,7 +58,7 @@ object McpJobsSpec extends ZIOSpecDefault:
             listed.toSet == jobs,
             accepted(ran) == Right(RunAccepted(opened.session, WireState.Running)),
             ended.state == WireState.Ended(WireOutcome.Completed),
-            log(exported) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished))),
+            log(exported) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1))),
             log(exported) == log(resumed),
             prompts == 1,
           )
@@ -106,7 +116,7 @@ object McpJobsSpec extends ZIOSpecDefault:
             asStatus(running) == Right(StatusView(opened.session, WireState.Running)),
             ended.state == WireState.Ended(WireOutcome.Completed),
             log(exported) == Right(
-              Log(opened.session, Chunk(WireEvent.Assistant("stay"), finished))
+              Log(opened.session, Chunk(WireEvent.Assistant("stay"), finished), Some(1))
             ),
           )
         }
@@ -150,6 +160,138 @@ object McpJobsSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("export after a cursor is the tail, and a negative cursor is refused") {
+      hosted(Script.echo) { (_, host) =>
+        for
+          opened <- host.open
+          empty  <- host.call("export", SessionJob(opened.session))
+          _      <- host.call("run", RunJob(opened.session, "hello"))
+          _      <- host.untilEnded(opened.session)
+          whole  <- host.call("export", SessionJob(opened.session))
+          tail   <- host.call("export", ExportJob(opened.session, Some(0)))
+          rest   <- host.call("export", ExportJob(opened.session, Some(1)))
+          ahead  <- host.call("export", ExportJob(opened.session, Some(9)))
+          bad    <- host.call("export", ExportJob(opened.session, Some(-1)))
+        yield assertTrue(
+          log(empty) == Right(Log(opened.session, Chunk.empty, None)),
+          log(whole) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1))),
+          log(tail) == Right(Log(opened.session, Chunk(finished), Some(1))),
+          log(rest) == Right(Log(opened.session, Chunk.empty, Some(1))),
+          log(ahead) == log(rest),
+          failure(bad) == Right(JobFailure.BadCursor),
+        )
+      }
+    },
+    test("follow is a subscription and the tool list stays the six jobs") {
+      ZIO.scoped {
+        for
+          (_, mcp) <- server(Script.echo)
+          listed   <- mcp.handle(Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None)).json)
+          found    <- mcp.handle(Message.stateless(RequestId.Num(2), ClientRequest.Discover).json)
+          tools = listed.fold("")(_.toJson)
+          disc  = found.fold("")(_.toJson)
+        yield assertTrue(
+          tools.contains("\"export\""),
+          !tools.contains("\"follow\""),
+          disc.contains("\"follow\""),
+          disc.contains("subscriptions"),
+        )
+      }
+    },
+    test("listen catches up, then a live event, and dropping it leaves the turn running") {
+      for
+        caught  <- Promise.make[Nothing, Unit]
+        release <- Promise.make[Nothing, Unit]
+        live    <- Promise.make[Nothing, Unit]
+        done    <- Promise.make[Nothing, Unit]
+        out     <- ZIO.scoped {
+          for
+            (memory, mcp) <- server(paced(caught, release, live, done))
+            id            <- sessionId(mcp)
+            _             <- invoke(mcp, "run", RunJob(id, "go"), 2, sse = false)
+            _             <- caught.await
+            _             <- ZIO.scoped {
+              for
+                queue <- watch(mcp, id, None, 9)
+                _     <- awaitEvent(queue, "0", "ToolStarted")
+                _     <- release.succeed(())
+                _     <- awaitEvent(queue, "1", "ToolUpdated")
+              yield ()
+            }
+            mid   <- memory.cancelled
+            _     <- done.succeed(())
+            ids   <- Ref.make(10L)
+            _     <- untilEnded(mcp, id, ids)
+            later <- memory.cancelled
+          yield assertTrue(mid.isEmpty, later.isEmpty)
+        }
+      yield out
+    },
+    test("a negative follow cursor fails the listen and does not acknowledge") {
+      ZIO.scoped {
+        for
+          (_, mcp) <- server(Script.echo)
+          id       <- sessionId(mcp)
+          res      <- listen(mcp, id, Some(-1), 4)
+          events   <- SseCodec.stream(res.body.toStream).runCollect.mapError(Fail.Failed(_))
+          messages = decoded(events)
+        yield assertTrue(
+          messages.length == 1,
+          messages.lift(0).exists {
+            case Message.Error(_, RpcError.OperationFailed(data)) => data.exists(_.toJson.contains("BadCursor"))
+            case _                                                => false
+          },
+          !messages.exists {
+            case Message.Notification(Notifications.SubscriptionsAcknowledged, _) => true
+            case _                                                                => false
+          },
+        )
+      }
+    },
+    test("GET events is the follow stream, and a negative cursor is a bad request") {
+      for
+        caught  <- Promise.make[Nothing, Unit]
+        release <- Promise.make[Nothing, Unit]
+        live    <- Promise.make[Nothing, Unit]
+        done    <- Promise.make[Nothing, Unit]
+        out     <- ZIO.scoped {
+          for
+            memory <- InMemory.make(paced(caught, release, live, done))
+            terret <- Terret.make(memory, TerretConfig.closed, Hooks.identity)
+            served <- ZIO.fromEither(TerretMcp.served(terret, "test")).mapError(Fail.Build(_))
+            id     <- sessionId(served.mcp)
+            _      <- invoke(served.mcp, "run", RunJob(id, "go"), 2, sse = false)
+            _      <- caught.await
+            bad    <- served.routes(Request.get(s"/sessions/$id/events?after=-1")).mapError(Fail.Http(_))
+            denied <- bad.body.utf8
+              .mapError(Fail.Failed(_))
+              .timeoutFail(Fail.Decode("the bad-cursor body did not end"))(5.seconds)
+            streamed <- ZIO.scoped {
+              for
+                res   <- served.routes(Request.get(s"/sessions/$id/events")).mapError(Fail.Http(_))
+                queue <- wireEvents(res)
+                _     <- awaitWire(queue, "0", "ToolStarted")
+                _     <- release.succeed(())
+                _     <- awaitWire(queue, "1", "ToolUpdated")
+              yield res
+            }
+            mid   <- memory.cancelled
+            _     <- done.succeed(())
+            ids   <- Ref.make(10L)
+            _     <- untilEnded(served.mcp, id, ids)
+            later <- memory.cancelled
+          yield assertTrue(
+            bad.status == Status.BadRequest,
+            !bad.headers.contentType.exists(_.isEventStream),
+            denied.contains("BadCursor"),
+            streamed.status == Status.Ok,
+            streamed.headers.contentType.exists(_.isEventStream),
+            mid.isEmpty,
+            later.isEmpty,
+          )
+        }
+      yield out
+    },
     test("an unknown session is the typed error") {
       hosted(Script.echo) { (_, host) =>
         for missed <- host.call("run", RunJob("missing", "hello"))
@@ -186,6 +328,132 @@ object McpJobsSpec extends ZIOSpecDefault:
       case got if got == n => ZIO.unit
       case _               => ZIO.yieldNow *> untilCount(started, n)
     }
+
+  private val readCall =
+    terret.event.ToolCall(terret.event.CallId("c1"), terret.event.ToolName("read"), Json.Str("body"))
+
+  private def paced(
+      caught: Promise[Nothing, Unit],
+      release: Promise[Nothing, Unit],
+      live: Promise[Nothing, Unit],
+      done: Promise[Nothing, Unit],
+  ): Script =
+    Script((_, _) =>
+      ZStream(Event.ToolStarted(readCall)) ++
+        ZStream.fromZIO(caught.succeed(()) *> release.await).drain ++
+        ZStream(Event.ToolUpdated(readCall)) ++
+        ZStream.fromZIO(live.succeed(()) *> done.await).drain ++
+        ZStream(Event.TurnFinished(TurnOutcome.Completed))
+    )
+
+  private def listen(mcp: Mcp[Any], session: String, after: Option[Long], id: Long): ZIO[Any, Fail, Response] =
+    for
+      tool <- ZIO.fromEither(ToolName.from("follow")).mapError(_ => Fail.BadTool("follow"))
+      args = after match
+        case Some(n) => Json.Obj("session" -> Json.Str(session), "after" -> Json.Num(n))
+        case None    => Json.Obj("session" -> Json.Str(session))
+      message = Message.stateless(RequestId.Num(id), ClientRequest.Listen(tool, args))
+      req     = Request
+        .post("/mcp", Body.json(message.json.toJson))
+        .withHeader(Http.ProtocolHeader, ProtocolVersion.Current.value)
+        .withHeader(Http.MethodHeader, Methods.Listen)
+        .withHeader("Accept", "text/event-stream")
+      res <- mcp.routes(req)
+    yield res
+
+  private def watch(
+      mcp: Mcp[Any],
+      session: String,
+      after: Option[Long],
+      id: Long,
+  ): ZIO[Scope, Fail, Queue[Message]] =
+    listen(mcp, session, after, id).flatMap(sse)
+
+  private def sse(res: Response): ZIO[Scope, Fail, Queue[Message]] =
+    for
+      _ <- ZIO.when(res.status != Status.Ok) {
+        res.body.utf8.mapError(Fail.Failed(_)).flatMap(text => ZIO.fail(Fail.Decode(text)))
+      }
+      queue <- Queue.unbounded[Message]
+      _     <- SseCodec
+        .stream(res.body.toStream)
+        .mapError(Fail.Failed(_))
+        .foreach { event =>
+          event.data.fromJson[Json] match
+            case Left(_)     => ZIO.unit
+            case Right(json) =>
+              Message.decode(json) match
+                case Left(_)    => ZIO.unit
+                case Right(msg) => queue.offer(msg).unit
+        }
+        .forkScoped
+    yield queue
+
+  private def wireEvents(res: Response): ZIO[Scope, Fail, Queue[Either[String, (String, WireEvent)]]] =
+    for
+      _ <- ZIO.when(res.status != Status.Ok) {
+        res.body.utf8.mapError(Fail.Failed(_)).flatMap(text => ZIO.fail(Fail.Decode(text)))
+      }
+      queue <- Queue.unbounded[Either[String, (String, WireEvent)]]
+      _     <- SseCodec
+        .stream(res.body.toStream)
+        .mapError(Fail.Failed(_))
+        .foreach { event =>
+          event.id match
+            case None     => ZIO.unit
+            case Some(id) =>
+              event.data.fromJson[WireEvent] match
+                case Left(detail) => queue.offer(Left(detail)).unit
+                case Right(wire)  => queue.offer(Right(id.value -> wire)).unit
+        }
+        .forkScoped
+    yield queue
+
+  private def awaitWire(
+      queue: Queue[Either[String, (String, WireEvent)]],
+      id: String,
+      kind: String,
+  ): ZIO[Any, Fail, Unit] =
+    def go: ZIO[Any, Fail, Unit] =
+      queue.poll.flatMap {
+        case Some(Left(detail))                                                  => ZIO.fail(Fail.Decode(detail))
+        case Some(Right(found -> wire)) if found == id && wireKind(wire) == kind => ZIO.unit
+        case Some(Right(_))                                                      => go
+        case None                                                                => ZIO.yieldNow *> go
+      }
+    go.timeoutFail(Fail.Decode(s"no $kind event id $id"))(5.seconds)
+
+  private def wireKind(event: WireEvent): String =
+    event match
+      case _: WireEvent.Assistant    => "Assistant"
+      case _: WireEvent.Thought      => "Thought"
+      case _: WireEvent.ToolStarted  => "ToolStarted"
+      case _: WireEvent.ToolUpdated  => "ToolUpdated"
+      case _: WireEvent.Plan         => "Plan"
+      case _: WireEvent.TurnFinished => "TurnFinished"
+
+  private def awaitEvent(queue: Queue[Message], id: String, kind: String): UIO[Unit] =
+    queue.poll.flatMap {
+      case Some(Message.Notification(Notifications.OperationEvent, params))
+          if params.get("id").contains(Json.Str(id)) && params.get("data").exists(_.toJson.contains(kind)) =>
+        ZIO.unit
+      case Some(_) => awaitEvent(queue, id, kind)
+      case None    => ZIO.yieldNow *> awaitEvent(queue, id, kind)
+    }
+
+  private def untilEnded(mcp: Mcp[Any], session: String, ids: Ref[Long]): ZIO[Any, Fail, Unit] =
+    ids.updateAndGet(_ + 1).flatMap { n =>
+      invoke(mcp, "status", SessionJob(session), n, sse = false).flatMap { res =>
+        res.body.utf8.mapError(Fail.Failed(_)).flatMap { text =>
+          text.fromJson[Json].toOption.flatMap(json => Message.decode(json).toOption) match
+            case Some(Message.Result(_, body)) if terminalStatus(body) => ZIO.unit
+            case _                                                     => ZIO.yieldNow *> untilEnded(mcp, session, ids)
+        }
+      }
+    }
+
+  private def terminalStatus(body: Json.Obj): Boolean =
+    asStatus(Reply(body)).toOption.exists(terminal)
 
   private def counting(calls: Ref[Int]): Script =
     Script((_, prompt) =>
@@ -397,5 +665,6 @@ object McpJobsSpec extends ZIOSpecDefault:
     case Undecodable
     case Decode(detail: String)
     case BadTool(name: String)
+    case Http(response: Response)
     case Failed(error: Throwable)
 end McpJobsSpec

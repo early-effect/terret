@@ -5,7 +5,7 @@ import zio.*
 
 object build extends HistosBuild:
   def graph =
-    val library = Ship("terret").next(0, 0, 1)
+    val library    = Ship("terret").next(0, 0, 1)
     val scala3     = scala"3.10.1"
     val zio        = dep"dev.zio::zio:2.1.27"
     val zioStreams = dep"dev.zio::zio-streams:2.1.27"
@@ -31,7 +31,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.15.1")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
     val dsh = module("dsh", Jvm)(scala3)
       .artifact(artifact"terret-dsh")
@@ -42,7 +42,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.15.1")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
     val mcp = module("mcp", Jvm)(scala3)
       .artifact(artifact"terret-mcp")
@@ -53,7 +53,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.15.1")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
     val app = module("app", Jvm)(scala3)
       .artifact(artifact"terret-app")
@@ -69,8 +69,8 @@ object build extends HistosBuild:
         zio,
         zioStreams,
         zioJson,
-        dep"rocks.earlyeffect::heddle:0.15.1",
-        dep"rocks.earlyeffect::heddle-mcp:0.15.1",
+        dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT",
+        dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT",
       )
       .testDependencies(zioTest, zioTestSbt)
     val docs = module("docs", Jvm)(scala3)
@@ -86,7 +86,7 @@ object build extends HistosBuild:
         dep"rocks.earlyeffect::specular-zio-test:0.21.4",
         dep"rocks.earlyeffect::specular-site:0.21.4",
         dep"rocks.earlyeffect::early-effect-docs-theme:0.21.4",
-        dep"rocks.earlyeffect::heddle:0.15.1",
+        dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT",
         zio,
         zioJson,
       )
@@ -137,3 +137,4 @@ object build extends HistosBuild:
     NoteText.from(revision) match
       case Right(text) => text
       case Left(_)     => NoteText("not-a-ship")
+end build

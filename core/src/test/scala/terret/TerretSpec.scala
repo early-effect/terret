@@ -9,11 +9,13 @@ import terret.memory.{InMemory, Script}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
+import terret.transcript.Entry
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.test.*
 import zio.{Chunk, Promise, Ref, Scope, ZIO, ZLayer}
+import zio.durationInt
 
 object TerretSpec extends ZIOSpecDefault:
   private val readCall = ToolCall(CallId("c1"), ToolName("read"), Json.Str("body"))
@@ -293,6 +295,49 @@ object TerretSpec extends ZIOSpecDefault:
         yield assertTrue(rejected == TerretError.UnknownSession(missing), cancelled.isEmpty)
       }
     },
+    test("cancel flushes an open text run onto an attached follow") {
+      ZIO.scoped {
+        for
+          entered                   <- Promise.make[Nothing, Unit]
+          release                   <- Promise.make[Nothing, Unit]
+          (memory, terret, session) <- opened(held(entered, release))
+          followed                  <- terret.follow(session.id, None).take(1).runCollect.fork
+          _                         <- terret.start(session.id, Prompt("held"))
+          _                         <- entered.await
+          _                         <- terret.cancel(session.id)
+          got                       <- followed.join
+          page                      <- terret.page(session.id, None)
+          cancelled                 <- memory.cancelled
+        yield assertTrue(
+          got == Chunk(Entry(0, Event.Assistant("held"))),
+          page.events == got,
+          page.cursor.contains(0L),
+          cancelled.contains(session.id),
+        )
+      }
+    } @@ TestAspect.timeout(10.seconds) @@ TestAspect.withLiveClock,
+    test("closing a follow does not cancel the turn") {
+      ZIO.scoped {
+        for
+          entered                   <- Promise.make[Nothing, Unit]
+          release                   <- Promise.make[Nothing, Unit]
+          (memory, terret, session) <- opened(holding(entered, release))
+          _                         <- terret.start(session.id, Prompt("stay"))
+          _                         <- entered.await
+          _                         <- ZIO.scoped(terret.follow(session.id, None).runDrain.forkScoped)
+          mid                       <- memory.cancelled
+          _                         <- release.succeed(())
+          ended                     <- awaitEnded(terret, session.id)
+          cancelled                 <- memory.cancelled
+          log                       <- terret.transcript(session.id)
+        yield assertTrue(
+          mid.isEmpty,
+          ended.state == SessionState.Ended(TurnOutcome.Completed),
+          cancelled.isEmpty,
+          log.events == Chunk(Event.TurnFinished(TurnOutcome.Completed)),
+        )
+      }
+    } @@ TestAspect.timeout(10.seconds) @@ TestAspect.withLiveClock,
     test("the layer opens a session under the closed policy") {
       def program =
         for
@@ -334,5 +379,18 @@ object TerretSpec extends ZIOSpecDefault:
       ZStream.fromZIO(entered.succeed(())).drain ++
         ZStream.fromZIO(release.await).drain ++
         ZStream.succeed(Event.TurnFinished(TurnOutcome.Completed))
+    }
+
+  private def held(entered: Promise[Nothing, Unit], release: Promise[Nothing, Unit]): Script =
+    Script { (_, prompt) =>
+      ZStream(Event.Assistant(prompt.text)) ++
+        ZStream.fromZIO(entered.succeed(()) *> release.await).drain
+    }
+
+  private def awaitEnded(terret: Terret, id: SessionId): ZIO[Any, TerretError, Session] =
+    terret.status(id).flatMap { session =>
+      session.state match
+        case SessionState.Ended(_) => ZIO.succeed(session)
+        case _                     => ZIO.yieldNow *> awaitEnded(terret, id)
     }
 end TerretSpec

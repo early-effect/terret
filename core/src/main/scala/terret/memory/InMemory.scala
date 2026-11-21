@@ -5,7 +5,7 @@ import terret.harness.{Harness, HarnessFailure}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.{Retain, Transcript}
+import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.{Chunk, IO, Promise, Random, Ref, UIO, ZIO, ZLayer}
@@ -25,6 +25,7 @@ final class InMemory private (
     sessions: Ref[Map[SessionId, InMemory.Slot]],
     gates: Ref[Map[SessionId, Promise[HarnessFailure, Unit]]],
     cancelledIds: Ref[Chunk[SessionId]],
+    journal: Journal,
     script: Script,
 ) extends Harness:
 
@@ -37,7 +38,8 @@ final class InMemory private (
     for
       uuid <- Random.nextUUID
       id = SessionId.trusted(uuid.toString)
-      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy, Chunk.empty)))
+      _ <- journal.open(id)
+      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -54,10 +56,19 @@ final class InMemory private (
     }
 
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event] =
-    ZStream.fromZIO(slot(id)).flatMap(found => ZStream.fromChunk(found.events))
+    ZStream.unwrap(slot(id) *> journal.events(id).map(ZStream.fromChunk))
 
   def transcript(id: SessionId): IO[HarnessFailure, Transcript] =
-    slot(id).map(found => Transcript(id, found.events))
+    slot(id) *> journal.events(id).map(Transcript(id, _))
+
+  def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry] =
+    ZStream.unwrap(slot(id).as(journal.follow(id, after)))
+
+  def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page] =
+    slot(id) *> journal.page(id, after).flatMap {
+      case Some(found) => ZIO.succeed(found)
+      case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
+    }
 
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     slot(id).flatMap { _ =>
@@ -75,11 +86,7 @@ final class InMemory private (
     }
 
   private def append(id: SessionId, event: Event): UIO[Unit] =
-    sessions.update { rows =>
-      rows.get(id) match
-        case None        => rows
-        case Some(found) => rows.updated(id, found.copy(events = found.events :+ event))
-    }
+    journal.append(id, event)
 end InMemory
 
 object InMemory:
@@ -87,7 +94,6 @@ object InMemory:
       workspace: Workspace,
       ceiling: Ceiling,
       policy: PermissionPolicy,
-      events: Chunk[Event],
   )
 
   def make(script: Script): UIO[InMemory] =
@@ -95,7 +101,8 @@ object InMemory:
       sessions  <- Ref.make(Map.empty[SessionId, Slot])
       gates     <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
       cancelled <- Ref.make(Chunk.empty[SessionId])
-    yield InMemory(sessions, gates, cancelled, script)
+      journal   <- Journal.make
+    yield InMemory(sessions, gates, cancelled, journal, script)
 
   def layer(script: Script): ZLayer[Any, Nothing, Harness] =
     ZLayer.fromZIO(make(script).map(memory => memory: Harness))

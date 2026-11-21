@@ -6,16 +6,17 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.{Retain, Transcript}
+import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
-import zio.{Chunk, IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
+import zio.{IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
 
 final class DshHarness private (
     config: DshConfig,
     spawner: Spawner,
     sessions: Ref[Map[SessionId, DshHarness.Slot]],
     gates: Ref[Map[SessionId, Promise[HarnessFailure, Unit]]],
+    journal: Journal,
 ) extends Harness:
 
   def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
@@ -24,6 +25,7 @@ final class DshHarness private (
       id   <- ZIO
         .fromEither(SessionId.from(uuid.toString))
         .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
+      _ <- journal.open(id)
       _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy)))
     yield id
 
@@ -45,10 +47,19 @@ final class DshHarness private (
     }
 
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event] =
-    ZStream.unwrap(require(id).map(slot => ZStream.fromChunk(slot.events)))
+    ZStream.unwrap(require(id) *> journal.events(id).map(ZStream.fromChunk))
 
   def transcript(id: SessionId): IO[HarnessFailure, Transcript] =
-    require(id).map(slot => Transcript(id, slot.events))
+    require(id) *> journal.events(id).map(Transcript(id, _))
+
+  def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry] =
+    ZStream.unwrap(require(id).as(journal.follow(id, after)))
+
+  def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page] =
+    require(id) *> journal.page(id, after).flatMap {
+      case Some(found) => ZIO.succeed(found)
+      case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
+    }
 
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     require(id) *> gates.get.flatMap(open => ZIO.foreachDiscard(open.get(id))(_.succeed(())))
@@ -80,11 +91,7 @@ final class DshHarness private (
     }
 
   private def append(id: SessionId, event: Event): UIO[Unit] =
-    sessions.update { rows =>
-      rows.get(id) match
-        case None       => rows
-        case Some(slot) => rows.updated(id, slot.copy(events = slot.events :+ event))
-    }
+    journal.append(id, event)
 
   private def require(id: SessionId): IO[HarnessFailure, DshHarness.Slot] =
     sessions.get.map(_.get(id)).flatMap {
@@ -98,19 +105,19 @@ object DshHarness:
       workspace: Workspace,
       ceiling: Ceiling,
       policy: PermissionPolicy,
-      events: Chunk[Event],
       remote: Option[String],
   )
 
   private[dsh] object Slot:
     def empty(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): Slot =
-      Slot(workspace, ceiling, policy, Chunk.empty, None)
+      Slot(workspace, ceiling, policy, None)
 
   def make(config: DshConfig, spawner: Spawner): ZIO[Scope, Nothing, DshHarness] =
     for
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-    yield DshHarness(config, spawner, sessions, gates)
+      journal  <- Journal.make
+    yield DshHarness(config, spawner, sessions, gates, journal)
 
   def layer(config: DshConfig): ZLayer[Scope, Nothing, Harness] =
     ZLayer.scoped(make(config, Spawner.jdk).map(harness => harness: Harness))

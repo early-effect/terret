@@ -4,7 +4,7 @@ import terret.event.Event
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.Transcript
+import terret.transcript.{Entry, Page, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.IO
@@ -14,5 +14,6 @@ trait Harness:
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event]
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event]
   def transcript(id: SessionId): IO[HarnessFailure, Transcript]
+  def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry]
+  def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page]
   def cancel(id: SessionId): IO[HarnessFailure, Unit]
-end Harness

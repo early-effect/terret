@@ -6,6 +6,7 @@ import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
 import terret.workspace.Workspace
+import zio.stream.ZStream
 import zio.{Chunk, IO, ZIO}
 
 private[mcp] object Jobs:
@@ -17,6 +18,7 @@ private[mcp] object Jobs:
       .job(resume)(replay(terret, _))
       .job(exportLog)(exported(terret, _))
       .job(cancel)(stop(terret, _))
+      .stream(follow)(followed(terret, _))
 
   private def fallible[In, Out](endpoint: Endpoint[In, Nothing, Out]): Endpoint[In, JobFailure, Out] =
     endpoint.outErrors[JobFailure](
@@ -25,6 +27,7 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.UnknownSession](Status.NotFound),
       ErrorCase[JobFailure.Busy](Status.Conflict),
       ErrorCase[JobFailure.EmptySession.type](Status.BadRequest),
+      ErrorCase[JobFailure.BadCursor.type](Status.BadRequest),
       ErrorCase[JobFailure.Harness](Status.BadGateway),
     )
 
@@ -60,11 +63,21 @@ private[mcp] object Jobs:
       .mcp("resume")
 
   private val exportLog =
-    fallible(Endpoint.post("sessions" / "export").in[SessionJob].out[Log])
+    fallible(Endpoint.post("sessions" / "export").in[ExportJob].out[Log])
       .name("export")
-      .summary("Return the retained log")
+      .summary("Return the retained log. after is exclusive. cursor is the last retained index.")
       .hints(Hint.ReadOnly)
       .mcp("export")
+
+  private val followSummary =
+    "Stream the retained log from the start, or strictly after an index. The event id is that index. " +
+      "Dropping the stream does not stop the turn."
+
+  private val follow =
+    fallible(Endpoint.get("sessions" / string("session") / "events").query[Option[Long]]("after"))
+      .name("follow")
+      .summary(followSummary)
+      .stream[WireEvent]
 
   private val cancel =
     fallible(Endpoint.post("sessions" / "cancel").in[SessionJob].out[Stopped])
@@ -100,13 +113,35 @@ private[mcp] object Jobs:
     for
       id     <- sessionOf(job.session)
       events <- terret.resume(id).map(WireEvent.from).runCollect.mapError(JobFailure.from)
-    yield Log(job.session, events)
+    yield Log(job.session, events, cursor(events.length))
 
-  private def exported(terret: Terret, job: SessionJob): IO[JobFailure, Log] =
+  private def exported(terret: Terret, job: ExportJob): IO[JobFailure, Log] =
     for
-      id  <- sessionOf(job.session)
-      log <- terret.transcript(id).mapError(JobFailure.from)
-    yield Log(log.session.value, log.events.map(WireEvent.from))
+      _    <- bounded(job.after)
+      id   <- sessionOf(job.session)
+      page <- terret.page(id, job.after).mapError(JobFailure.from)
+    yield Log(job.session, page.events.map(entry => WireEvent.from(entry.event)), page.cursor)
+
+  private def followed(
+      terret: Terret,
+      in: (String, Option[Long]),
+  ): IO[JobFailure, ZStream[Any, JobFailure, Observed[WireEvent]]] =
+    val (raw, after) = in
+    for
+      _  <- bounded(after)
+      id <- sessionOf(raw)
+      _  <- terret.status(id).mapError(JobFailure.from)
+    yield terret.follow(id, after).mapError(JobFailure.from).map { entry =>
+      Observed(SseField.of(entry.index), WireEvent.from(entry.event))
+    }
+
+  private def bounded(after: Option[Long]): IO[JobFailure, Unit] =
+    after match
+      case Some(n) if n < 0 => ZIO.fail(JobFailure.BadCursor)
+      case _                => ZIO.unit
+
+  private def cursor(length: Int): Option[Long] =
+    if length == 0 then None else Some(length.toLong - 1)
 
   private def stop(terret: Terret, job: SessionJob): IO[JobFailure, Stopped] =
     for

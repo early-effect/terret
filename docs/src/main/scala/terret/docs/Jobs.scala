@@ -21,8 +21,13 @@ A host attaches to six jobs: `open`, `run`, `status`, `resume`, `export`, and `c
 running. The turn keeps going if that call is cancelled. `status` is the poll: it stays `Running`
 until the turn ends, and then it carries the outcome. `resume` replays the retained log and does
 not send a prompt. `export` returns that log, including whatever has been retained while the turn
-is still running. The Scala method is `transcript`, because `export` is a keyword. `cancel` is the
-only stop.
+is still running. The Scala method is `transcript`, because `export` is a keyword. `export` takes an
+optional `after` and returns `cursor`, the last retained index, or nothing when the log is empty.
+`after` is exclusive. `cancel` is the only stop.
+
+`follow` is a subscription, not a seventh job. A host listens with MCP `subscriptions/listen`, or
+opens `GET /sessions/{session}/events` as server-sent events. The event id is the log index. Send
+that id back as `after` to continue strictly after it. Closing the stream does not cancel the turn.
 
 An empty server version is rejected before the catalog is built.
 """,
@@ -33,10 +38,22 @@ An empty server version is rejected before the catalog is built.
           session <- Terret.make(memory, TerretConfig(PermissionPolicy.Closed, None), Hooks.identity)
         yield TerretMcp
           .api(session, ProcessConfig.local.version)
-          .map(_.ops.map(_.endpoint.doc.toolName).toSet)
+          .map { api =>
+            (
+              api.ops.map(_.endpoint.doc.toolName).toSet,
+              api.subscriptions.map(_.subscription.doc.toolName).toSet,
+            )
+          }
       }
     }.assert { built =>
-      assertTrue(built == Right(Set("open", "run", "status", "resume", "export", "cancel")))
+      assertTrue(
+        built == Right(
+          (
+            Set("open", "run", "status", "resume", "export", "cancel"),
+            Set("follow"),
+          )
+        )
+      )
     },
     exampleZIO {
       ZIO.scoped {

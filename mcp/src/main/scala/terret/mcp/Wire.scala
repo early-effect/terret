@@ -103,6 +103,7 @@ enum JobFailure derives Schema, JsonCodec:
   case UnknownSession(id: String)
   case Busy(id: String)
   case EmptySession
+  case BadCursor
   case Harness(failure: WireFailure)
 
 object JobFailure:
@@ -121,6 +122,8 @@ final case class RunJob(session: String, prompt: String) derives Schema, JsonCod
 
 final case class SessionJob(session: String) derives Schema, JsonCodec
 
+final case class ExportJob(session: String, after: Option[Long]) derives Schema, JsonCodec
+
 final case class Opened(
     session: String,
     effective: Chunk[Permission],
@@ -133,6 +136,6 @@ final case class RunAccepted(session: String, state: WireState) derives Schema, 
 
 final case class StatusView(session: String, state: WireState) derives Schema, JsonCodec
 
-final case class Log(session: String, events: Chunk[WireEvent]) derives Schema, JsonCodec
+final case class Log(session: String, events: Chunk[WireEvent], cursor: Option[Long]) derives Schema, JsonCodec
 
 final case class Stopped(session: String) derives Schema, JsonCodec

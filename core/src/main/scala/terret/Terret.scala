@@ -8,7 +8,7 @@ import terret.hooks.Hooks
 import terret.permission.Ceiling
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
-import terret.transcript.Transcript
+import terret.transcript.{Entry, Page, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.{Exit, IO, Ref, Scope, UIO, URIO, ZIO, ZLayer}
@@ -57,6 +57,15 @@ final class Terret private (
 
   def transcript(id: SessionId): IO[TerretError, Transcript] =
     require(id) *> harness.transcript(id).mapError(TerretError.Harness(_))
+
+  def page(id: SessionId, after: Option[Long]): IO[TerretError, Page] =
+    require(id) *> harness.page(id, after).mapError(TerretError.Harness(_))
+
+  /** Stays open across turns. Interrupting this stream does not cancel the harness. */
+  def follow(id: SessionId, after: Option[Long]): ZStream[Any, TerretError, Entry] =
+    ZStream.fromZIO(require(id)).flatMap { _ =>
+      harness.follow(id, after).mapError(TerretError.Harness(_))
+    }
 
   def status(id: SessionId): IO[TerretError, Session] =
     require(id)

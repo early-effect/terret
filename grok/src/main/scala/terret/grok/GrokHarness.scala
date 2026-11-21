@@ -6,11 +6,11 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
-import terret.transcript.{Retain, Transcript}
+import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.stream.ZStream
-import zio.{Chunk, IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
+import zio.{IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
 
 final class GrokHarness private (
     config: GrokConfig,
@@ -19,6 +19,7 @@ final class GrokHarness private (
     scope: Scope,
     sessions: Ref[Map[SessionId, GrokHarness.Slot]],
     gates: Ref[Map[SessionId, Promise[HarnessFailure, Unit]]],
+    journal: Journal,
 ) extends Harness:
 
   def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
@@ -43,15 +44,26 @@ final class GrokHarness private (
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
       require(id).flatMap { slot =>
-        slot.pipe match
-          case Some(pipe) if slot.events.isEmpty =>
-            reload(id, slot, pipe).map(stream => Retain.coalesce(stream)(append(id, _)).tap(append(id, _)))
-          case _ => ZIO.succeed(ZStream.fromChunk(slot.events))
+        journal.isEmpty(id).flatMap { empty =>
+          slot.pipe match
+            case Some(pipe) if empty =>
+              reload(id, slot, pipe).map(stream => Retain.coalesce(stream)(append(id, _)).tap(append(id, _)))
+            case _ => journal.events(id).map(ZStream.fromChunk(_))
+        }
       }
     }
 
   def transcript(id: SessionId): IO[HarnessFailure, Transcript] =
-    require(id).map(slot => Transcript(id, slot.events))
+    require(id) *> journal.events(id).map(Transcript(id, _))
+
+  def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry] =
+    ZStream.unwrap(require(id).as(journal.follow(id, after)))
+
+  def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page] =
+    require(id) *> journal.page(id, after).flatMap {
+      case Some(found) => ZIO.succeed(found)
+      case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
+    }
 
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     require(id).flatMap { slot =>
@@ -68,6 +80,7 @@ final class GrokHarness private (
         .fromEither(SessionId.from(uuid.toString))
         .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
       names <- Ref.make(Map.empty[String, ToolName])
+      _     <- journal.open(id)
       _     <- sessions.update(_.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names)))
     yield id
 
@@ -78,6 +91,7 @@ final class GrokHarness private (
         result <- handshake(pipe, workspace, ceiling).tapError(_ => pipe.close)
         id     <- ZIO.fromEither(AcpEvents.sessionId(result)).mapError(HarnessFailure.Protocol(_))
         names  <- Ref.make(Map.empty[String, ToolName])
+        _      <- journal.open(id)
         _      <- sessions.update(
           _.updated(id, GrokHarness.Slot.empty(workspace, ceiling, policy, names).copy(pipe = Some(pipe), nextId = 3))
         )
@@ -160,11 +174,7 @@ final class GrokHarness private (
     }
 
   private def append(id: SessionId, event: Event): UIO[Unit] =
-    sessions.update { rows =>
-      rows.get(id) match
-        case None       => rows
-        case Some(slot) => rows.updated(id, slot.copy(events = slot.events :+ event))
-    }
+    journal.append(id, event)
 
   private def require(id: SessionId): IO[HarnessFailure, GrokHarness.Slot] =
     sessions.get.map(_.get(id)).flatMap {
@@ -178,7 +188,6 @@ object GrokHarness:
       workspace: Workspace,
       ceiling: Ceiling,
       policy: PermissionPolicy,
-      events: Chunk[Event],
       prompted: Boolean,
       pipe: Option[RpcPipe],
       nextId: Int,
@@ -192,14 +201,15 @@ object GrokHarness:
         policy: PermissionPolicy,
         names: Ref[Map[String, ToolName]],
     ): Slot =
-      Slot(workspace, ceiling, policy, Chunk.empty, prompted = false, pipe = None, nextId = 1, names)
+      Slot(workspace, ceiling, policy, prompted = false, pipe = None, nextId = 1, names)
 
   def make(config: GrokConfig, spawner: Spawner, acp: AcpOpen): ZIO[Scope, Nothing, GrokHarness] =
     for
       scope    <- ZIO.scope
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-    yield GrokHarness(config, spawner, acp, scope, sessions, gates)
+      journal  <- Journal.make
+    yield GrokHarness(config, spawner, acp, scope, sessions, gates, journal)
 
   def layer(config: GrokConfig): ZLayer[Scope, Nothing, Harness] =
     ZLayer.scoped {
