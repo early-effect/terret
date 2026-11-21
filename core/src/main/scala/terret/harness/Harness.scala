@@ -7,7 +7,7 @@ import terret.session.SessionId
 import terret.transcript.{Entry, Page, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
-import zio.IO
+import zio.{IO, UIO}
 
 trait Harness:
   def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId]
@@ -17,3 +17,7 @@ trait Harness:
   def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry]
   def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page]
   def cancel(id: SessionId): IO[HarnessFailure, Unit]
+
+  /** Release every child this harness still owns. Idempotent. */
+  def close: UIO[Unit]
+end Harness

@@ -79,6 +79,11 @@ final class InMemory private (
       }
     }
 
+  def close: UIO[Unit] =
+    sessions.get.flatMap { rows =>
+      ZIO.foreachDiscard(rows.keys)(id => cancel(id).ignore)
+    }
+
   private def slot(id: SessionId): IO[HarnessFailure, InMemory.Slot] =
     sessions.get.map(_.get(id)).flatMap {
       case Some(found) => ZIO.succeed(found)

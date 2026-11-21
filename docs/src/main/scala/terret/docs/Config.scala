@@ -1,7 +1,16 @@
 package terret.docs
 
 import specular.*
-import terret.app.{Listen, ProcessConfig, ProcessError, ProcessHarness, WarpLocal}
+import terret.app.{
+  Listen,
+  ProcessConfig,
+  ProcessError,
+  ProcessHarness,
+  ServiceConfig,
+  ServiceError,
+  SupervisorChoice,
+  WarpLocal,
+}
 import terret.dsh.DshConfig
 import terret.grok.{AcpBind, GrokConfig, GrokTransport}
 import terret.workspace.WorkspaceError
@@ -25,6 +34,12 @@ are rejected.
 
 An empty version is rejected. A relative root is rejected. The packaged process does not spawn
 `grok agent serve`. It connects to a serve the user already started.
+
+`supervisor` is `launchd`, `foreground`, or `none`. `none` is the default: restart does not call a
+service manager. `launchd` reads `launchd.labels` and `launchd.plistDir`. There is no built-in job
+label. `foreground` reads `foreground.command`, one executable path. The server writes `pidFile`
+when it starts. Restart waits use `restart.pace`, `restart.exit`, `restart.port`, and
+`restart.listen`.
 """,
     exampleValue(ProcessConfig.local.harness).assert { harness =>
       assertTrue(harness == ProcessHarness.Grok(GrokConfig.stdio))
@@ -68,6 +83,12 @@ An empty version is rejected. A relative root is rejected. The packaged process 
     },
     exampleValue(ProcessConfig.load(base.copy(writeRoots = Some("work")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
+    },
+    exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
+      assertTrue(supervisor == Right(SupervisorChoice.None))
+    },
+    exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw.copy(supervisor = "launchd"))).assert { loaded =>
+      assertTrue(loaded == Left(ServiceError.LabelsMissing))
     },
   )
 

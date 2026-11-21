@@ -168,6 +168,26 @@ Warp's local agent reads `.warp/.mcp.json` from the project or from the home dir
 
 The docs pages are DocSpecs. The index tells why Terret exists, how to run the app module (`terret.app.Main`), and the install coordinates. `./histos test` proves the snippets and builds the site. The Early Effect theme brands the pages. The catalog names specular-histos. `services` turns the site on. The pages say latest stable. `.libraryShip` writes the shipped revision into the install lines. A push to `main` publishes `target/site` to GitHub Pages at `/terret`. A pull request does not deploy.
 
+## Restart
+
+The running process and the thing that restarts it are different. Shutdown belongs to the server. Restart belongs to a supervisor. The core never hears the name launchctl.
+
+`Harness.close` releases children the adapter still owns. `Terret.shutdown` cancels every open session, joins that session's turn so a scoped child is destroyed, then closes the harness. On ACP that close sends `session/cancel` and closes the pipe, which destroys the agent process. On dsh it releases the turn, which destroys the child. SIGTERM interrupts the server fiber. `Process.listen` runs shutdown with `ensuring` while its scope is still open, then the scope closes the socket. A scope finalizer must not join a fiber forked into that same scope.
+
+`terret restart` is `./histos run app -- restart`. `Restart` is plain ZIO over three services:
+
+| Service | What it answers | Live layer |
+| --- | --- | --- |
+| `Supervisor` | `stop`, `start`, `running` | `TERRET_SUPERVISOR` |
+| `Liveness` | has the recorded process exited | the pid file the server writes at startup |
+| `PortProbe` | is the port free, is it listening | a bind, then a connect |
+
+`none` is the default supervisor. `stop` and `start` succeed and touch nothing, so a restart without configuration does not bootout a job. `foreground` starts and destroys one executable from `TERRET_FOREGROUND_COMMAND`. `launchd` is `LaunchdSupervisor`, and it is the only code that runs launchctl or reads a plist path. Labels are `TERRET_LAUNCHD_LABELS` and the directory is `TERRET_LAUNCHD_PLISTDIR`. There is no built-in label. A later systemd layer implements the same trait.
+
+The waits are `Schedule.spaced` composed with `Schedule.recurUntil`, bounded by `Schedule.upTo`. A timeout names the step: process exit, a free port, or listening. The limits are `TERRET_RESTART_EXIT`, `TERRET_RESTART_PORT`, and `TERRET_RESTART_LISTEN`. The pace is `TERRET_RESTART_PACE`. The server's pid file is `TERRET_PIDFILE`. Liveness compares the pid and its start instant, so a reused pid is not the old server. It does not call `launchctl print`: bootout can report the job gone while the process still holds the port.
+
+The hand-written `~/.local/bin` scripts map onto that supervisor, and stay where they are. `terret-off` is `stop`: `launchctl bootout` then `launchctl disable` for each label. A bootout of a job that is already out is ignored. `terret-on` is `start`: `launchctl enable`, then `launchctl bootstrap` of `<plistDir>/<label>.plist`, then `launchctl kickstart` if bootstrap fails. The scripts pass `rocks.earlyeffect.terret` and `rocks.earlyeffect.terret-tunnel`, with plists in `~/Library/LaunchAgents`. Those two strings are configuration, listed server first. The tunnel is another label stopped and started with the server. The pid wait and the port wait are about the server. `terret-serve` is what the plist runs. Restart does not rewrite the plist or the scripts.
+
 ## Later
 
 The dsh headless protocol is specified above. Any later harness implements the same core traits. The MCP jobs should not change when a new adapter lands.

@@ -11,7 +11,7 @@ import terret.session.{Session, SessionId, SessionState}
 import terret.transcript.{Entry, Page, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
-import zio.{Exit, IO, Ref, Scope, UIO, URIO, ZIO, ZLayer}
+import zio.{Exit, Fiber, IO, Ref, Scope, UIO, URIO, ZIO, ZLayer}
 
 final class Terret private (
     harness: Harness,
@@ -19,13 +19,14 @@ final class Terret private (
     hooks: Hooks,
     sessions: Ref[Map[SessionId, Terret.Held]],
     scope: Scope,
+    closed: Ref[Boolean],
 ):
   def open(workspace: Workspace, requested: Ceiling = Ceiling.all): IO[TerretError, Session] =
     confine(workspace).flatMap { _ =>
       val (effective, dropped) = requested.clamp(config.policy.ceiling)
       harness.open(workspace, effective, config.policy).mapError(TerretError.Harness(_)).flatMap { id =>
         val session = Session(id, workspace, effective, dropped, SessionState.Open)
-        sessions.update(_.updated(id, Terret.Held(session, 0L))).as(session)
+        sessions.update(_.updated(id, Terret.Held(session, 0L, None))).as(session)
       }
     }
 
@@ -44,7 +45,18 @@ final class Terret private (
             // forkIn copies this uninterruptible region onto the fiber. An uninterruptible
             // drain ignores scope close, and the close waits forever. The drain sets its own
             // interrupt status. The fork stays in this region, so the launch is not the hole.
-            drain.interruptible.forkIn(scope).as(session)
+            drain.interruptible.forkIn(scope).flatMap { fiber =>
+              sessions
+                .modify { rows =>
+                  rows.get(session.id) match
+                    case Some(held) => (false, rows.updated(session.id, held.copy(turn = Some(fiber))))
+                    case None       => (true, rows)
+                }
+                .flatMap {
+                  case true  => fiber.interrupt.as(session)
+                  case false => ZIO.succeed(session)
+                }
+            }
           }
           .tapError(_ => child.close(Exit.unit))
       }
@@ -72,6 +84,18 @@ final class Terret private (
 
   def cancel(id: SessionId): IO[TerretError, Unit] =
     require(id) *> halt(id).mapError(TerretError.Harness(_))
+
+  /** Cancel every session, wait for its turn to finish, then close harness children. */
+  def shutdown: UIO[Unit] =
+    closed.modify(already => (already, true)).flatMap {
+      case true  => ZIO.unit
+      case false =>
+        sessions.get.flatMap { rows =>
+          ZIO.foreachDiscard(rows) { (id, held) =>
+            halt(id).ignore *> ZIO.foreachDiscard(held.turn)(_.interrupt)
+          }
+        } *> harness.close
+    }
 
   private def acquire(
       id: SessionId,
@@ -119,12 +143,12 @@ final class Terret private (
         rows.get(id) match
           case None =>
             (Left(TerretError.UnknownSession(id)), rows)
-          case Some(Terret.Held(session, _)) if session.state == SessionState.Running =>
+          case Some(Terret.Held(session, _, _)) if session.state == SessionState.Running =>
             (Left(TerretError.Busy(id)), rows)
-          case Some(Terret.Held(session, epoch)) =>
+          case Some(Terret.Held(session, epoch, turn)) =>
             val running = session.copy(state = SessionState.Running)
             val next    = epoch + 1
-            (Right((running, session.state, next)), rows.updated(id, Terret.Held(running, next)))
+            (Right((running, session.state, next)), rows.updated(id, Terret.Held(running, next, turn)))
       }
       .flatMap(ZIO.fromEither)
 
@@ -155,8 +179,8 @@ final class Terret private (
   private def setIfRunning(id: SessionId, epoch: Long, state: SessionState): UIO[Boolean] =
     sessions.modify { rows =>
       rows.get(id) match
-        case Some(Terret.Held(current, `epoch`)) if current.state == SessionState.Running =>
-          (true, rows.updated(id, Terret.Held(current.copy(state = state), epoch)))
+        case Some(held @ Terret.Held(current, `epoch`, _)) if current.state == SessionState.Running =>
+          (true, rows.updated(id, held.copy(session = current.copy(state = state))))
         case _ =>
           (false, rows)
     }
@@ -177,13 +201,14 @@ final class Terret private (
 end Terret
 
 object Terret:
-  private final case class Held(session: Session, epoch: Long)
+  private final case class Held(session: Session, epoch: Long, turn: Option[Fiber[TerretError, Unit]])
 
   def make(harness: Harness, config: TerretConfig, hooks: Hooks): URIO[Scope, Terret] =
     for
       sessions <- Ref.make(Map.empty[SessionId, Held])
       scope    <- ZIO.scope
-    yield Terret(harness, config, hooks, sessions, scope)
+      closed   <- Ref.make(false)
+    yield Terret(harness, config, hooks, sessions, scope, closed)
 
   val layer: ZLayer[Harness & TerretConfig & Hooks, Nothing, Terret] =
     ZLayer.scoped {
