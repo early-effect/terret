@@ -18,8 +18,11 @@ object AcpOpen:
           val argv = Launch.stdio(config, policy, ceiling)
           for
             spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, workspace))(_.destroy)
-            _       <- Spawner.drain(spawned.stderr).forkScoped
-          yield LineRpc(LinePipe.streams(spawned.stdout, spawned.stdin), spawned.destroy)
+            // stderr's read ignores interruption. Do not join it from this scope.
+            drain <- Spawner.drain(spawned.stderr).forkDaemon
+            _     <- ZIO.addFinalizer(drain.interruptFork)
+            pipe  <- LineRpc.make(LinePipe.streams(spawned.stdout, spawned.stdin), spawned.destroy)
+          yield pipe
         case GrokTransport.AcpWebSocket =>
           config.bind match
             case None       => ZIO.fail(HarnessFailure.Protocol(ProtocolFault.BindMissing))
@@ -37,7 +40,11 @@ object AcpOpen:
         ),
         "terminal" -> Json.Bool(false),
       ),
-      "clientInfo" -> Json.Obj("name" -> Json.Str("terret"), "title" -> Json.Str("Terret")),
+      "clientInfo" -> Json.Obj(
+        "name"    -> Json.Str("terret"),
+        "title"   -> Json.Str("Terret"),
+        "version" -> Json.Str("0"),
+      ),
     )
 
   def sessionNew(config: GrokConfig, workspace: Workspace): Json =

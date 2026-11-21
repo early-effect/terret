@@ -92,6 +92,40 @@ object AcpEventsSpec extends ZIOSpecDefault:
         AcpEvents.fromUpdate(unnamed) == Right(Chunk.empty),
       )
     },
+    test("a rejected update keeps the host refusal ahead of the agent text") {
+      val callId   = "call-029c85f7-8643-4cc5-a332-5c5ecaa190e8-0"
+      val seen     = Map(callId -> ToolName("run_terminal_command"))
+      val refusals = Map(callId -> "run_terminal_command needs WriteWorkspace")
+      LiveBodies.json("tool-call-failed.json").map { failed =>
+        val reason = "run_terminal_command needs WriteWorkspace"
+        assertTrue(
+          CallId
+            .from(callId)
+            .fold(
+              _ => false,
+              id =>
+                AcpEvents.fromUpdate(failed, seen, refusals) == Right(
+                  (
+                    seen,
+                    Chunk(Event.ToolUpdated(ToolCall(id, ToolName("run_terminal_command"), Json.Str(reason)))),
+                  )
+                ),
+            )
+        )
+      }
+    },
+    test("a recorded stop ignores cancellationCategory") {
+      for
+        ended     <- LiveBodies.json("stop-end.json")
+        cancelled <- LiveBodies.json("stop-cancelled.json")
+      yield assertTrue(
+        AcpEvents.stop(ended) == Right(TurnOutcome.Completed),
+        AcpEvents.stop(cancelled) == Right(
+          TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))
+        ),
+        AcpEvents.stop(cancelled, hostCancelled = true) == Right(TurnOutcome.Cancelled),
+      )
+    },
     test("stop reasons and session ids stay typed") {
       assertTrue(
         AcpEvents.stop(Json.Obj("stopReason" -> Json.Str("cancelled"))) == Right(

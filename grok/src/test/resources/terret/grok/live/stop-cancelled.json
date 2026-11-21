@@ -1,0 +1,10 @@
+{
+  "stopReason": "cancelled",
+  "_meta": {
+    "cancellationCategory": "PermissionRejected",
+    "cancellationContext": {
+      "tool_name": "run_terminal_command",
+      "reason": "User rejected the execution"
+    }
+  }
+}

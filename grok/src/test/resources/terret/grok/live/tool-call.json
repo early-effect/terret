@@ -1,0 +1,9 @@
+{
+  "sessionUpdate": "tool_call",
+  "toolCallId": "call-57c13523-c289-4650-b466-44fc96e26cf1-0",
+  "title": "run_terminal_command",
+  "rawInput": {
+    "command": "echo hi | tee out.txt",
+    "description": "Echo hi and write it to out.txt"
+  }
+}

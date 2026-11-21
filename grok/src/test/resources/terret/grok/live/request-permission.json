@@ -1,0 +1,35 @@
+{
+  "toolCall": {
+    "toolCallId": "call-57c13523-c289-4650-b466-44fc96e26cf1-0",
+    "kind": "execute",
+    "title": "Execute `echo hi | tee out.txt`",
+    "rawInput": {
+      "variant": "Bash",
+      "command": "echo hi | tee out.txt",
+      "description": "Echo hi and write it to out.txt",
+      "is_background": false
+    }
+  },
+  "options": [
+    {
+      "optionId": "always-allow",
+      "name": "Yes, and don't ask again for bash commands",
+      "kind": "allow_always"
+    },
+    {
+      "optionId": "allow-once",
+      "name": "Yes, proceed",
+      "kind": "allow_once"
+    },
+    {
+      "optionId": "reject-once",
+      "name": "No, and tell Grok what to do differently",
+      "kind": "reject_once"
+    },
+    {
+      "optionId": "reject-always",
+      "name": "No, and don't ask again for this command",
+      "kind": "reject_always"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 package terret.grok
 
 import heddle.LinePipe
-import terret.event.{Event, ToolName}
+import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
@@ -9,8 +9,8 @@ import terret.session.SessionId
 import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
 import terret.workspace.Workspace
 import zio.json.ast.Json
-import zio.stream.ZStream
-import zio.{Chunk, IO, Promise, Random, Ref, Scope, UIO, ZIO, ZLayer}
+import zio.stream.{Take, ZStream}
+import zio.{Chunk, IO, Promise, Queue, Random, Ref, Scope, UIO, ZIO, ZLayer}
 
 final class GrokHarness private (
     config: GrokConfig,
@@ -31,14 +31,11 @@ final class GrokHarness private (
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
       require(id).flatMap { slot =>
-        Promise.make[HarnessFailure, Unit].flatMap { gate =>
-          gates.update(_.updated(id, gate)).as {
-            Retain
-              .coalesce(turn(id, slot, prompt).interruptWhen(gate))(append(id, _))
-              .tap(append(id, _))
-              .ensuring(gates.update(_.removed(id)))
-          }
-        }
+        for
+          gate     <- Promise.make[HarnessFailure, Unit]
+          finished <- Ref.make(false)
+          _        <- gates.update(_.updated(id, gate))
+        yield watched(id, slot, prompt, gate, finished).ensuring(gates.update(_.removed(id)))
       }
     }
 
@@ -118,6 +115,52 @@ final class GrokHarness private (
       _      <- pipe.write(Wire.request(2, "session/new", AcpOpen.sessionNew(config, workspace)))
       result <- AcpTurn.await(pipe, 2)
     yield result
+
+  // The producer is what offers the end marker. Joining it from the consumer that marker
+  // resumes deadlocks, so the scope only signals interruption and does not wait.
+  private def watched(
+      id: SessionId,
+      slot: GrokHarness.Slot,
+      prompt: Prompt,
+      gate: Promise[HarnessFailure, Unit],
+      finished: Ref[Boolean],
+  ): ZStream[Any, HarnessFailure, Event] =
+    ZStream.unwrapScoped {
+      for
+        queue <- Queue.unbounded[Take[HarnessFailure, Event]]
+        fiber <- turnEvents(id, slot, prompt, gate)
+          .runForeach { event =>
+            ZIO.whenCase(event) { case Event.TurnFinished(_) => finished.set(true) } *>
+              queue.offer(Take.single(event)).unit
+          }
+          .catchAllCause { cause =>
+            slot.hostCancel.get.flatMap {
+              case true  => ZIO.unit
+              case false => queue.offer(Take.failCause(cause)).unit
+            }
+          }
+          .ensuring {
+            finished.get.zip(slot.hostCancel.get).flatMap { (done, cancelled) =>
+              if !done && cancelled then
+                val event = Event.TurnFinished(TurnOutcome.Cancelled)
+                append(id, event) *> queue.offer(Take.single(event)).unit
+              else ZIO.unit
+            } *> queue.offer(Take.end)
+          }
+          .forkDaemon
+        _ <- ZIO.addFinalizer(fiber.interruptFork)
+      yield ZStream.fromQueue(queue).flattenTake
+    }
+
+  private def turnEvents(
+      id: SessionId,
+      slot: GrokHarness.Slot,
+      prompt: Prompt,
+      gate: Promise[HarnessFailure, Unit],
+  ): ZStream[Any, HarnessFailure, Event] =
+    Retain
+      .coalesce(turn(id, slot, prompt).interruptWhen(gate))(append(id, _))
+      .tap(append(id, _))
 
   private def turn(id: SessionId, slot: GrokHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     slot.pipe match

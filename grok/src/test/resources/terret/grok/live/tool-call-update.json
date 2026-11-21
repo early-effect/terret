@@ -1,0 +1,11 @@
+{
+  "sessionUpdate": "tool_call_update",
+  "toolCallId": "call-57c13523-c289-4650-b466-44fc96e26cf1-0",
+  "status": "completed",
+  "rawOutput": {
+    "type": "Bash",
+    "output": [104, 105, 10],
+    "exit_code": 0,
+    "command": "echo hi | tee out.txt"
+  }
+}

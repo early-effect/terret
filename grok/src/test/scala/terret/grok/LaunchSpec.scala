@@ -114,25 +114,25 @@ object LaunchSpec extends ZIOSpecDefault:
       assertTrue(
         argv.rendered == Chunk(
           "grok",
-          "agent",
           "--permission-mode",
           "default",
           "--disallowed-tools",
           "search_tool,use_tool",
+          "agent",
           "stdio",
         )
       )
     },
-    test("stdio flags sit between agent and the mode") {
+    test("stdio flags sit before the agent subcommand") {
       val argv = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Closed, Ceiling.closed)
       assertTrue(
         argv.rendered == Chunk(
           "grok",
-          "agent",
           "--permission-mode",
           "default",
           "--disallowed-tools",
           closed,
+          "agent",
           "stdio",
         )
       )

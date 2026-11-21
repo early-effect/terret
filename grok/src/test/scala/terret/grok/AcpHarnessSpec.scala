@@ -50,16 +50,16 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           root   <- workspace
           id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
           _      <- harness.prompt(id, Prompt("hello")).runDrain
-          record <- awaitSeen(seen)(_.payloads.exists(option(_, "allow-once")))
-        yield assertTrue(record.payloads.exists(option(_, "allow-once")))
+          record <- awaitSeen(seen)(_.payloads.exists(option(_, "always-allow")))
+        yield assertTrue(record.payloads.exists(option(_, "always-allow")))
       }
     },
     test("a workspace write is allowed when both grants are present") {
       val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
       shell("echo hi > out.txt").flatMap { (harness, seen) =>
-        turn(harness, seen, ceiling, "allow-once").flatMap { (got, record) =>
+        turn(harness, seen, ceiling, "always-allow").flatMap { (got, record) =>
           assertTrue(
-            record.payloads.exists(option(_, "allow-once")),
+            record.payloads.exists(option(_, "always-allow")),
             finished(got, TurnOutcome.Completed),
             got.exists {
               case Event.ToolUpdated(call) => call.input == Json.Obj("stdout" -> Json.Str("hi"))
@@ -73,7 +73,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
       val run     = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       shell("echo hi | tee out.txt").flatMap { (harness, seen) =>
-        turn(harness, seen, ceiling, "allow-once").flatMap { (got, _) =>
+        turn(harness, seen, ceiling, "always-allow").flatMap { (got, _) =>
           shell("echo hi | tee out.txt").flatMap { (narrow, denied) =>
             turn(narrow, denied, run, "reject-once").map { (refused, record) =>
               assertTrue(
@@ -102,7 +102,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           ZIO.fromEither(Workspace.from("/tmp")).orDieWith(_ => new IllegalArgumentException("workspace")).flatMap {
             scratch =>
               shell(command, Chunk(scratch)).flatMap { (opened, allowedSeen) =>
-                turn(opened, allowedSeen, ceiling, "allow-once").map { (allowed, record) =>
+                turn(opened, allowedSeen, ceiling, "always-allow").map { (allowed, record) =>
                   assertTrue(
                     refused.exists {
                       case Event.ToolUpdated(call) =>
@@ -111,7 +111,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
                           case _              => false
                       case _ => false
                     },
-                    record.payloads.exists(option(_, "allow-once")),
+                    record.payloads.exists(option(_, "always-allow")),
                     finished(allowed, TurnOutcome.Completed),
                   )
                 }
@@ -123,8 +123,8 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     test("a redirect to /dev/null does not need WriteWorkspace") {
       val run = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       shell("echo hi > /dev/null").flatMap { (harness, seen) =>
-        turn(harness, seen, run, "allow-once").map { (_, record) =>
-          assertTrue(record.payloads.exists(option(_, "allow-once")))
+        turn(harness, seen, run, "always-allow").map { (_, record) =>
+          assertTrue(record.payloads.exists(option(_, "always-allow")))
         }
       }
     },
@@ -146,6 +146,10 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           got.exists {
             case Event.Thought("hmm") => true
             case _                    => false
+          },
+          got.exists {
+            case Event.TurnFinished(TurnOutcome.Cancelled) => true
+            case _                                         => false
           },
           record.methods.contains("session/cancel"),
         )
@@ -179,9 +183,10 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       for
         ends <- LinePipe.connected
         (client, agentEnd) = ends
-        _ <- shellTalk(agentEnd, seen, promptId, command).forkScoped
-        _ <- ZIO.addFinalizer(agentEnd.close *> client.close)
-      yield LineRpc(client, client.close)
+        _    <- shellTalk(agentEnd, seen, promptId, command).forkScoped
+        _    <- ZIO.addFinalizer(agentEnd.close *> client.close)
+        pipe <- LineRpc.make(client, client.close)
+      yield pipe
 
   private def shellTalk(
       agent: LinePipe,
@@ -222,7 +227,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         seen.update(found => found.copy(payloads = found.payloads :+ result)) *>
           promptId.get.flatMap {
             case Some(id) =>
-              val allowed = option(result, "allow-once")
+              val allowed = option(result, "always-allow") || option(result, "allow-once")
               promptId.set(None) *>
                 send(agent, if allowed then shellOutput else shellFailed) *>
                 send(agent, Wire.ok(id, Json.Obj("stopReason" -> Json.Str("end_turn"))))
@@ -247,6 +252,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       ),
     )
 
+  private val recordedOptions = Json.Arr(
+    Json.Obj("optionId" -> Json.Str("always-allow"), "kind"  -> Json.Str("allow_always")),
+    Json.Obj("optionId" -> Json.Str("allow-once"), "kind"    -> Json.Str("allow_once")),
+    Json.Obj("optionId" -> Json.Str("reject-once"), "kind"   -> Json.Str("reject_once")),
+    Json.Obj("optionId" -> Json.Str("reject-always"), "kind" -> Json.Str("reject_always")),
+  )
+
   private def shellPermission(command: String): Json =
     Wire.request(
       Json.Str("perm-9"),
@@ -257,10 +269,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           "kind"       -> Json.Str("execute"),
           "rawInput"   -> Json.Obj("command" -> Json.Str(command)),
         ),
-        "options" -> Json.Arr(
-          Json.Obj("optionId" -> Json.Str("allow-once"), "kind"  -> Json.Str("allow_once")),
-          Json.Obj("optionId" -> Json.Str("reject-once"), "kind" -> Json.Str("reject_once")),
-        ),
+        "options" -> recordedOptions,
       ),
     )
 
@@ -317,9 +326,10 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       for
         ends <- LinePipe.connected
         (client, agentEnd) = ends
-        _ <- talk(agentEnd, seen, cancelled, reply).forkScoped
-        _ <- ZIO.addFinalizer(agentEnd.close *> client.close)
-      yield LineRpc(client, client.close)
+        _    <- talk(agentEnd, seen, cancelled, reply).forkScoped
+        _    <- ZIO.addFinalizer(agentEnd.close *> client.close)
+        pipe <- LineRpc.make(client, client.close)
+      yield pipe
 
   private def talk(
       agent: LinePipe,
@@ -416,10 +426,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       Json.Obj(
         "toolCall" -> Json
           .Obj("toolCallId" -> Json.Str("call_1"), "title" -> Json.Str("Edit"), "kind" -> Json.Str("edit")),
-        "options" -> Json.Arr(
-          Json.Obj("optionId" -> Json.Str("allow-once"), "kind"  -> Json.Str("allow_once")),
-          Json.Obj("optionId" -> Json.Str("reject-once"), "kind" -> Json.Str("reject_once")),
-        ),
+        "options" -> recordedOptions,
       ),
     )
 

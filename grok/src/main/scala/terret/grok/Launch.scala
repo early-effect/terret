@@ -28,7 +28,7 @@ object Launch:
     )
 
   def stdio(config: GrokConfig, policy: PermissionPolicy, ceiling: Ceiling): Argv =
-    Argv(config.command, Chunk("agent") ++ flags(config, policy, ceiling) ++ Chunk("stdio"))
+    Argv(config.command, flags(config, policy, ceiling) ++ Chunk("agent", "stdio"))
 
   def flags(config: GrokConfig, policy: PermissionPolicy, ceiling: Ceiling): Chunk[String] =
     val always =

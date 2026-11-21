@@ -73,6 +73,20 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         edit == PermissionAnswer.Refused("reject-once", "call_1", "edit writes /etc/passwd, outside the workspace"),
       )
     },
+    test("a recorded shell permission uses the live option ids") {
+      for
+        params  <- LiveBodies.json("request-permission.json")
+        allowed <- checked(PermissionPolicy.Clamp(both), both, params)
+        denied  <- checked(PermissionPolicy.Clamp(commands), commands, params)
+      yield assertTrue(
+        allowed == PermissionAnswer.Selected("always-allow"),
+        denied == PermissionAnswer.Refused(
+          "reject-once",
+          "call-57c13523-c289-4650-b466-44fc96e26cf1-0",
+          "run_terminal_command needs WriteWorkspace",
+        ),
+      )
+    },
     test("a missing matching option cancels") {
       val allowOnly = Json.Obj(
         "toolCall" -> Json.Obj("kind" -> Json.Str("edit")),

@@ -42,14 +42,16 @@ object ToolEvent:
     val raw = payload(obj, started)
     if started || raw != Json.Null then decode(raw)
     else
-      JsonFields.field(obj, "content").flatMap(JsonFields.text).filter(_.nonEmpty).orElse(refusal) match
+      refusal
+        .filter(_.nonEmpty)
+        .orElse(JsonFields.field(obj, "content").flatMap(JsonFields.text).filter(_.nonEmpty)) match
         case Some(text) => Json.Str(text)
         case None       =>
           if failed(obj) then Json.Obj("status" -> Json.Str("failed")) else Json.Null
 
   private def payload(obj: Json.Obj, started: Boolean): Json =
     if started then JsonFields.field(obj, "rawInput").getOrElse(Json.Obj())
-    else JsonFields.field(obj, "rawOutput").orElse(JsonFields.field(obj, "rawInput")).getOrElse(Json.Obj())
+    else JsonFields.field(obj, "rawOutput").orElse(JsonFields.field(obj, "rawInput")).getOrElse(Json.Null)
 
   private def failed(obj: Json.Obj): Boolean =
     JsonFields.str(obj, "status").contains("failed")
