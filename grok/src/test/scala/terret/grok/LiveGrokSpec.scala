@@ -10,14 +10,15 @@ import zio.test.*
 import zio.durationInt
 import zio.{Chunk, ZIO}
 
-import java.io.{FileOutputStream, InputStream, OutputStream}
+import java.io.{InputStream, OutputStream}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util.{Comparator, UUID}
 
 object LiveGrokSpec extends ZIOSpecDefault:
+  private[grok] val parallelBound: Int = 2
+
   private lazy val scratch = repoRoot(Path.of("").toAbsolutePath).resolve(Path.of("target", "live-grok"))
-  private lazy val wireLog = scratch.resolve("wire.log")
   private lazy val outside = scratch.resolve("outside")
   private val granted      = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
   private val shell        = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
@@ -30,7 +31,7 @@ object LiveGrokSpec extends ZIOSpecDefault:
     val gated = suite("live grok")(
       test("open over ACP returns the agent session") {
         ZIO.scoped {
-          session(Ceiling.closed, PermissionPolicy.Closed).map { (_, _, id) =>
+          session(Ceiling.closed, PermissionPolicy.Closed).map { (_, _, id, _) =>
             assertTrue(id.value.nonEmpty)
           }
         }
@@ -38,8 +39,8 @@ object LiveGrokSpec extends ZIOSpecDefault:
       test("a granted shell write finishes and the file exists") {
         ZIO.scoped {
           for
-            (root, harness, id) <- session(granted, PermissionPolicy.Clamp(granted))
-            events              <- harness.prompt(id, Prompt(write)).runCollect
+            (root, harness, id, _) <- session(granted, PermissionPolicy.Clamp(granted))
+            events                 <- harness.prompt(id, Prompt(write)).runCollect
             out = root.path.resolve("out.txt")
             exists <- ZIO.attemptBlocking(Files.exists(out))
             text   <- ZIO.attemptBlocking(if exists then Files.readString(out) else "")
@@ -54,8 +55,8 @@ object LiveGrokSpec extends ZIOSpecDefault:
       test("cancel ends the turn as Cancelled") {
         ZIO.scoped {
           for
-            (_, harness, id) <- session(shell, PermissionPolicy.Clamp(shell))
-            fiber            <- harness
+            (_, harness, id, _) <- session(shell, PermissionPolicy.Clamp(shell))
+            fiber               <- harness
               .prompt(id, Prompt("sleep 60"))
               .runCollect
               .fork
@@ -68,20 +69,20 @@ object LiveGrokSpec extends ZIOSpecDefault:
       test("a read-only prompt completes") {
         ZIO.scoped {
           for
-            (_, harness, id) <- session(Ceiling.closed, PermissionPolicy.Closed)
-            events           <- harness.prompt(id, Prompt(quiet)).runCollect
+            (_, harness, id, _) <- session(Ceiling.closed, PermissionPolicy.Closed)
+            events              <- harness.prompt(id, Prompt(quiet)).runCollect
           yield assertTrue(finished(events, TurnOutcome.Completed), !started(events))
         }
       } @@ TestAspect.timeout(3.minutes),
       test("a refused outside write names the path and the turn completes") {
         ZIO.scoped {
           for
-            probe            <- fresh(outside.resolve("tee.txt"))
-            (_, harness, id) <- session(granted, PermissionPolicy.Clamp(granted))
-            events           <- harness.prompt(id, Prompt(s"echo hi | tee $probe")).runCollect
-            followed         <- harness.prompt(id, Prompt(quiet)).runCollect
-            exported         <- harness.transcript(id)
-            exists           <- ZIO.attemptBlocking(Files.exists(probe))
+            probe               <- fresh(outside.resolve(s"tee-${UUID.randomUUID}.txt"))
+            (_, harness, id, _) <- session(granted, PermissionPolicy.Clamp(granted))
+            events              <- harness.prompt(id, Prompt(s"echo hi | tee $probe")).runCollect
+            followed            <- harness.prompt(id, Prompt(quiet)).runCollect
+            exported            <- harness.transcript(id)
+            exists              <- ZIO.attemptBlocking(Files.exists(probe))
           yield assertTrue(
             !exists,
             endings(events) == Chunk(TurnOutcome.Completed),
@@ -93,9 +94,9 @@ object LiveGrokSpec extends ZIOSpecDefault:
       test("a running command reports only new output") {
         ZIO.scoped {
           for
-            (_, harness, id) <- session(shell, PermissionPolicy.Clamp(shell))
-            events           <- harness.prompt(id, Prompt(ticking)).runCollect
-            exported         <- harness.transcript(id)
+            (_, harness, id, _) <- session(shell, PermissionPolicy.Clamp(shell))
+            events              <- harness.prompt(id, Prompt(ticking)).runCollect
+            exported            <- harness.transcript(id)
           yield assertTrue(
             endings(events) == Chunk(TurnOutcome.Completed),
             lengths(events).exists(_.size >= 2) || lengths(exported.events).exists(_.size >= 2),
@@ -117,18 +118,18 @@ object LiveGrokSpec extends ZIOSpecDefault:
         }
       } @@ TestAspect.tag("mcp-optin") @@ TestAspect.timeout(4.minutes),
     ).when(LiveGate.current == LiveGate.Decision.Ready)
-    gated @@ TestAspect.beforeAll(prepare) @@ TestAspect.sequential @@ TestAspect.withLiveClock
+    gated @@ TestAspect.beforeAll(prepare) @@ TestAspect.parallelN(parallelBound) @@ TestAspect.withLiveClock
 
   private[grok] val ungrantedWrite =
     test("an ungranted write names the missing grant and the session continues") {
       ZIO.scoped {
         for
-          (root, harness, id) <- session(shell, PermissionPolicy.Clamp(shell))
-          before              <- wireSize
-          events              <- harness.prompt(id, Prompt(write)).runCollect
-          permissionRequested <- askedSince(before)
-          followed            <- harness.prompt(id, Prompt(quiet)).runCollect
-          exported            <- harness.transcript(id)
+          (root, harness, id, wire) <- session(shell, PermissionPolicy.Clamp(shell))
+          before                    <- wire.size
+          events                    <- harness.prompt(id, Prompt(write)).runCollect
+          permissionRequested       <- wire.askedSince(before)
+          followed                  <- harness.prompt(id, Prompt(quiet)).runCollect
+          exported                  <- harness.transcript(id)
           out = root.path.resolve("out.txt")
           exists <- ZIO.attemptBlocking(Files.exists(out))
         yield (assertTrue(permissionRequested) ?? "model never attempted the tool") &&
@@ -145,13 +146,13 @@ object LiveGrokSpec extends ZIOSpecDefault:
     test("a heredoc write outside the workspace is refused on the tool update and the turn completes") {
       ZIO.scoped {
         for
-          dir                 <- freshDir(outside.resolve("heredoc"))
-          (_, harness, id)    <- session(granted, PermissionPolicy.Clamp(granted))
-          before              <- wireSize
-          events              <- harness.prompt(id, Prompt(heredoc(dir))).runCollect
-          permissionRequested <- askedSince(before)
-          followed            <- harness.prompt(id, Prompt(quiet)).runCollect
-          exported            <- harness.transcript(id)
+          dir                    <- freshDir(outside.resolve(s"heredoc-${UUID.randomUUID}"))
+          (_, harness, id, wire) <- session(granted, PermissionPolicy.Clamp(granted))
+          before                 <- wire.size
+          events                 <- harness.prompt(id, Prompt(heredoc(dir))).runCollect
+          permissionRequested    <- wire.askedSince(before)
+          followed               <- harness.prompt(id, Prompt(quiet)).runCollect
+          exported               <- harness.transcript(id)
           written = dir.resolve("Probe.java")
           exists <- ZIO.attemptBlocking(Files.exists(written))
         yield (assertTrue(permissionRequested) ?? "model never attempted the tool") &&
@@ -169,22 +170,22 @@ object LiveGrokSpec extends ZIOSpecDefault:
     ZIO
       .attemptBlocking {
         Files.createDirectories(outside)
-        Files.deleteIfExists(wireLog)
       }
       .orDie
       .unit
 
   private def session(ceiling: Ceiling, policy: PermissionPolicy) =
     for
+      wire <- WireLog.make(scratch)
       dir  <- ZIO.acquireRelease(freshRepo)(deleteTree)
       root <- ZIO
         .fromEither(Workspace.from(dir.toString))
         .orDieWith(_ => new IllegalArgumentException("workspace"))
-      log <- ZIO.acquireRelease(ZIO.attemptBlocking(new FileOutputStream(wireLog.toFile, true)).orDie)(closeLog)
+      log <- wire.open
       spawner = tee(Spawner.jdk, log)
       harness <- GrokHarness.make(GrokConfig.stdio, spawner, AcpOpen.live(GrokConfig.stdio, spawner))
       id      <- harness.open(root, ceiling, policy)
-    yield (root, harness, id)
+    yield (root, harness, id, wire)
 
   private val histosVersion =
     "Call use_tool with tool_name histos__version and an empty object as tool_input. Then reply with the single word done."
@@ -201,11 +202,8 @@ object LiveGrokSpec extends ZIOSpecDefault:
       root <- ZIO
         .fromEither(Workspace.from(dir.toString))
         .orDieWith(_ => new IllegalArgumentException("workspace"))
-      log <- ZIO.acquireRelease(ZIO.attemptBlocking {
-        Files.createDirectories(scratch)
-        Files.deleteIfExists(mcpWire)
-        new FileOutputStream(mcpWire.toFile)
-      }.orDie)(closeLog)
+      wire <- WireLog.make(scratch)
+      log  <- wire.open
       spawner = teeBoth(Spawner.jdk, log)
       harness <- GrokHarness.make(
         GrokConfig.stdio,
@@ -215,9 +213,7 @@ object LiveGrokSpec extends ZIOSpecDefault:
         catalog = McpCatalog.live,
       )
       id <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-    yield (harness, id, mcpWire)
-
-  private lazy val mcpWire = scratch.resolve("mcp-wire.log")
+    yield (harness, id, wire.file)
 
   private def advertised(path: Path): ZIO[Any, Nothing, Boolean] =
     ZIO.attemptBlocking {
@@ -303,19 +299,6 @@ object LiveGrokSpec extends ZIOSpecDefault:
   private def hex(nibble: Int): Char =
     val code = if nibble < 10 then '0' + nibble else 'A' + (nibble - 10)
     code.toChar
-
-  private def wireSize: ZIO[Any, Nothing, Long] =
-    ZIO.attemptBlocking(if Files.exists(wireLog) then Files.size(wireLog) else 0L).orDie
-
-  private def askedSince(offset: Long): ZIO[Any, Nothing, Boolean] =
-    ZIO.attemptBlocking {
-      if !Files.exists(wireLog) then false
-      else
-        val bytes = Files.readAllBytes(wireLog)
-        val start = math.max(0L, math.min(offset, bytes.length.toLong)).toInt
-        new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8)
-          .contains("session/request_permission")
-    }.orDie
 
   private def fresh(path: Path): ZIO[Any, Nothing, Path] =
     ZIO.attemptBlocking {
@@ -419,9 +402,6 @@ object LiveGrokSpec extends ZIOSpecDefault:
           while paths.hasNext do Files.deleteIfExists(paths.next())
         finally walk.close()
     }.ignore
-
-  private def closeLog(out: OutputStream): ZIO[Any, Nothing, Unit] =
-    ZIO.attemptBlocking(out.close()).ignore
 
   private def tee(inner: Spawner, log: OutputStream): Spawner = new:
     def spawn(command: String, args: Chunk[String], cwd: Workspace) =

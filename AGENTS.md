@@ -6,7 +6,7 @@ Run only the tests a change touches.
 
 `./histos test <project> --only <suite>` selects suites by name. `--tag <name>` keeps a test that carries that exact tag. `--test <term>` keeps a test whose label contains the term. `--quick` skips a suite whose stamp still matches, and it is not a full proof.
 
-Do not run `LiveGrokSpec` or `LiveRefusalSpec` as a whole, including before a push. A live case that must run alone carries a tag. The MCP opt-in smoke is `mcp-optin`.
+Do not run `LiveGrokSpec` or `LiveRefusalSpec` as a whole, including before a push. A live case that must run alone carries a tag. The MCP opt-in smoke is `mcp-optin`. Those suites run at most 2 cases at a time. Each case owns its wire log and its probe files. `--only` and `--tag` still select.
 
 This histos copies `CI` and `GITHUB_ACTIONS` into the test process. `LiveGate` skips the live suite when either is set.
 
