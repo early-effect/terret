@@ -29,7 +29,7 @@ object CliLine:
           case Some("plan")             => Right((seen, plan(obj)))
           case Some("end")              =>
             val reason = JsonFields.str(obj, "stopReason").getOrElse("")
-            Right((seen, Chunk(Event.TurnFinished(Stop.outcome(reason, Stop.category(obj))))))
+            Right((seen, Chunk(Event.TurnFinished(Stop.outcome(reason)))))
           case Some("error") =>
             Right(
               (

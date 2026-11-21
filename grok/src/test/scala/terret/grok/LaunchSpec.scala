@@ -15,7 +15,7 @@ object LaunchSpec extends ZIOSpecDefault:
   )
 
   def spec = suite("Launch")(
-    test("a closed ask prompt passes dontAsk and the deny list, and grants nothing") {
+    test("a closed ask prompt passes default mode and the deny list") {
       val argv =
         Launch.cli(GrokConfig.cli, id, Prompt("hello"), resume = false, PermissionPolicy.Closed, Ceiling.closed)
       assertTrue(
@@ -28,11 +28,12 @@ object LaunchSpec extends ZIOSpecDefault:
           "--output-format",
           "streaming-json",
           "--permission-mode",
-          "dontAsk",
+          "default",
           "--disallowed-tools",
           closed,
         ),
         !argv.args.contains("--allow"),
+        !argv.args.contains("dontAsk"),
       )
     },
     test("a later prompt resumes that session") {
@@ -59,7 +60,7 @@ object LaunchSpec extends ZIOSpecDefault:
         deny(argv).exists(names => names.contains("run_terminal_command") && names.contains("run_terminal_cmd")),
       )
     },
-    test("a command ceiling grants the shell and the editors and does not deny them") {
+    test("a command ceiling keeps the shell and does not pre-approve it") {
       val argv =
         Launch.cli(GrokConfig.cli, id, Prompt("go"), resume = false, PermissionPolicy.Clamp(commands), commands)
       val names = deny(argv).getOrElse("")
@@ -72,17 +73,13 @@ object LaunchSpec extends ZIOSpecDefault:
           id.value,
           "--output-format",
           "streaming-json",
-          "--allow",
-          "Edit",
-          "--allow",
-          "Write",
-          "--allow",
-          "Bash",
           "--permission-mode",
-          "dontAsk",
+          "default",
           "--disallowed-tools",
           "image_edit,image_gen,image_to_video,reference_to_video,search_tool,use_tool,web_fetch,web_search",
         ),
+        !argv.args.contains("--allow"),
+        !argv.args.contains("dontAsk"),
         !names.contains("run_terminal_command"),
         !names.contains("search_replace"),
         !names.contains("write"),

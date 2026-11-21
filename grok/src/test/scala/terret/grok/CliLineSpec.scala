@@ -48,16 +48,8 @@ object CliLineSpec extends ZIOSpecDefault:
           Chunk(Event.TurnFinished(TurnOutcome.Completed))
         ),
         CliLine.parse("""{"type":"end","stopReason":"cancelled"}""") == Right(
-          Chunk(Event.TurnFinished(TurnOutcome.Cancelled))
+          Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))))
         ),
-        CliLine.parse("""{"type":"end","stopReason":"cancelled","cancellationCategory":"permission_cancelled"}""") ==
-          Right(
-            Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))))
-          ),
-        CliLine.parse("""{"type":"end","stopReason":"cancelled","cancellation_category":"PermissionRejected"}""") ==
-          Right(
-            Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))))
-          ),
         CliLine.parse("""{"type":"end","stopReason":"refusal"}""") == Right(
           Chunk(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Refused))))
         ),
@@ -93,6 +85,19 @@ object CliLineSpec extends ZIOSpecDefault:
           Chunk.empty
         ),
       )
+    },
+    test("a failed update keeps its content when the output is null") {
+      val lines = List(
+        """{"type":"tool_call","toolCallId":"call_1","toolName":"run_terminal_command","rawInput":{"command":"echo hi > out.txt"}}""",
+        """{"type":"tool_call_update","toolCallId":"call_1","status":"failed","rawOutput":null,"content":[{"type":"text","text":"User cancelled"}]}""",
+      )
+      val started = ToolCall(
+        CallId("call_1"),
+        ToolName("run_terminal_command"),
+        Json.Obj("command" -> Json.Str("echo hi > out.txt")),
+      )
+      val failed = ToolCall(CallId("call_1"), ToolName("run_terminal_command"), Json.Str("User cancelled"))
+      assertTrue(replay(lines) == Right(Chunk(Event.ToolStarted(started), Event.ToolUpdated(failed))))
     },
     test("a null update records a name and emits nothing") {
       val lines = List(

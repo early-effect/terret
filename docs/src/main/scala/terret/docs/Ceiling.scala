@@ -15,9 +15,10 @@ cap, and the session records what was dropped.
 `WriteWorkspace`, `RunCommands`, and `Network`. A workspace outside the configured root is
 rejected. An unset root means the opened workspace is its own root.
 
-On the Grok CLI transport the ceiling is launch flags. `Closed` and `Clamp` do not leave a prompt
-for a person to answer. A ceiling without `RunCommands` removes the shell, including both names
-Grok uses for it.
+On Grok, `Ask` under `Closed` or `Clamp` is ACP stdio. The ceiling removes every tool it does not
+grant, and terret answers `session/request_permission`. A shell write needs `RunCommands` and
+`WriteWorkspace`, and the target has to sit in the session workspace or a `writeRoots` path. A
+ceiling without `RunCommands` removes the shell, including both names Grok uses for it.
 """,
     exampleValue(PermissionPolicy.Closed.ceiling).assert { cap =>
       assertTrue(cap.allow == Set(Permission.ReadWorkspace))

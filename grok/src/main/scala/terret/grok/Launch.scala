@@ -36,27 +36,16 @@ object Launch:
     policy match
       case PermissionPolicy.Inherit => always
       case _                        =>
-        // The CLI has no prompter. dontAsk refuses what was not granted instead of cancelling the turn.
         val mode =
-          if config.approval != GrokApproval.Ask then Chunk.empty
-          else if config.transport == GrokTransport.Cli then Chunk("--permission-mode", "dontAsk")
-          else Chunk("--permission-mode", "default")
-        val grants = allowFlags(config, ceiling)
-        val tools  = denied(ceiling)
-        val deny   =
+          if config.approval == GrokApproval.Ask then Chunk("--permission-mode", "default") else Chunk.empty
+        val tools = denied(ceiling)
+        val deny  =
           if tools.isEmpty then Chunk.empty else Chunk("--disallowed-tools", tools.mkString(","))
-        always ++ grants ++ mode ++ deny
+        always ++ mode ++ deny
 
   def denied(ceiling: Ceiling): Chunk[String] =
     val names = gates.filterNot(gate => ceiling.allow.contains(gate.permission)).flatMap(_.deny) ++ ungoverned
     Chunk.fromIterable(names.distinct.sorted)
-
-  private def allowFlags(config: GrokConfig, ceiling: Ceiling): Chunk[String] =
-    if config.transport != GrokTransport.Cli || config.approval != GrokApproval.Ask then Chunk.empty
-    else allows(ceiling).flatMap(rule => Chunk("--allow", rule))
-
-  private def allows(ceiling: Ceiling): Chunk[String] =
-    gates.filter(gate => ceiling.allow.contains(gate.permission)).flatMap(_.allow)
 
   // Ids and the names the model sees both have to be listed. Grok removes a tool by either spelling.
   private val commandTools = Chunk(
@@ -91,11 +80,11 @@ object Launch:
   private val ungoverned = Chunk("search_tool", "use_tool")
 
   private val gates = Chunk(
-    Gate(Permission.ReadWorkspace, Chunk("grep", "list_dir", "read_file"), Chunk.empty),
-    Gate(Permission.WriteWorkspace, Chunk("search_replace", "write"), Chunk("Edit", "Write")),
-    Gate(Permission.RunCommands, commandTools, Chunk("Bash")),
-    Gate(Permission.Network, networkTools, Chunk("WebFetch", "WebSearch")),
+    Gate(Permission.ReadWorkspace, Chunk("grep", "list_dir", "read_file")),
+    Gate(Permission.WriteWorkspace, Chunk("search_replace", "write")),
+    Gate(Permission.RunCommands, commandTools),
+    Gate(Permission.Network, networkTools),
   )
 
-  private final case class Gate(permission: Permission, deny: Chunk[String], allow: Chunk[String])
+  private final case class Gate(permission: Permission, deny: Chunk[String])
 end Launch

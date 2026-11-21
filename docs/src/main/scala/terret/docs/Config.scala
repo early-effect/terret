@@ -17,14 +17,17 @@ Keys live under `terret`. `listen` is `http` or `stdio`. `policy` is `Closed`, `
 `harness` is `grok` or `dsh`. The default is `grok`. An unset `command` follows the harness.
 `profile` belongs to dsh and defaults to `headless`. A profile on grok is rejected. `transport`
 (`Cli`, `AcpStdio`, or `AcpWebSocket`), `approval` (`Ask` or `Always`), and the bind triple belong
-to grok. Setting them on dsh is rejected. `Ask` is the default. A socket transport needs `bindHost`,
-`bindPort`, and `bindSecret`. Bind fields on any other transport are rejected.
+to grok. Setting them on dsh is rejected. `Ask` is the default. Under `Closed` or `Clamp`, an omitted
+transport is `AcpStdio`, and an explicit `Cli` is rejected. `Inherit` keeps `Cli`. `writeRoots` is an
+optional comma-separated list of absolute paths a shell write may use besides the session workspace.
+A socket transport needs `bindHost`, `bindPort`, and `bindSecret`. Bind fields on any other transport
+are rejected.
 
 An empty version is rejected. A relative root is rejected. The packaged process does not spawn
 `grok agent serve`. It connects to a serve the user already started.
 """,
     exampleValue(ProcessConfig.local.harness).assert { harness =>
-      assertTrue(harness == ProcessHarness.Grok(GrokConfig.cli))
+      assertTrue(harness == ProcessHarness.Grok(GrokConfig.stdio))
     },
     exampleValue(GrokConfig.stdio.transport).assert { transport =>
       assertTrue(transport == GrokTransport.AcpStdio)
@@ -50,7 +53,7 @@ An empty version is rejected. A relative root is rejected. The packaged process 
     exampleValue(
       ProcessConfig
         .load(base.copy(harness = "dsh", command = None, profile = None, transport = None, approval = None))
-        .map(_.harness),
+        .map(_.harness)
     ).assert { harness =>
       assertTrue(harness == Right(ProcessHarness.Dsh(DshConfig.headless)))
     },
@@ -59,6 +62,12 @@ An empty version is rejected. A relative root is rejected. The packaged process 
     },
     exampleValue(ProcessConfig.load(base.copy(harness = "dsh"))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.GrokKeys))
+    },
+    exampleValue(ProcessConfig.load(base.copy(transport = Some("Cli")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.CliAsk))
+    },
+    exampleValue(ProcessConfig.load(base.copy(writeRoots = Some("work")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
     },
   )
 
@@ -73,7 +82,7 @@ An empty version is rejected. A relative root is rejected. The packaged process 
     harness = "grok",
     command = Some("grok"),
     profile = None,
-    transport = Some("Cli"),
+    transport = Some("AcpStdio"),
     approval = Some("Ask"),
     bindHost = None,
     bindPort = None,

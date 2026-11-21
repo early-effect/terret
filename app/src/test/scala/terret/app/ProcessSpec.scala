@@ -91,6 +91,24 @@ object ProcessSpec extends ZIOSpecDefault:
         unknown == Left(ProcessError.Harness("codex")),
       )
     },
+    test("ask under a ceiling uses stdio, and an explicit cli ask is refused") {
+      val omitted   = ProcessConfig.load(defaults.copy(transport = None))
+      val explicit  = ProcessConfig.load(defaults)
+      val inherited = ProcessConfig.load(defaults.copy(policy = "Inherit", transport = None))
+      val roots     = ProcessConfig.load(defaults.copy(transport = None, writeRoots = Some("work")))
+      val scratch   = ProcessConfig.load(defaults.copy(transport = None, writeRoots = Some("/tmp")))
+      assertTrue(
+        omitted.map(_.harness) == Right(ProcessHarness.Grok(terret.grok.GrokConfig.stdio)),
+        explicit == Left(ProcessError.CliAsk),
+        inherited.map(_.harness) == Right(ProcessHarness.Grok(terret.grok.GrokConfig.cli)),
+        roots == Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
+        scratch.map(_.writeRoots) == terret.workspace.Workspace
+          .from("/tmp")
+          .map(root => zio.Chunk(root))
+          .left
+          .map(ProcessError.Workspace(_)),
+      )
+    },
     test("an empty version and a relative root are refused") {
       val empty    = ProcessConfig.load(defaults.copy(version = ""))
       val relative = ProcessConfig.load(defaults.copy(root = Some("work")))

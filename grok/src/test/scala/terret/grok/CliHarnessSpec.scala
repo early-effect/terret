@@ -2,7 +2,7 @@ package terret.grok
 
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.{HarnessFailure, ProtocolFault}
-import terret.permission.{Ceiling, Permission, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.workspace.Workspace
 import zio.json.ast.Json
@@ -130,32 +130,36 @@ object CliHarnessSpec extends ZIOSpecDefault:
         )
       }
     },
-    test("RunCommands pre-approves the shell, and a read ceiling reports a permission cancel") {
-      val run = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+    test("a cancelled end line is a permission denial unless terret cancelled") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, branching(calls), dead)
-          root    <- workspace
-          running <- harness.open(root, run, PermissionPolicy.Clamp(run))
-          ran     <- harness.prompt(running, Prompt("go")).runCollect
-          closed  <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          stopped <- harness.prompt(closed, Prompt("go")).runCollect
+          calls     <- Ref.make(Chunk.empty[SpawnCall])
+          harness   <- GrokHarness.make(GrokConfig.cli, recording(deniedTurn, 0, calls), dead)
+          root      <- workspace
+          denied    <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          stopped   <- harness.prompt(denied, Prompt("go")).runCollect
+          hosted    <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          _         <- harness.cancel(hosted)
+          cancelled <- harness.prompt(hosted, Prompt("go")).runCollect
         yield assertTrue(
-          ran.exists {
-            case Event.ToolUpdated(call) if call.name == ToolName("run_terminal_command") => true
-            case _                                                                        => false
-          },
-          ran.exists {
-            case Event.TurnFinished(TurnOutcome.Completed) => true
-            case _                                         => false
-          },
           stopped == Chunk(
             Event.ToolStarted(
-              ToolCall(CallId("call_1"), ToolName("run_terminal_command"), Json.Obj("command" -> Json.Str("true")))
+              ToolCall(
+                CallId("call_1"),
+                ToolName("run_terminal_command"),
+                Json.Obj("command" -> Json.Str("echo hi > out.txt")),
+              )
             ),
             Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied))),
           ),
+          cancelled.exists {
+            case Event.TurnFinished(TurnOutcome.Cancelled) => true
+            case _                                         => false
+          },
+          !cancelled.exists {
+            case Event.TurnFinished(TurnOutcome.Failed(_)) => true
+            case _                                         => false
+          },
         )
       }
     },
@@ -179,25 +183,10 @@ object CliHarnessSpec extends ZIOSpecDefault:
     def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =
       ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
 
-  private val approved =
-    """{"type":"tool_call","toolCallId":"call_1","toolName":"run_terminal_command","rawInput":{"command":"true"}}
-      |{"type":"tool_call_update","toolCallId":"call_1","toolName":"run_terminal_command","rawOutput":{"stdout":"ok"}}
-      |{"type":"end","stopReason":"end_turn"}
-      |""".stripMargin
-
   private val deniedTurn =
-    """{"type":"tool_call","toolCallId":"call_1","toolName":"run_terminal_command","rawInput":{"command":"true"}}
-      |{"type":"end","stopReason":"cancelled","cancellationCategory":"permission_cancelled"}
+    """{"type":"tool_call","toolCallId":"call_1","toolName":"run_terminal_command","rawInput":{"command":"echo hi > out.txt"}}
+      |{"type":"end","stopReason":"cancelled"}
       |""".stripMargin
-
-  private def branching(calls: Ref[Chunk[SpawnCall]]): Spawner = new:
-    def spawn(command: String, args: Chunk[String], cwd: Workspace): IO[HarnessFailure, Spawned] =
-      val argv = command +: args
-      val body = if grantsBash(argv) then approved else deniedTurn
-      calls.update(_ :+ SpawnCall(argv, cwd)) *> ZIO.succeed(scripted(body, 0))
-
-  private def grantsBash(argv: Chunk[String]): Boolean =
-    argv.zip(argv.drop(1)).exists((flag, value) => flag == "--allow" && value == "Bash")
 
   private def recording(body: String, code: Int, calls: Ref[Chunk[SpawnCall]]): Spawner = new:
     def spawn(command: String, args: Chunk[String], cwd: Workspace): IO[HarnessFailure, Spawned] =

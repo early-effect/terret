@@ -2,14 +2,13 @@ package terret.grok
 
 import heddle.LinePipe
 import terret.harness.{HarnessFailure, ProtocolFault}
-import terret.permission.{Ceiling, Permission, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.{Scope, ZIO}
 
 trait AcpOpen:
   def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe]
-end AcpOpen
 
 object AcpOpen:
   def live(config: GrokConfig, spawner: Spawner): AcpOpen = new:
@@ -28,15 +27,15 @@ object AcpOpen:
         case GrokTransport.Cli =>
           ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
 
-  def initialize(ceiling: Ceiling): Json =
+  def initialize: Json =
     Json.Obj(
-      "protocolVersion" -> Json.Num(BigDecimal(1)),
+      "protocolVersion"    -> Json.Num(BigDecimal(1)),
       "clientCapabilities" -> Json.Obj(
         "fs" -> Json.Obj(
-          "readTextFile"  -> Json.Bool(ceiling.allow.contains(Permission.ReadWorkspace)),
-          "writeTextFile" -> Json.Bool(ceiling.allow.contains(Permission.WriteWorkspace)),
+          "readTextFile"  -> Json.Bool(false),
+          "writeTextFile" -> Json.Bool(false),
         ),
-        "terminal" -> Json.Bool(ceiling.allow.contains(Permission.RunCommands)),
+        "terminal" -> Json.Bool(false),
       ),
       "clientInfo" -> Json.Obj("name" -> Json.Str("terret"), "title" -> Json.Str("Terret")),
     )
@@ -47,8 +46,7 @@ object AcpOpen:
       "mcpServers" -> Json.Arr(),
     )
     val withMeta =
-      if config.approval == GrokApproval.Always then
-        fields :+ ("_meta" -> Json.Obj("yoloMode" -> Json.Bool(true)))
+      if config.approval == GrokApproval.Always then fields :+ ("_meta" -> Json.Obj("yoloMode" -> Json.Bool(true)))
       else fields
     Json.Obj(withMeta*)
 end AcpOpen
