@@ -1,9 +1,10 @@
 package terret.docs
 
 import specular.*
-import terret.app.{Listen, ProcessConfig, ProcessHarness, WarpLocal}
+import terret.app.{Command, Listen, ProcessConfig, ProcessHarness, WarpLocal}
 import terret.dsh.DshConfig
 import terret.grok.GrokConfig
+import zio.Chunk
 import zio.test.*
 
 /** Why Terret exists, how to run it, and the latest stable coordinate. */
@@ -24,7 +25,12 @@ heddle already owns HTTP and MCP, so Terret does not grow a second tool DSL. It 
 edge: one adapter per harness, then those same jobs promoted through heddle.
 
 From this repository, `./histos test` proves the suites. `./histos run app` listens on
-`http://127.0.0.1:8080/mcp`. The default harness is Grok: command `grok`, transport `AcpStdio`,
+`http://127.0.0.1:8080/mcp`. `./histos run app -- restart` stops the supervised process, waits
+until that process has exited and the port is free, starts it, and returns when the new server is
+listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`, `foreground`, or `none`. `none` is the
+default and does not call a service manager.
+
+The default harness is Grok: command `grok`, transport `AcpStdio`,
 approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses ACP stdio, because
 the CLI transport cannot answer a permission prompt. The ceiling removes every tool it does not
 grant, and terret answers the prompts that remain. A shell write needs `RunCommands` and
@@ -58,6 +64,12 @@ dep"rocks.earlyeffect::terret-app:<terret ship>"
     },
     exampleValue(ProcessConfig.load(dsh).map(_.harness)).assert { harness =>
       assertTrue(harness == Right(ProcessHarness.Dsh(DshConfig.headless)))
+    },
+    exampleValue(Command.parse(Chunk.empty)).assert { parsed =>
+      assertTrue(parsed == Right(Command.Serve))
+    },
+    exampleValue(Command.parse(Chunk("restart"))).assert { parsed =>
+      assertTrue(parsed == Right(Command.Restart))
     },
   )
 

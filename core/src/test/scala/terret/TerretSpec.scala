@@ -338,6 +338,23 @@ object TerretSpec extends ZIOSpecDefault:
         )
       }
     } @@ TestAspect.timeout(10.seconds) @@ TestAspect.withLiveClock,
+    test("shutdown cancels a started turn and closes the harness") {
+      ZIO.scoped {
+        for
+          entered                   <- Promise.make[Nothing, Unit]
+          release                   <- Promise.make[Nothing, Unit]
+          (memory, terret, session) <- opened(holding(entered, release))
+          _                         <- terret.start(session.id, Prompt("stay"))
+          _                         <- entered.await
+          _                         <- terret.shutdown
+          cancelled                 <- memory.cancelled
+          status                    <- terret.status(session.id)
+        yield assertTrue(
+          cancelled.contains(session.id),
+          status.state == SessionState.Ended(TurnOutcome.Cancelled),
+        )
+      }
+    },
     test("the layer opens a session under the closed policy") {
       def program =
         for

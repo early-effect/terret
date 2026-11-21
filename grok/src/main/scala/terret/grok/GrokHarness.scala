@@ -72,6 +72,18 @@ final class GrokHarness private (
         }
     }
 
+  def close: UIO[Unit] =
+    sessions.get.zip(gates.get).flatMap { (rows, open) =>
+      ZIO.foreachDiscard(rows) { (id, slot) =>
+        slot.hostCancel.set(true) *>
+          ZIO.foreachDiscard(open.get(id))(_.succeed(())) *>
+          ZIO.foreachDiscard(slot.pipe) { pipe =>
+            pipe.write(Wire.notify("session/cancel", Json.Obj("sessionId" -> Json.Str(id.value)))).ignore *>
+              pipe.close
+          }
+      }
+    }
+
   private def openCli(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
@@ -301,7 +313,9 @@ object GrokHarness:
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
       journal  <- Journal.make
-    yield GrokHarness(config, spawner, acp, scope, sessions, gates, journal, writeRoots)
+      harness = GrokHarness(config, spawner, acp, scope, sessions, gates, journal, writeRoots)
+      _ <- ZIO.addFinalizer(harness.close)
+    yield harness
 
   def layer(config: GrokConfig, writeRoots: Chunk[Workspace] = Chunk.empty): ZLayer[Scope, Nothing, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer

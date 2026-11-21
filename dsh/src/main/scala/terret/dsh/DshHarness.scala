@@ -64,6 +64,9 @@ final class DshHarness private (
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     require(id) *> gates.get.flatMap(open => ZIO.foreachDiscard(open.get(id))(_.succeed(())))
 
+  def close: UIO[Unit] =
+    gates.get.flatMap(open => ZIO.foreachDiscard(open.values)(_.succeed(())))
+
   private[dsh] def applied(id: SessionId): IO[HarnessFailure, (Ceiling, PermissionPolicy)] =
     require(id).map(slot => (slot.ceiling, slot.policy))
 
