@@ -9,7 +9,7 @@ import zio.test.*
 object LaunchSpec extends ZIOSpecDefault:
   private val id     = SessionId("11111111-1111-1111-1111-111111111111")
   private val closed =
-    "Agent,get_command_or_subagent_output,get_task_output,image_edit,image_gen,image_to_video,kill_command_or_subagent,kill_task,monitor,reference_to_video,run_terminal_cmd,run_terminal_command,scheduler_create,scheduler_delete,scheduler_list,search_replace,search_tool,spawn_subagent,task,use_tool,wait_commands_or_subagents,wait_tasks,web_fetch,web_search,workflow,write"
+    "Agent,WebFetch,WebSearch,get_command_or_subagent_output,get_task_output,image_edit,image_gen,image_to_video,kill_command_or_subagent,kill_task,monitor,reference_to_video,run_terminal_cmd,run_terminal_command,scheduler_create,scheduler_delete,scheduler_list,search_replace,search_tool,spawn_subagent,task,use_tool,wait_commands_or_subagents,wait_tasks,web_fetch,web_search,workflow,write"
   private val commands = Ceiling(
     Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands)
   )
@@ -31,6 +31,7 @@ object LaunchSpec extends ZIOSpecDefault:
           "default",
           "--disallowed-tools",
           closed,
+          "--disable-web-search",
         ),
         !argv.args.contains("--allow"),
         !argv.args.contains("dontAsk"),
@@ -46,6 +47,7 @@ object LaunchSpec extends ZIOSpecDefault:
         !argv.args.contains("--permission-mode"),
         !argv.args.contains("--disallowed-tools"),
         !argv.args.contains("--always-approve"),
+        !argv.args.contains("--disable-web-search"),
         !argv.args.contains("--allow"),
       )
     },
@@ -54,6 +56,7 @@ object LaunchSpec extends ZIOSpecDefault:
       val argv   = Launch.cli(config, id, Prompt("hi"), resume = false, PermissionPolicy.Closed, Ceiling.closed)
       assertTrue(
         argv.args.contains("--always-approve"),
+        argv.args.contains("--disable-web-search"),
         !argv.args.contains("--permission-mode"),
         !argv.args.contains("--allow"),
         argv.args.contains(closed),
@@ -76,7 +79,8 @@ object LaunchSpec extends ZIOSpecDefault:
           "--permission-mode",
           "default",
           "--disallowed-tools",
-          "image_edit,image_gen,image_to_video,reference_to_video,search_tool,use_tool,web_fetch,web_search",
+          "WebFetch,WebSearch,image_edit,image_gen,image_to_video,reference_to_video,search_tool,use_tool,web_fetch,web_search",
+          "--disable-web-search",
         ),
         !argv.args.contains("--allow"),
         !argv.args.contains("dontAsk"),
@@ -107,6 +111,7 @@ object LaunchSpec extends ZIOSpecDefault:
         !argv.args.contains("dontAsk"),
         !argv.args.contains("--allow"),
         deny(argv).exists(names => !names.contains("run_terminal_command") && names.contains("web_fetch")),
+        argv.args.contains("--disable-web-search"),
       )
     },
     test("a clamp of every permission asks and denies only the ungoverned tools") {
@@ -132,6 +137,7 @@ object LaunchSpec extends ZIOSpecDefault:
           "default",
           "--disallowed-tools",
           closed,
+          "--disable-web-search",
           "agent",
           "stdio",
         )

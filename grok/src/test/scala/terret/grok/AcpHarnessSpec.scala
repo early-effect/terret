@@ -50,16 +50,16 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           root   <- workspace
           id     <- harness.open(root, Ceiling.all, PermissionPolicy.Inherit)
           _      <- harness.prompt(id, Prompt("hello")).runDrain
-          record <- awaitSeen(seen)(_.payloads.exists(option(_, "always-allow")))
-        yield assertTrue(record.payloads.exists(option(_, "always-allow")))
+          record <- awaitSeen(seen)(_.payloads.exists(option(_, "allow-once")))
+        yield assertTrue(record.payloads.exists(option(_, "allow-once")))
       }
     },
     test("a workspace write is allowed when both grants are present") {
       val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
       shell("echo hi > out.txt").flatMap { (harness, seen) =>
-        turn(harness, seen, ceiling, "always-allow").flatMap { (got, record) =>
+        turn(harness, seen, ceiling, "allow-once").flatMap { (got, record) =>
           assertTrue(
-            record.payloads.exists(option(_, "always-allow")),
+            record.payloads.exists(option(_, "allow-once")),
             finished(got, TurnOutcome.Completed),
             got.exists {
               case Event.ToolUpdated(call) => call.input == Json.Obj("stdout" -> Json.Str("hi"))
@@ -73,12 +73,13 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
       val run     = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       shell("echo hi | tee out.txt").flatMap { (harness, seen) =>
-        turn(harness, seen, ceiling, "always-allow").flatMap { (got, _) =>
+        turn(harness, seen, ceiling, "allow-once").flatMap { (got, _) =>
           shell("echo hi | tee out.txt").flatMap { (narrow, denied) =>
             turn(narrow, denied, run, "reject-once").map { (refused, record) =>
               assertTrue(
                 finished(got, TurnOutcome.Completed),
                 record.payloads.exists(option(_, "reject-once")),
+                record.payloads.exists(followup(_, "clamped by server policy")),
                 refused.exists {
                   case Event.ToolUpdated(call) =>
                     call.input match
@@ -102,7 +103,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           ZIO.fromEither(Workspace.from("/tmp")).orDieWith(_ => new IllegalArgumentException("workspace")).flatMap {
             scratch =>
               shell(command, Chunk(scratch)).flatMap { (opened, allowedSeen) =>
-                turn(opened, allowedSeen, ceiling, "always-allow").map { (allowed, record) =>
+                turn(opened, allowedSeen, ceiling, "allow-once").map { (allowed, record) =>
                   assertTrue(
                     refused.exists {
                       case Event.ToolUpdated(call) =>
@@ -111,7 +112,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
                           case _              => false
                       case _ => false
                     },
-                    record.payloads.exists(option(_, "always-allow")),
+                    record.payloads.exists(option(_, "allow-once")),
                     finished(allowed, TurnOutcome.Completed),
                   )
                 }
@@ -123,8 +124,8 @@ object AcpHarnessSpec extends ZIOSpecDefault:
     test("a redirect to /dev/null does not need WriteWorkspace") {
       val run = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       shell("echo hi > /dev/null").flatMap { (harness, seen) =>
-        turn(harness, seen, run, "always-allow").map { (_, record) =>
-          assertTrue(record.payloads.exists(option(_, "always-allow")))
+        turn(harness, seen, run, "allow-once").map { (_, record) =>
+          assertTrue(record.payloads.exists(option(_, "allow-once")))
         }
       }
     },
@@ -459,6 +460,14 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         ),
       ),
     )
+
+  private def followup(json: Json, needle: String): Boolean =
+    json match
+      case obj: Json.Obj =>
+        JsonFields.field(obj, "_meta").flatMap(JsonFields.obj) match
+          case Some(meta) => JsonFields.str(meta, "followup_message").exists(_.contains(needle))
+          case None       => false
+      case _ => false
 
   private def option(json: Json, optionId: String): Boolean =
     json match

@@ -31,9 +31,13 @@ object PermissionChoice:
 
   def body(answer: PermissionAnswer): Json =
     answer match
-      case PermissionAnswer.Selected(optionId)      => selected(optionId)
-      case PermissionAnswer.Refused(optionId, _, _) => selected(optionId)
-      case PermissionAnswer.Cancelled               =>
+      case PermissionAnswer.Selected(optionId)           => selected(optionId)
+      case PermissionAnswer.Refused(optionId, _, reason) =>
+        Json.Obj(
+          "outcome" -> Json.Obj("outcome" -> Json.Str("selected"), "optionId" -> Json.Str(optionId)),
+          "_meta"   -> Json.Obj("followup_message" -> Json.Str(reason)),
+        )
+      case PermissionAnswer.Cancelled =>
         Json.Obj("outcome" -> Json.Obj("outcome" -> Json.Str("cancelled")))
 
   private def selected(optionId: String): Json =
@@ -50,31 +54,35 @@ object PermissionChoice:
     policy match
       case PermissionPolicy.Inherit => Decision.Allow
       case _                        =>
-        normalize(kind) match
-          case "read" | "search" | "grep" | "glob" =>
-            grant(ceiling, Permission.ReadWorkspace, label(tool, kind))
-          case "edit" | "write" | "delete" | "move" | "rename" =>
-            guarded(
-              ceiling,
-              Permission.WriteWorkspace,
-              label(tool, kind),
-              locations(tool),
-              cwd(tool, workspace),
-              roots(workspace, writeRoots),
-            )
-          case "execute" | "bash" | "terminal" =>
-            shell(ceiling, tool, workspace, writeRoots)
-          case "think" | "thought" => Decision.Allow
-          case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
+        if networkKind(kind) || webTool(tool) then grant(policy, ceiling, Permission.Network, label(tool, kind))
+        else
+          normalize(kind) match
+            case "read" | "search" | "grep" | "glob" =>
+              grant(policy, ceiling, Permission.ReadWorkspace, label(tool, kind))
+            case "edit" | "write" | "delete" | "move" | "rename" =>
+              guarded(
+                policy,
+                ceiling,
+                Permission.WriteWorkspace,
+                label(tool, kind),
+                locations(tool),
+                cwd(tool, workspace),
+                roots(workspace, writeRoots),
+              )
+            case "execute" | "bash" | "terminal" =>
+              shell(policy, ceiling, tool, workspace, writeRoots)
+            case "think" | "thought" => Decision.Allow
+            case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
 
   private def shell(
+      policy: PermissionPolicy,
       ceiling: Ceiling,
       tool: Json.Obj,
       workspace: Workspace,
       writeRoots: Chunk[Workspace],
   ): Decision =
     val name = label(tool, "execute")
-    if !ceiling.allow.contains(Permission.RunCommands) then Decision.Deny(s"$name needs RunCommands")
+    if !ceiling.allow.contains(Permission.RunCommands) then Decision.Deny(missing(policy, Permission.RunCommands, name))
     else
       val effect  = command(tool).fold(ShellEffect.Opaque)(ShellWrite.effect)
       val located = locations(tool)
@@ -83,7 +91,8 @@ object PermissionChoice:
         case ShellEffect.Writes(_) => true
         case ShellEffect.Opaque    => true
       if !writing then Decision.Allow
-      else if !ceiling.allow.contains(Permission.WriteWorkspace) then Decision.Deny(s"$name needs WriteWorkspace")
+      else if !ceiling.allow.contains(Permission.WriteWorkspace) then
+        Decision.Deny(missing(policy, Permission.WriteWorkspace, name))
       else
         val targets = effect match
           case ShellEffect.Writes(paths) => paths ++ located
@@ -95,6 +104,7 @@ object PermissionChoice:
           case None       => Decision.Allow
 
   private def guarded(
+      policy: PermissionPolicy,
       ceiling: Ceiling,
       permission: Permission,
       name: String,
@@ -102,14 +112,30 @@ object PermissionChoice:
       base: Path,
       roots: Chunk[Path],
   ): Decision =
-    if !ceiling.allow.contains(permission) then Decision.Deny(s"$name needs $permission")
+    if !ceiling.allow.contains(permission) then Decision.Deny(missing(policy, permission, name))
     else
       targets.find(path => !inside(path, base, roots)) match
         case Some(path) => Decision.Deny(s"$name writes $path, outside the workspace")
         case None       => Decision.Allow
 
-  private def grant(ceiling: Ceiling, permission: Permission, name: String): Decision =
-    if ceiling.allow.contains(permission) then Decision.Allow else Decision.Deny(s"$name needs $permission")
+  private def grant(
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      permission: Permission,
+      name: String,
+  ): Decision =
+    if ceiling.allow.contains(permission) then Decision.Allow
+    else Decision.Deny(missing(policy, permission, name))
+
+  private def missing(policy: PermissionPolicy, permission: Permission, name: String): String =
+    val base = s"$name needs $permission"
+    if clamped(policy, permission) then s"$base, clamped by server policy" else base
+
+  private def clamped(policy: PermissionPolicy, permission: Permission): Boolean =
+    policy match
+      case PermissionPolicy.Inherit    => false
+      case PermissionPolicy.Closed     => permission != Permission.ReadWorkspace
+      case PermissionPolicy.Clamp(cap) => !cap.allow.contains(permission)
 
   private def command(tool: Json.Obj): Option[String] =
     rawCommand(tool)
@@ -127,6 +153,9 @@ object PermissionChoice:
     }
 
   private def locations(tool: Json.Obj): Chunk[String] =
+    listed(tool) ++ rawPaths(tool)
+
+  private def listed(tool: Json.Obj): Chunk[String] =
     JsonFields.field(tool, "locations") match
       case Some(Json.Arr(values)) =>
         values.flatMap { item =>
@@ -135,6 +164,30 @@ object PermissionChoice:
             case None       => Chunk.empty
         }
       case _ => Chunk.empty
+
+  // Path keys only. content, url, and command are not paths.
+  private def rawPaths(tool: Json.Obj): Chunk[String] =
+    JsonFields.field(tool, "rawInput").fold(Chunk.empty)(pathsIn)
+
+  private def pathsIn(json: Json): Chunk[String] =
+    json match
+      case obj: Json.Obj =>
+        obj.fields.flatMap { (key, value) =>
+          if pathKey(key) then pathValues(value) else pathsIn(value)
+        }
+      case Json.Arr(values) => values.flatMap(pathsIn)
+      case _                => Chunk.empty
+
+  private def pathValues(json: Json): Chunk[String] =
+    json match
+      case Json.Str(text) if text.nonEmpty => Chunk(text)
+      case Json.Arr(values)                => values.flatMap(pathValues)
+      case obj: Json.Obj                   => pathsIn(obj)
+      case _                               => Chunk.empty
+
+  private def pathKey(name: String): Boolean =
+    val key = normalize(name).replace("_", "")
+    key == "path" || key == "paths" || key.endsWith("path")
 
   private def cwd(tool: Json.Obj, workspace: Workspace): Path =
     val raw = JsonFields
@@ -167,23 +220,87 @@ object PermissionChoice:
       catch case _: InvalidPathException => None
 
   private def label(tool: Json.Obj, kind: String): String =
-    JsonFields
-      .str(tool, "name")
-      .filter(_.nonEmpty)
+    networkLabel(tool)
+      .orElse(JsonFields.str(tool, "name").filter(_.nonEmpty))
       .orElse(JsonFields.str(tool, "toolName").filter(_.nonEmpty))
+      .orElse(metaName(tool))
+      .orElse(variant(tool).map(wireName))
       .getOrElse {
         normalize(kind) match
           case "execute" | "bash" | "terminal" => "run_terminal_command"
+          case "fetch" | "web_fetch"           => "web_fetch"
+          case "web_search"                    => "web_search"
           case other                           => other
       }
+
+  private def networkLabel(tool: Json.Obj): Option[String] =
+    rawToolName(tool).filter(networkName).map(wireName)
+
+  private def rawToolName(tool: Json.Obj): Option[String] =
+    JsonFields
+      .field(tool, "rawInput")
+      .flatMap(JsonFields.obj)
+      .flatMap(raw => JsonFields.str(raw, "tool_name").filter(_.nonEmpty))
+
+  private def metaName(tool: Json.Obj): Option[String] =
+    JsonFields.field(tool, "_meta").flatMap(JsonFields.obj).flatMap { meta =>
+      JsonFields
+        .field(meta, "x.ai/tool")
+        .flatMap(JsonFields.obj)
+        .flatMap(found => JsonFields.str(found, "name").filter(_.nonEmpty))
+    }
+
+  private def variant(tool: Json.Obj): Option[String] =
+    JsonFields
+      .field(tool, "rawInput")
+      .flatMap(JsonFields.obj)
+      .flatMap(raw => JsonFields.str(raw, "variant").filter(_.nonEmpty))
+
+  private def wireName(raw: String): String =
+    normalize(raw).replace("_", "") match
+      case "webfetch"         => "web_fetch"
+      case "websearch"        => "web_search"
+      case "xsearch"          => "x_search"
+      case "imageedit"        => "image_edit"
+      case "imagegen"         => "image_gen"
+      case "imagetovideo"     => "image_to_video"
+      case "referencetovideo" => "reference_to_video"
+      case _                  => normalize(raw)
+
+  private def webTool(tool: Json.Obj): Boolean =
+    val names = Chunk(
+      JsonFields.str(tool, "name"),
+      JsonFields.str(tool, "toolName"),
+      metaName(tool),
+      variant(tool),
+      rawToolName(tool),
+    ).flatten
+    names.exists(networkName)
+
+  private def networkName(raw: String): Boolean =
+    normalize(raw).replace("_", "") match
+      case "webfetch" | "websearch" | "xsearch" | "imageedit" | "imagegen" | "imagetovideo" | "referencetovideo" =>
+        true
+      case _ => false
+
+  private def networkKind(kind: String): Boolean =
+    normalize(kind) match
+      case "fetch" | "web_fetch" | "web_search" => true
+      case _                                    => false
 
   private def callId(tool: Json.Obj): String =
     JsonFields.str(tool, "toolCallId").getOrElse("")
 
   private def pick(options: Chunk[Choice], decision: Decision, callId: String): PermissionAnswer =
     val wanted = decision match
-      case Decision.Allow   => options.find(choice => isAllow(choice.kind))
-      case Decision.Deny(_) => options.find(choice => isReject(choice.kind))
+      case Decision.Allow =>
+        options
+          .find(choice => normalize(choice.kind) == "allow_once")
+          .orElse(options.find(choice => isAllow(choice.kind)))
+      case Decision.Deny(_) =>
+        options
+          .find(choice => normalize(choice.kind) == "reject_once")
+          .orElse(options.find(choice => isReject(choice.kind)))
     wanted match
       case Some(choice) =>
         decision match

@@ -16,6 +16,7 @@ object AcpTurn:
       writeRoots: Chunk[Workspace],
       names: Ref[Map[String, ToolName]],
       refusals: Ref[Map[String, String]],
+      printed: Ref[Map[String, String]],
       hostCancel: Ref[Boolean],
   )
 
@@ -114,7 +115,10 @@ object AcpTurn:
                 .fromEither(AcpEvents.fromParams(params, seen, refusals))
                 .mapError(HarnessFailure.Protocol(_))
                 .flatMap { (next, events) =>
-                  scope.names.set(next).as(Step.Emit(events))
+                  scope.printed.get.flatMap { printed =>
+                    val (kept, trimmed) = ToolOutput.trim(printed, events)
+                    scope.names.set(next) *> scope.printed.set(kept).as(Step.Emit(trimmed))
+                  }
                 }
             }
           case Wire.Note(_, _)                                  => ZIO.succeed(Step.Emit(Chunk.empty))

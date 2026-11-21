@@ -41,7 +41,9 @@ object Launch:
         val tools = denied(ceiling)
         val deny  =
           if tools.isEmpty then Chunk.empty else Chunk("--disallowed-tools", tools.mkString(","))
-        always ++ mode ++ deny
+        val search =
+          if ceiling.allow.contains(Permission.Network) then Chunk.empty else Chunk("--disable-web-search")
+        always ++ mode ++ deny ++ search
 
   def denied(ceiling: Ceiling): Chunk[String] =
     val names = gates.filterNot(gate => ceiling.allow.contains(gate.permission)).flatMap(_.deny) ++ ungoverned
@@ -68,6 +70,8 @@ object Launch:
   )
 
   private val networkTools = Chunk(
+    "WebFetch",
+    "WebSearch",
     "image_edit",
     "image_gen",
     "image_to_video",

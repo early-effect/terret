@@ -33,4 +33,21 @@ object ShellWriteSpec extends ZIOSpecDefault:
         ShellWrite.effect("   ") == ShellEffect.Opaque,
       )
     },
+    test("a heredoc body does not hide the redirect, and the delimiter is not a target") {
+      val quoted =
+        "mkdir -p /tmp/fts5-probe && cat > /tmp/fts5-probe/Fts5Probe.java << 'EOF'\nclass Probe { String q = \"x; }\nEOF"
+      val sameLine = "cat << 'EOF' > /tmp/out.txt\nhello\nEOF"
+      val dashed   = "cat <<-EOF > /tmp/out.txt\n\thello\nEOF"
+      val plain    = "cat << out.txt\nhello\nout.txt"
+      val here     = "cat <<< 'hi'"
+      val open     = "cat > out.txt << 'EOF'\nclass Probe { String q = \"x;"
+      assertTrue(
+        ShellWrite.effect(quoted) == ShellEffect.Writes(Chunk("/tmp/fts5-probe/Fts5Probe.java")),
+        ShellWrite.effect(sameLine) == ShellEffect.Writes(Chunk("/tmp/out.txt")),
+        ShellWrite.effect(dashed) == ShellEffect.Writes(Chunk("/tmp/out.txt")),
+        ShellWrite.effect(plain) == ShellEffect.ReadOnly,
+        ShellWrite.effect(here) == ShellEffect.ReadOnly,
+        ShellWrite.effect(open) == ShellEffect.Opaque,
+      )
+    },
   )
