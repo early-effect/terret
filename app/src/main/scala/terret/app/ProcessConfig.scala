@@ -12,9 +12,10 @@ import terret.grok.{
   NetworkGrantError,
   NetworkPolicy,
 }
+import terret.mcp.{EventPolicy, EventPolicyError}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
-import zio.{Chunk, Config}
+import zio.{Chunk, Config, Duration}
 
 enum ProcessHarness:
   case Grok(config: GrokConfig)
@@ -29,6 +30,7 @@ final case class ProcessConfig(
     writeRoots: Chunk[Workspace] = Chunk.empty,
     mcp: McpPolicy = McpPolicy.empty,
     network: NetworkPolicy = NetworkPolicy.empty,
+    events: EventPolicy = EventPolicy.terret,
 )
 
 object ProcessConfig:
@@ -39,6 +41,18 @@ object ProcessConfig:
     version = "dev",
     harness = ProcessHarness.Grok(GrokConfig.stdio),
   )
+
+  private final case class EventRaw(verification: String, floor: Duration, default: Duration, cap: Duration)
+
+  private val eventRaw: Config[EventRaw] =
+    (
+      Config.string("verification").withDefault(EventPolicy.name(EventPolicy.terret.verification)) ++
+        Config.duration("floor").withDefault(EventPolicy.terret.floor) ++
+        Config.duration("default").withDefault(EventPolicy.terret.default) ++
+        Config.duration("cap").withDefault(EventPolicy.terret.cap)
+    ).nested("events").map { (verification, floor, default, cap) =>
+      EventRaw(verification, floor, default, cap)
+    }
 
   val raw: Config[Raw] =
     (
@@ -59,7 +73,8 @@ object ProcessConfig:
         Config.string("bindSecret").optional ++
         Config.string("writeRoots").optional ++
         Config.string("mcp").optional ++
-        Config.string("network").optional
+        Config.string("network").optional ++
+        eventRaw
     ).nested("terret").map {
       (
           listen,
@@ -80,6 +95,7 @@ object ProcessConfig:
           writeRoots,
           mcp,
           network,
+          events,
       ) =>
         Raw(
           listen,
@@ -100,6 +116,10 @@ object ProcessConfig:
           writeRoots,
           mcp,
           network,
+          events.verification,
+          events.floor,
+          events.default,
+          events.cap,
         )
     }
 
@@ -113,7 +133,8 @@ object ProcessConfig:
       roots   <- rootsOf(raw.writeRoots)
       grants  <- grantsOf(raw.mcp)
       network <- hostsOf(raw.network)
-    yield ProcessConfig(listen, policy, root, version, harness, roots, grants, network)
+      events  <- eventsOf(raw)
+    yield ProcessConfig(listen, policy, root, version, harness, roots, grants, network, events)
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -263,6 +284,10 @@ object ProcessConfig:
       writeRoots: Option[String] = None,
       mcp: Option[String] = None,
       network: Option[String] = None,
+      eventVerification: String = EventPolicy.name(EventPolicy.terret.verification),
+      eventFloor: Duration = EventPolicy.terret.floor,
+      eventDefault: Duration = EventPolicy.terret.default,
+      eventCap: Duration = EventPolicy.terret.cap,
   )
 
   private def grantsOf(raw: Option[String]): Either[ProcessError, McpPolicy] =
@@ -274,6 +299,12 @@ object ProcessConfig:
     raw match
       case None       => Right(NetworkPolicy.empty)
       case Some(text) => NetworkPolicy.parse(text).left.map(ProcessError.NetworkGrant(_))
+
+  private def eventsOf(raw: Raw): Either[ProcessError, EventPolicy] =
+    EventPolicy
+      .from(raw.eventVerification, raw.eventFloor, raw.eventDefault, raw.eventCap)
+      .left
+      .map(ProcessError.Events(_))
 end ProcessConfig
 
 enum ProcessError:
@@ -297,6 +328,7 @@ enum ProcessError:
   case NetworkGrant(error: NetworkGrantError)
   case Mcp(error: terret.mcp.TerretMcpError)
   case McpGrant(error: McpGrantError)
+  case Events(error: EventPolicyError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
   case Config(error: zio.Config.Error)
@@ -322,6 +354,7 @@ enum ProcessError:
     case NetworkGrant(error) => error.render
     case Mcp(error)          => s"mcp ${error.toString}"
     case McpGrant(error)     => error.render
+    case Events(error)       => error.render
     case Server(error)       => error.message
     case Stdio(cause)        => s"stdio ${cause.toString}"
     case Config(error)       => error.toString

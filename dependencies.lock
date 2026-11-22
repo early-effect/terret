@@ -41,11 +41,11 @@ cell grok 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
@@ -62,14 +62,14 @@ test grok 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 direct rocks.earlyeffect slayer 0.3.0 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact rocks.earlyeffect slayer_3 0.3.0 dc3c8309e07d34865810b2b4e7694072f678d3dd9df53ade7035cc19d8b83912 central
@@ -95,11 +95,11 @@ cell dsh 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
@@ -116,13 +116,13 @@ test dsh 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
@@ -146,18 +146,18 @@ cell mcp 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle-mcp 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle-mcp 0.16.0-6af005fe3cda-SNAPSHOT binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle-mcp_3 0.16.0-c5436d0694a3-SNAPSHOT 64bbb9d255ea686315831f765f35e6400ed36e00503cd361951d62047664a7a7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp_3 0.16.0-6af005fe3cda-SNAPSHOT 8b1eae2f3dc7ecf07ef886b3ce6ece71923a10777c0ad7b52d755d509af1552d maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-c5436d0694a3-SNAPSHOT 1cb9c8c1db794f699d1af3bf7345505c1cb9c4f8185649decd2bc88c2c8fbcf7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-6af005fe3cda-SNAPSHOT d27dabade34c725434089b6c72090feae27d08239db074bead5a94587ec64e79 maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
@@ -169,14 +169,14 @@ test mcp 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle-mcp 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle-mcp 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 direct rocks.earlyeffect slayer 0.3.0 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle-mcp_3 0.16.0-c5436d0694a3-SNAPSHOT 64bbb9d255ea686315831f765f35e6400ed36e00503cd361951d62047664a7a7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp_3 0.16.0-6af005fe3cda-SNAPSHOT 8b1eae2f3dc7ecf07ef886b3ce6ece71923a10777c0ad7b52d755d509af1552d maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact rocks.earlyeffect slayer_3 0.3.0 dc3c8309e07d34865810b2b4e7694072f678d3dd9df53ade7035cc19d8b83912 central
@@ -185,8 +185,8 @@ artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159
 artifact org.scala-lang scala3-library_3 3.10.1 de6f5d7f9175fd0c1043bb2ca26f349959e00d4c9dbfd1a1f30f6144843a3d13 central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-c5436d0694a3-SNAPSHOT 1cb9c8c1db794f699d1af3bf7345505c1cb9c4f8185649decd2bc88c2c8fbcf7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-6af005fe3cda-SNAPSHOT d27dabade34c725434089b6c72090feae27d08239db074bead5a94587ec64e79 maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
 artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
 artifact org.scala-lang scala-library 3.10.1 ff0a773187f827ea7b596e4f370098abc417d6a4de24858ff907bbb6af97b9a5 central
@@ -205,20 +205,20 @@ cell app 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
-direct rocks.earlyeffect heddle-mcp 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
+direct rocks.earlyeffect heddle-mcp 0.16.0-6af005fe3cda-SNAPSHOT binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
-artifact rocks.earlyeffect heddle-mcp_3 0.16.0-c5436d0694a3-SNAPSHOT 64bbb9d255ea686315831f765f35e6400ed36e00503cd361951d62047664a7a7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp_3 0.16.0-6af005fe3cda-SNAPSHOT 8b1eae2f3dc7ecf07ef886b3ce6ece71923a10777c0ad7b52d755d509af1552d maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-internal-macros_3 2.1.27 b95c382830e74dd1ce5b43f646e1e77e265b642f23222439846dad41f856bfa1 central
 artifact dev.zio zio-stacktracer_3 2.1.27 ecdd5178029f9b85a0b3d5f8b475b42a680159ae1bad7ea64c5300f094908801 central
 artifact org.scala-lang scala3-library_3 3.9.0 9343f9651453945fc6a9b75bb4fd230418ee28a1f88ea28ee429f3ebe0511aba central
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-c5436d0694a3-SNAPSHOT 1cb9c8c1db794f699d1af3bf7345505c1cb9c4f8185649decd2bc88c2c8fbcf7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-6af005fe3cda-SNAPSHOT d27dabade34c725434089b6c72090feae27d08239db074bead5a94587ec64e79 maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a980bb15e5c37c35443d1d0b0e0cd central
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 artifact io.github.kitlangton neotype-internal_3 0.7.2 e59814e1eb7f39b4548efe3a8f5b44022e0869a7815f0bd70d41a2e179b95083 central
@@ -229,16 +229,16 @@ test app 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
-direct rocks.earlyeffect heddle-mcp 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
+direct rocks.earlyeffect heddle-mcp 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio-test 2.1.27 binary
 direct dev.zio zio-test-sbt 2.1.27 binary
 direct rocks.earlyeffect slayer 0.3.0 binary
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-streams_3 2.1.27 2c6ca872943d022c9bfae3b0778c9205453fcb64a514c72465da586fd3e47bb7 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
-artifact rocks.earlyeffect heddle-mcp_3 0.16.0-c5436d0694a3-SNAPSHOT 64bbb9d255ea686315831f765f35e6400ed36e00503cd361951d62047664a7a7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp_3 0.16.0-6af005fe3cda-SNAPSHOT 8b1eae2f3dc7ecf07ef886b3ce6ece71923a10777c0ad7b52d755d509af1552d maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
 artifact dev.zio zio-test-sbt_3 2.1.27 169c96c829d462ca16b054570af26be3b5a8ca3ff47844aa801ccd880a600574 central
 artifact rocks.earlyeffect slayer_3 0.3.0 dc3c8309e07d34865810b2b4e7694072f678d3dd9df53ade7035cc19d8b83912 central
@@ -248,7 +248,7 @@ artifact org.scala-lang scala3-library_3 3.10.1 de6f5d7f9175fd0c1043bb2ca26f3499
 artifact dev.zio izumi-reflect_3 3.0.11 65a7b4a7f32617da3c1bfaaa8a096527ea5d082bfe976af9d8139bb0c8ea0664 central
 artifact org.scala-lang.modules scala-collection-compat_3 2.14.0 0d44cb0fa7f867ae9e8d76a2dfc58985aec2fe4e836ebb3b671472a23ca74d48 central
 artifact io.github.kitlangton neotype_3 0.7.2 bd1ce033b8fd70c2b693afa36aef4c161ef2557fd00c7e1c82b9fc52ec91314e central
-artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-c5436d0694a3-SNAPSHOT 1cb9c8c1db794f699d1af3bf7345505c1cb9c4f8185649decd2bc88c2c8fbcf7 maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle-mcp-protocol_3 0.16.0-6af005fe3cda-SNAPSHOT d27dabade34c725434089b6c72090feae27d08239db074bead5a94587ec64e79 maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact org.portable-scala portable-scala-reflect_2.13 1.1.3 920f62979293069cf721865f931e42f9f7b0b2720ee9f6a9ddff76a19ecf8d4e central
 artifact org.scala-sbt test-interface 1.0 15f70b38bb95f3002fec9aea54030f19bb4ecfbad64c67424b5e5fea09cd749e central
 artifact org.scala-lang scala-library 3.10.1 ff0a773187f827ea7b596e4f370098abc417d6a4de24858ff907bbb6af97b9a5 central
@@ -267,14 +267,14 @@ direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
 direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
 artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced5685f734e0995a561947463f6645f3650bc6 central
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
 artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
@@ -346,13 +346,13 @@ evict org.scala-lang scala3-library_3 3.3.1 3.9.0
 evict org.scala-lang scala3-library_3 3.3.3 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
-evict rocks.earlyeffect heddle_3 0.12.0 0.16.0-c5436d0694a3-SNAPSHOT
+evict rocks.earlyeffect heddle_3 0.12.0 0.16.0-6af005fe3cda-SNAPSHOT
 test docs 3.10.1 jvm
 direct rocks.earlyeffect specular-core 0.21.4 binary
 direct rocks.earlyeffect specular-zio-test 0.21.4 binary
 direct rocks.earlyeffect specular-site 0.21.4 binary
 direct rocks.earlyeffect early-effect-docs-theme 0.21.4 binary
-direct rocks.earlyeffect heddle 0.16.0-c5436d0694a3-SNAPSHOT binary
+direct rocks.earlyeffect heddle 0.16.0-6af005fe3cda-SNAPSHOT binary
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
 direct dev.zio zio-test 2.1.27 binary
@@ -361,7 +361,7 @@ artifact rocks.earlyeffect specular-core_3 0.21.4 dd8723f0ef6a30b4524aac7dfced56
 artifact rocks.earlyeffect specular-zio-test_3 0.21.4 153e897161846f500e9c80f4cbdbcc74df792e167bb32ecfa97b5902656c6da8 central
 artifact rocks.earlyeffect specular-site_3 0.21.4 8bc9d7656aad2e9315c0b5cea2e5f7287c06867548e23d1ca2e33951f571522f central
 artifact rocks.earlyeffect early-effect-docs-theme_3 0.21.4 15bcebf2c415d80c2792749a8eeebf9ffa45798cbdccf2743c41b09ba6e0ca46 central
-artifact rocks.earlyeffect heddle_3 0.16.0-c5436d0694a3-SNAPSHOT 09575aba72f46faf734f1d193bb6daa9770e1de55b3412482da4a206ef1259df maven:https://central.sonatype.com/repository/maven-snapshots/
+artifact rocks.earlyeffect heddle_3 0.16.0-6af005fe3cda-SNAPSHOT 1afdb07342fe3b0f581714eb93e5212a265b68d4feace9b91aa18c9a5b56abbe maven:https://central.sonatype.com/repository/maven-snapshots/
 artifact dev.zio zio_3 2.1.27 08633a13f88d4b7349bba1bce1eb5bdf69d9a89331721f397605449d5e783c20 central
 artifact dev.zio zio-json_3 1.1.2 5112dc291ceb2c17f78f5fdcfd64fca6c7fc479db23cf180768fac4cb9444d77 central
 artifact dev.zio zio-test_3 2.1.27 6a9ae65b60c1882b21a4a5424981dc17aae24fa4c74918aa7ada7f2bd29c0369 central
@@ -433,7 +433,7 @@ evict org.scala-lang scala3-library_3 3.3.1 3.9.0
 evict org.scala-lang scala3-library_3 3.3.3 3.9.0
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
-evict rocks.earlyeffect heddle_3 0.12.0 0.16.0-c5436d0694a3-SNAPSHOT
+evict rocks.earlyeffect heddle_3 0.12.0 0.16.0-6af005fe3cda-SNAPSHOT
 tool compiler 3.10.1 jvm
 root org.scala-lang scala3-compiler_3 3.10.1 closure build
 root org.scala-lang scala3-sbt-bridge 3.10.1 closure build
