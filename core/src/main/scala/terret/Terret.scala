@@ -5,6 +5,7 @@ import terret.error.TerretError
 import terret.event.{Event, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.hooks.Hooks
+import terret.milestone.MilestoneSink
 import terret.permission.Ceiling
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
@@ -20,6 +21,7 @@ final class Terret private (
     sessions: Ref[Map[SessionId, Terret.Held]],
     scope: Scope,
     closed: Ref[Boolean],
+    sink: MilestoneSink,
 ):
   def open(workspace: Workspace, requested: Ceiling = Ceiling.all): IO[TerretError, Session] =
     confine(workspace).flatMap { _ =>
@@ -107,6 +109,8 @@ final class Terret private (
       _                          <- ZIO.addFinalizer(release(id, previous, started, epoch))
       revised                    <- hooks.beforePrompt(session, prompt)
       _                          <- started.set(true)
+      cursor                     <- cursorOf(id)
+      _                          <- sink.started(id, cursor, epoch)
     // The harness finalizer flushes an open text run. A gate around this stream would discard that run.
     yield (session, live(session, revised, epoch))
 
@@ -116,8 +120,13 @@ final class Terret private (
       .mapError(TerretError.Harness(_))
       .tap(event => observe(session, event, epoch))
       .catchAll { error =>
-        ZStream.fromZIO(setIfRunning(session.id, epoch, SessionState.Ended(failed(error))).unit) *>
-          ZStream.fail(error)
+        ZStream.fromZIO {
+          val outcome = failed(error)
+          setIfRunning(session.id, epoch, SessionState.Ended(outcome)).flatMap {
+            case false => ZIO.unit
+            case true  => cursorOf(session.id).flatMap(cursor => sink.failed(session.id, cause(error), cursor, epoch))
+          }
+        } *> ZStream.fail(error)
       }
 
   private def observe(session: Session, event: Event, epoch: Long): UIO[Unit] =
@@ -130,12 +139,18 @@ final class Terret private (
     }
 
   private def failed(error: TerretError): TurnOutcome =
+    TurnOutcome.Failed(cause(error))
+
+  private def cause(error: TerretError): HarnessFailure =
     error match
-      case TerretError.Harness(failure)      => TurnOutcome.Failed(failure)
-      case TerretError.UnknownSession(id)    => TurnOutcome.Failed(HarnessFailure.UnknownSession(id))
-      case TerretError.Busy(_)               => TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete))
-      case TerretError.WorkspaceDenied(_, _) => TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete))
-      case TerretError.WorkspaceInvalid(_)   => TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete))
+      case TerretError.Harness(failure)      => failure
+      case TerretError.UnknownSession(id)    => HarnessFailure.UnknownSession(id)
+      case TerretError.Busy(_)               => HarnessFailure.Protocol(ProtocolFault.Incomplete)
+      case TerretError.WorkspaceDenied(_, _) => HarnessFailure.Protocol(ProtocolFault.Incomplete)
+      case TerretError.WorkspaceInvalid(_)   => HarnessFailure.Protocol(ProtocolFault.Incomplete)
+
+  private def cursorOf(id: SessionId): UIO[Option[Long]] =
+    harness.page(id, None).map(_.cursor).catchAll(_ => ZIO.succeed(None))
 
   private def begin(id: SessionId): IO[TerretError, (Session, SessionState, Long)] =
     sessions
@@ -203,12 +218,17 @@ end Terret
 object Terret:
   private final case class Held(session: Session, epoch: Long, turn: Option[Fiber[TerretError, Unit]])
 
-  def make(harness: Harness, config: TerretConfig, hooks: Hooks): URIO[Scope, Terret] =
+  def make(
+      harness: Harness,
+      config: TerretConfig,
+      hooks: Hooks,
+      milestones: MilestoneSink = MilestoneSink.discard,
+  ): URIO[Scope, Terret] =
     for
       sessions <- Ref.make(Map.empty[SessionId, Held])
       scope    <- ZIO.scope
       closed   <- Ref.make(false)
-    yield Terret(harness, config, hooks, sessions, scope, closed)
+    yield Terret(harness, config, hooks, sessions, scope, closed, milestones)
 
   val layer: ZLayer[Harness & TerretConfig & Hooks, Nothing, Terret] =
     ZLayer.scoped {

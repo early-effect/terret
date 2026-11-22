@@ -10,6 +10,8 @@ Do not run `LiveGrokSpec` or `LiveRefusalSpec` as a whole, including before a pu
 
 This histos copies `CI` and `GITHUB_ACTIONS` into the test process. `LiveGate` skips the live suite when either is set.
 
+`export` takes optional `after`, `milestones`, and `latest`. `after` is exclusive. `milestones` keeps the events the milestone classifier accepts. `latest` keeps the newest N of that selection. The response `cursor` is the tail of the whole log, and `state` is the session state.
+
 Tee the log under `target/`. Do not pipe it away.
 
 ```text

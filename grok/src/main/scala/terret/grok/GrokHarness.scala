@@ -3,6 +3,7 @@ package terret.grok
 import heddle.LinePipe
 import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
+import terret.milestone.MilestoneSink
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -326,12 +327,13 @@ object GrokHarness:
       mcp: McpPolicy = McpPolicy.empty,
       catalog: McpCatalog = McpCatalog.empty,
       hosts: HostAllowlist = HostAllowlist.closed,
+      milestones: MilestoneSink = MilestoneSink.discard,
   ): ZIO[Scope, Nothing, GrokHarness] =
     for
       scope    <- ZIO.scope
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-      journal  <- Journal.make
+      journal  <- Journal.make(milestones)
       harness = GrokHarness(
         config,
         spawner,
@@ -354,13 +356,14 @@ object GrokHarness:
       mcp: McpPolicy = McpPolicy.empty,
       catalog: McpCatalog = McpCatalog.live,
       network: NetworkPolicy = NetworkPolicy.empty,
+      milestones: MilestoneSink = MilestoneSink.discard,
   ): ZLayer[Scope, Nothing, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer
     (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
       for
         acp     <- ZIO.service[AcpOpen]
         spawner <- ZIO.service[Spawner]
-        harness <- make(config, spawner, acp, writeRoots, mcp, catalog, HostAllowlist.fixed(network))
+        harness <- make(config, spawner, acp, writeRoots, mcp, catalog, HostAllowlist.fixed(network), milestones)
       yield harness: Harness
     }
 end GrokHarness

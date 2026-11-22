@@ -2,6 +2,7 @@ package terret.mcp
 
 import heddle.{Body, LinePipe, Request, Response, Status}
 import heddle.mcp.Mcp
+import heddle.mcp.events.{Events, WebhookTransport}
 import heddle.mcp.protocol.{
   Cancelled,
   ClientRequest,
@@ -19,6 +20,7 @@ import terret.config.TerretConfig
 import terret.event.{Event, TurnOutcome}
 import terret.hooks.Hooks
 import terret.memory.{InMemory, Script}
+import terret.milestone.Milestones
 import terret.permission.{Permission, PermissionPolicy}
 import terret.workspace.Workspace
 import terret.Terret
@@ -31,6 +33,8 @@ import zio.{Chunk, Promise, Queue, Ref, Scope, UIO, ZIO}
 
 object McpJobsSpec extends ZIOSpecDefault:
   private val jobs = Set("open", "run", "status", "resume", "export", "cancel")
+
+  private type Env = Milestones & Events.Env
 
   def spec = suite("MCP jobs")(
     test("an empty server version is refused") {
@@ -58,7 +62,7 @@ object McpJobsSpec extends ZIOSpecDefault:
             listed.toSet == jobs,
             accepted(ran) == Right(RunAccepted(opened.session, WireState.Running)),
             ended.state == WireState.Ended(WireOutcome.Completed),
-            log(exported) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1))),
+            log(exported) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1), done)),
             log(exported) == log(resumed),
             prompts == 1,
           )
@@ -116,7 +120,7 @@ object McpJobsSpec extends ZIOSpecDefault:
             asStatus(running) == Right(StatusView(opened.session, WireState.Running)),
             ended.state == WireState.Ended(WireOutcome.Completed),
             log(exported) == Right(
-              Log(opened.session, Chunk(WireEvent.Assistant("stay"), finished), Some(1))
+              Log(opened.session, Chunk(WireEvent.Assistant("stay"), finished), Some(1), done)
             ),
           )
         }
@@ -173,10 +177,10 @@ object McpJobsSpec extends ZIOSpecDefault:
           ahead  <- host.call("export", ExportJob(opened.session, Some(9)))
           bad    <- host.call("export", ExportJob(opened.session, Some(-1)))
         yield assertTrue(
-          log(empty) == Right(Log(opened.session, Chunk.empty, None)),
-          log(whole) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1))),
-          log(tail) == Right(Log(opened.session, Chunk(finished), Some(1))),
-          log(rest) == Right(Log(opened.session, Chunk.empty, Some(1))),
+          log(empty) == Right(Log(opened.session, Chunk.empty, None, WireState.Open)),
+          log(whole) == Right(Log(opened.session, Chunk(WireEvent.Assistant("hello"), finished), Some(1), done)),
+          log(tail) == Right(Log(opened.session, Chunk(finished), Some(1), done)),
+          log(rest) == Right(Log(opened.session, Chunk.empty, Some(1), done)),
           log(ahead) == log(rest),
           failure(bad) == Right(JobFailure.BadCursor),
         )
@@ -186,8 +190,8 @@ object McpJobsSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           (_, mcp) <- server(Script.echo)
-          listed   <- mcp.handle(Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None)).json)
-          found    <- mcp.handle(Message.stateless(RequestId.Num(2), ClientRequest.Discover).json)
+          listed   <- supply(mcp)(mcp.handle(Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None)).json))
+          found    <- supply(mcp)(mcp.handle(Message.stateless(RequestId.Num(2), ClientRequest.Discover).json))
           tools = listed.fold("")(_.toJson)
           disc  = found.fold("")(_.toJson)
         yield assertTrue(
@@ -262,13 +266,14 @@ object McpJobsSpec extends ZIOSpecDefault:
             id     <- sessionId(served.mcp)
             _      <- invoke(served.mcp, "run", RunJob(id, "go"), 2, sse = false)
             _      <- caught.await
-            bad    <- served.routes(Request.get(s"/sessions/$id/events?after=-1")).mapError(Fail.Http(_))
+            bad    <- supply(served.mcp)(served.routes(Request.get(s"/sessions/$id/events?after=-1")))
+              .mapError(Fail.Http(_))
             denied <- bad.body.utf8
               .mapError(Fail.Failed(_))
               .timeoutFail(Fail.Decode("the bad-cursor body did not end"))(5.seconds)
             streamed <- ZIO.scoped {
               for
-                res   <- served.routes(Request.get(s"/sessions/$id/events")).mapError(Fail.Http(_))
+                res   <- supply(served.mcp)(served.routes(Request.get(s"/sessions/$id/events"))).mapError(Fail.Http(_))
                 queue <- wireEvents(res)
                 _     <- awaitWire(queue, "0", "ToolStarted")
                 _     <- release.succeed(())
@@ -322,6 +327,8 @@ object McpJobsSpec extends ZIOSpecDefault:
 
   private val finished: WireEvent = WireEvent.TurnFinished(WireOutcome.Completed)
 
+  private val done: WireState = WireState.Ended(WireOutcome.Completed)
+
   /** Yields between reads. `repeatUntil` on the live clock does not, so it starves the forked turn. */
   private def untilCount(started: Ref[Int], n: Int): UIO[Unit] =
     started.get.flatMap {
@@ -346,7 +353,7 @@ object McpJobsSpec extends ZIOSpecDefault:
         ZStream(Event.TurnFinished(TurnOutcome.Completed))
     )
 
-  private def listen(mcp: Mcp[Any], session: String, after: Option[Long], id: Long): ZIO[Any, Fail, Response] =
+  private def listen(mcp: Mcp[Env], session: String, after: Option[Long], id: Long): ZIO[Scope, Fail, Response] =
     for
       tool <- ZIO.fromEither(ToolName.from("follow")).mapError(_ => Fail.BadTool("follow"))
       args = after match
@@ -358,11 +365,11 @@ object McpJobsSpec extends ZIOSpecDefault:
         .withHeader(Http.ProtocolHeader, ProtocolVersion.Current.value)
         .withHeader(Http.MethodHeader, Methods.Listen)
         .withHeader("Accept", "text/event-stream")
-      res <- mcp.routes(req)
+      res <- supply(mcp)(mcp.routes(req))
     yield res
 
   private def watch(
-      mcp: Mcp[Any],
+      mcp: Mcp[Env],
       session: String,
       after: Option[Long],
       id: Long,
@@ -441,7 +448,7 @@ object McpJobsSpec extends ZIOSpecDefault:
       case None    => ZIO.yieldNow *> awaitEvent(queue, id, kind)
     }
 
-  private def untilEnded(mcp: Mcp[Any], session: String, ids: Ref[Long]): ZIO[Any, Fail, Unit] =
+  private def untilEnded(mcp: Mcp[Env], session: String, ids: Ref[Long]): ZIO[Scope, Fail, Unit] =
     ids.updateAndGet(_ + 1).flatMap { n =>
       invoke(mcp, "status", SessionJob(session), n, sse = false).flatMap { res =>
         res.body.utf8.mapError(Fail.Failed(_)).flatMap { text =>
@@ -480,7 +487,7 @@ object McpJobsSpec extends ZIOSpecDefault:
   private def server(
       script: Script,
       config: TerretConfig = TerretConfig.closed,
-  ): ZIO[Scope, Fail, (InMemory, Mcp[Any])] =
+  ): ZIO[Scope, Fail, (InMemory, Mcp[Env])] =
     for
       memory <- InMemory.make(script)
       terret <- Terret.make(memory, config, Hooks.identity)
@@ -497,13 +504,13 @@ object McpJobsSpec extends ZIOSpecDefault:
         mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
         pipes  <- LinePipe.connected
         (client, remote) = pipes
-        fiber  <- mcp.stdio(remote).forkScoped
+        fiber  <- supply(mcp)(mcp.stdio(remote)).forkScoped
         host   <- Host.make(client)
         result <- use(memory, host).ensuring(client.close *> fiber.interrupt.ignore)
       yield result
     }
 
-  private def sessionId(mcp: Mcp[Any]): ZIO[Any, Fail, String] =
+  private def sessionId(mcp: Mcp[Env]): ZIO[Scope, Fail, String] =
     for
       opened <- invoke(mcp, "open", openAll, 1, sse = false)
       text   <- opened.body.utf8.mapError(Fail.Failed(_))
@@ -521,17 +528,22 @@ object McpJobsSpec extends ZIOSpecDefault:
     yield opened.session
 
   private def invoke[A: JsonEncoder](
-      mcp: Mcp[Any],
+      mcp: Mcp[Env],
       name: String,
       args: A,
       id: Long,
       sse: Boolean,
-  ): ZIO[Any, Fail, Response] =
+  ): ZIO[Scope, Fail, Response] =
     for
       encoded <- ZIO.fromEither(asObj(args)).mapError(_ => Fail.Undecodable)
       tool    <- ZIO.fromEither(ToolName.from(name)).mapError(_ => Fail.BadTool(name))
-      res     <- mcp.routes(callRequest(tool, encoded, id, sse))
+      res     <- supply(mcp)(mcp.routes(callRequest(tool, encoded, id, sse)))
     yield res
+
+  private def supply[E, A](mcp: Mcp[Env])(effect: ZIO[Env, E, A]): ZIO[Scope, E, A] =
+    (mcp.eventsLayer ++ WebhookTransport.unavailable ++ Milestones.live).build.flatMap { environment =>
+      effect.provideEnvironment(environment)
+    }
 
   private def callRequest(tool: ToolName, args: Json.Obj, id: Long, sse: Boolean): Request =
     val message = Message.stateless(RequestId.Num(id), ClientRequest.CallTool(tool, args))

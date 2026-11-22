@@ -1,6 +1,7 @@
 package terret.transcript
 
 import terret.event.Event
+import terret.milestone.MilestoneSink
 import terret.session.SessionId
 import zio.stream.ZStream
 import zio.{Chunk, Hub, Ref, Semaphore, UIO, ZIO}
@@ -12,7 +13,7 @@ final case class Entry(index: Long, event: Event)
 final case class Page(events: Chunk[Entry], cursor: Option[Long])
 
 /** The session log. Append is the only writer, so a flushed text run and a live emit share one index. */
-final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]]):
+final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: MilestoneSink):
   def open(id: SessionId): UIO[Unit] =
     for
       hub  <- Hub.unbounded[Entry]
@@ -39,8 +40,9 @@ final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]]):
                     (Some(found.hub -> entry), current.updated(id, found.copy(events = found.events :+ event)))
               }
               .flatMap {
-                case None              => ZIO.unit
-                case Some(hub -> item) => hub.publish(item).unit
+                case None => ZIO.unit
+                // The offer stays inside the permit so it cannot pass the index. Publish runs later, outside it.
+                case Some(hub -> item) => hub.publish(item) *> sink.appended(id, item)
               }
           }
     }
@@ -86,8 +88,10 @@ end Journal
 object Journal:
   private final case class Slot(events: Chunk[Event], hub: Hub[Entry], lock: Semaphore)
 
-  def make: UIO[Journal] =
-    Ref.make(Map.empty[SessionId, Slot]).map(Journal(_))
+  def make: UIO[Journal] = make(MilestoneSink.discard)
+
+  def make(sink: MilestoneSink): UIO[Journal] =
+    Ref.make(Map.empty[SessionId, Slot]).map(Journal(_, sink))
 
   private def cursor(length: Long): Option[Long] =
     if length == 0 then None else Some(length - 1)

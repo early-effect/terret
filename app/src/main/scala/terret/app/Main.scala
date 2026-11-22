@@ -3,6 +3,7 @@ package terret.app
 import terret.dsh.DshHarness
 import terret.grok.GrokHarness
 import terret.harness.Harness
+import terret.milestone.MilestoneGate
 import zio.{ExitCode, Scope, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer}
 
 object Main extends ZIOAppDefault:
@@ -22,7 +23,8 @@ object Main extends ZIOAppDefault:
         service <- ZIO.config(ServiceConfig.raw).mapError(error => AppFailure.Service(ServiceError.Config(error)))
         loaded  <- ZIO.fromEither(ServiceConfig.load(service)).mapError(AppFailure.Service(_))
         _       <- PidFile.write(loaded.pidFile).mapError(AppFailure.Service(_))
-        _       <- Process.listen(config).provideSomeLayer(wired(config)).mapError(AppFailure.Process(_))
+        gate    <- MilestoneGate.make
+        _       <- Process.listen(config, gate).provideSomeLayer(wired(config, gate)).mapError(AppFailure.Process(_))
       yield ()
     served.foldZIO(
       error => report(error.render),
@@ -51,11 +53,17 @@ object Main extends ZIOAppDefault:
   private def report(message: String) =
     ZIO.consoleWith(_.printLineError(message)).ignore.as(ExitCode.failure)
 
-  private def wired(config: ProcessConfig): ZLayer[Scope, Nothing, Harness] =
+  private def wired(config: ProcessConfig, milestones: MilestoneGate): ZLayer[Scope, Nothing, Harness] =
     config.harness match
       case ProcessHarness.Grok(grok) =>
-        GrokHarness.layer(grok, config.writeRoots, config.mcp, network = config.network)
-      case ProcessHarness.Dsh(dsh) => DshHarness.layer(dsh)
+        GrokHarness.layer(
+          grok,
+          config.writeRoots,
+          config.mcp,
+          network = config.network,
+          milestones = milestones,
+        )
+      case ProcessHarness.Dsh(dsh) => DshHarness.layer(dsh, milestones)
 end Main
 
 enum AppFailure:
