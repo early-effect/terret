@@ -3,7 +3,7 @@ package terret.mcp
 import heddle.endpoint.Api
 import heddle.http.Response
 import heddle.mcp.events.Events
-import heddle.mcp.{InstallPrincipal, Mcp, McpBuildError}
+import heddle.mcp.{Mcp, McpBuildError}
 import heddle.route.Routes
 import terret.Terret
 import terret.milestone.Milestones
@@ -40,7 +40,7 @@ object TerretMcp:
           .left
           .map(TerretMcpError.Rejected(_))
           .map { declared =>
-            val keyed = InstallPrincipal.events(declared)(EventsKey.principal(key))
+            val keyed = declared.principal(EventsKey.principal(key))
             val tuned = keyed.eventPolicy(events.ttl).verificationPolicy(events.verification)
             val jobs: Routes[Milestones & Events.Env, Response] = built.routes
             Served(tuned, tuned.routes ++ jobs)
