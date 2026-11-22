@@ -1,8 +1,7 @@
 package terret.mcp
 
 import heddle.Schema
-import heddle.http.header.Headers
-import heddle.mcp.events.{EmitError, EventId, Events, Principal}
+import heddle.mcp.events.{EmitError, EventId, Events}
 import heddle.mcp.protocol.EventName
 import terret.harness.HarnessFailure
 import terret.milestone.{MilestoneGate, MilestoneKind, MilestoneSink, Milestones, Notice}
@@ -32,9 +31,6 @@ object MilestoneEvents:
     val session = filter.session.forall(_ == data.session)
     val kinds   = filter.kinds.isEmpty || filter.kinds.contains(data.kind)
     session && kinds
-
-  def principal(headers: Headers): UIO[Option[Principal]] =
-    ZIO.succeed(headers.get("Authorization").filter(_.nonEmpty).map(Principal(_)))
 
   def attach(gate: MilestoneGate): ZIO[Milestones & Events.Env & Scope, Nothing, Publisher] =
     Publisher.make.flatMap(publisher => gate.bind(publisher).as(publisher))

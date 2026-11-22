@@ -55,7 +55,11 @@ object Process:
   ): ZIO[Scope, ProcessError, Prepared] =
     for
       terret <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate)
-      served <- ZIO.fromEither(TerretMcp.served(terret, config.version, config.events)).mapError(ProcessError.Mcp(_))
+      served <- ZIO
+        .fromEither(
+          TerretMcp.served(terret, config.version, config.events, config.eventsKey)
+        )
+        .mapError(ProcessError.Mcp(_))
     yield Prepared(served, terret.shutdown)
 
   /** The caller's scope owns the ring, the worker, and the accept loop. */

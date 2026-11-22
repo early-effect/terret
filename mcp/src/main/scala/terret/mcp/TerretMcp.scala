@@ -20,24 +20,28 @@ object TerretMcp:
       terret: Terret,
       version: String,
       events: EventPolicy = EventPolicy.terret,
+      key: Option[EventsKey] = None,
   ): Either[TerretMcpError, Mcp[Milestones & Events.Env]] =
-    served(terret, version, events).map(_.mcp)
+    served(terret, version, events, key).map(_.mcp)
 
   /** MCP on `/mcp`, plus the API routes. HTTP serves both. Stdio serves `mcp` only. */
   def served(
       terret: Terret,
       version: String,
       events: EventPolicy = EventPolicy.terret,
+      key: Option[EventsKey] = None,
   ): Either[TerretMcpError, Served] =
     api(terret, version).flatMap { built =>
       Mcp.from(built).left.map(TerretMcpError.Rejected(_)).flatMap { raw =>
-        InstallPrincipal(raw.instructions(summary))(MilestoneEvents.principal)
+        raw
+          .instructions(summary)
           .event[MilestoneFilter, MilestoneData]("session.milestone", "A session milestone")
           .pollAndWebhook(MilestoneEvents.accept)
           .left
           .map(TerretMcpError.Rejected(_))
-          .map { mcp =>
-            val tuned = mcp.eventPolicy(events.ttl).verificationPolicy(events.verification)
+          .map { declared =>
+            val keyed = InstallPrincipal.events(declared)(EventsKey.principal(key))
+            val tuned = keyed.eventPolicy(events.ttl).verificationPolicy(events.verification)
             val jobs: Routes[Milestones & Events.Env, Response] = built.routes
             Served(tuned, tuned.routes ++ jobs)
           }

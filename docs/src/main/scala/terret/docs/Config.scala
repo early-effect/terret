@@ -48,9 +48,12 @@ every tool on that server. `histos:version` grants only `version`. dsh stores th
 not pass servers. An allowed server comes from the workspace `.mcp.json`. `network` is a host
 allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does
 not apply it. `events.verification` is `Skip` or `Required`. The default is `Skip`, because the
-edge already checks the caller. `events.floor`, `events.default`, and `events.cap` are the webhook
-TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor is raised,
-an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
+edge already rejects a request with no `x-terret-key`. `events.key` (`TERRET_EVENTS_KEY`) is optional.
+When it is set, that header must match it or the caller is not a principal. When it is unset, or
+empty, any non-empty `x-terret-key` is a principal. The id is `key:` plus the first 8 hex characters
+of the SHA-256 of the key. The key is not logged. `events.floor`, `events.default`, and `events.cap`
+are the webhook TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor
+is raised, an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
 
 An empty version is rejected. A relative root is rejected. The packaged process does not spawn
 `grok agent serve`. It connects to a serve the user already started.
@@ -167,6 +170,27 @@ when it starts. Restart waits use `restart.pace`, `restart.exit`, `restart.port`
     },
     exampleValue(ProcessConfig.load(base.copy(eventCap = Duration.Zero))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Events(EventPolicyError.Duration("cap"))))
+    },
+    exampleValue(ProcessConfig.load(base).map(_.eventsKey)).assert { key =>
+      assertTrue(key == Right(None))
+    },
+    exampleZIO {
+      ZIO
+        .config(ProcessConfig.raw)
+        .mapError(ProcessError.Config(_))
+        .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.events.key" -> "example-events-key")))
+    }.assert { config =>
+      assertTrue(config.eventsKey.isDefined, !config.toString.contains("example-events-key"))
+    },
+    exampleZIO {
+      ZIO
+        .config(ProcessConfig.raw)
+        .mapError(ProcessError.Config(_))
+        .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.events.key" -> "")))
+    }.assert { config =>
+      assertTrue(config.eventsKey.isEmpty)
     },
     exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
       assertTrue(supervisor == Right(SupervisorChoice.None))

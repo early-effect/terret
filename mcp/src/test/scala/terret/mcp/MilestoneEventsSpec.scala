@@ -1,7 +1,6 @@
 package terret.mcp
 
-import heddle.http.header.Headers
-import heddle.mcp.events.{Events, Principal, WebhookTransport}
+import heddle.mcp.events.{Events, WebhookTransport}
 import heddle.mcp.protocol.{ClientRequest, EventName}
 import slayer.*
 import terret.Terret
@@ -99,14 +98,6 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
           found.forall(_.at == when.toString),
         )
       }
-    },
-    test("a header is the principal and a blank header is nobody") {
-      val headers = Headers(Chunk.empty)
-      for
-        empty <- MilestoneEvents.principal(headers)
-        blank <- MilestoneEvents.principal(headers.add("Authorization", ""))
-        named <- MilestoneEvents.principal(headers.add("Authorization", "Bearer secret"))
-      yield assertTrue(empty.isEmpty, blank.isEmpty, named.contains(Principal("Bearer secret")))
     },
   )
 
