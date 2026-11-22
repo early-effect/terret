@@ -2,15 +2,17 @@ package terret.mcp
 
 import heddle.*
 import terret.Terret
+import terret.milestone.Milestones
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
+import terret.transcript.Entry
 import terret.workspace.Workspace
 import zio.stream.ZStream
 import zio.{Chunk, IO, ZIO}
 
 private[mcp] object Jobs:
-  def api(terret: Terret, version: String): Api[Any] =
+  def api(terret: Terret, version: String): Api[Milestones] =
     Api(TerretMcp.name, version, Some(TerretMcp.summary))
       .job(open)(openSession(terret, _))
       .job(run)(runTurn(terret, _))
@@ -28,6 +30,7 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.Busy](Status.Conflict),
       ErrorCase[JobFailure.EmptySession.type](Status.BadRequest),
       ErrorCase[JobFailure.BadCursor.type](Status.BadRequest),
+      ErrorCase[JobFailure.BadLatest.type](Status.BadRequest),
       ErrorCase[JobFailure.Harness](Status.BadGateway),
     )
 
@@ -62,10 +65,15 @@ private[mcp] object Jobs:
       .hints(Hint.ReadOnly)
       .mcp("resume")
 
+  private val exportSummary =
+    "Return the retained log. after is exclusive and is applied first. milestones keeps only milestone events. " +
+      "latest keeps the newest N of that selection. cursor is the tail of the whole log, even when the selection is shorter. " +
+      "state is the session state."
+
   private val exportLog =
     fallible(Endpoint.post("sessions" / "export").in[ExportJob].out[Log])
       .name("export")
-      .summary("Return the retained log. after is exclusive. cursor is the last retained index.")
+      .summary(exportSummary)
       .hints(Hint.ReadOnly)
       .mcp("export")
 
@@ -111,16 +119,25 @@ private[mcp] object Jobs:
 
   private def replay(terret: Terret, job: SessionJob): IO[JobFailure, Log] =
     for
-      id     <- sessionOf(job.session)
-      events <- terret.resume(id).map(WireEvent.from).runCollect.mapError(JobFailure.from)
-    yield Log(job.session, events, cursor(events.length))
+      id      <- sessionOf(job.session)
+      events  <- terret.resume(id).map(WireEvent.from).runCollect.mapError(JobFailure.from)
+      session <- terret.status(id).mapError(JobFailure.from)
+    yield Log(job.session, events, cursor(events.length), WireState.from(session.state))
 
-  private def exported(terret: Terret, job: ExportJob): IO[JobFailure, Log] =
+  private def exported(terret: Terret, job: ExportJob): ZIO[Milestones, JobFailure, Log] =
     for
-      _    <- bounded(job.after)
-      id   <- sessionOf(job.session)
-      page <- terret.page(id, job.after).mapError(JobFailure.from)
-    yield Log(job.session, page.events.map(entry => WireEvent.from(entry.event)), page.cursor)
+      _       <- bounded(job.after)
+      _       <- positive(job.latest)
+      id      <- sessionOf(job.session)
+      page    <- terret.page(id, job.after).mapError(JobFailure.from)
+      session <- terret.status(id).mapError(JobFailure.from)
+      kept    <- select(page.events, job.milestones.contains(true), job.latest)
+    yield Log(
+      job.session,
+      kept.map(entry => WireEvent.from(entry.event)),
+      page.cursor,
+      WireState.from(session.state),
+    )
 
   private def followed(
       terret: Terret,
@@ -139,6 +156,29 @@ private[mcp] object Jobs:
     after match
       case Some(n) if n < 0 => ZIO.fail(JobFailure.BadCursor)
       case _                => ZIO.unit
+
+  private def positive(latest: Option[Int]): IO[JobFailure, Unit] =
+    latest match
+      case Some(n) if n < 1 => ZIO.fail(JobFailure.BadLatest)
+      case _                => ZIO.unit
+
+  private def select(
+      entries: Chunk[Entry],
+      milestones: Boolean,
+      latest: Option[Int],
+  ): ZIO[Milestones, Nothing, Chunk[Entry]] =
+    val chosen =
+      if milestones then
+        ZIO.serviceWithZIO[Milestones] { service =>
+          ZIO.foldLeft(entries)(Chunk.empty[Entry]) { (kept, entry) =>
+            service.classify(entry.event).map {
+              case Some(_) => kept :+ entry
+              case None    => kept
+            }
+          }
+        }
+      else ZIO.succeed(entries)
+    chosen.map(rows => Milestones.latest(rows, latest))
 
   private def cursor(length: Int): Option[Long] =
     if length == 0 then None else Some(length.toLong - 1)

@@ -4,13 +4,18 @@ Do not run `terret restart`, `terret-off`, `terret-on`, or `launchctl bootout` /
 
 Run only the tests a change touches.
 
-`./histos test <project> --only <suite>` selects suites by name. It does not select one test inside a suite, and histos does not forward a test-name filter. Put a live case you need to run in its own suite, and pass that suite to `--only`. Do not run the whole live suite by default, including before a push. `LiveGrokSpec` is that whole suite. `LiveRefusalSpec` is the refusal cases.
+`./histos test <project> --only <suite>` selects suites by name. `--tag <name>` keeps a test that carries that exact tag. `--test <term>` keeps a test whose label contains the term. `--quick` skips a suite whose stamp still matches, and it is not a full proof.
 
-`CI=true` does not reach the test process through histos (histos#212), so it does not skip the live suite.
+Do not run `LiveGrokSpec` or `LiveRefusalSpec` as a whole, including before a push. A live case that must run alone carries a tag. The MCP opt-in smoke is `mcp-optin`. Those suites run at most 2 cases at a time. Each case owns its wire log and its probe files. `--only` and `--tag` still select.
+
+This histos copies `CI` and `GITHUB_ACTIONS` into the test process. `LiveGate` skips the live suite when either is set.
+
+`export` takes optional `after`, `milestones`, and `latest`. `after` is exclusive. `milestones` keeps the events the milestone classifier accepts. `latest` keeps the newest N of that selection. The response `cursor` is the tail of the whole log, and `state` is the session state.
 
 Tee the log under `target/`. Do not pipe it away.
 
 ```text
 set -o pipefail
 ./histos test grok --only terret.grok.PermissionChoiceSpec 2>&1 | tee target/permission-choice.log
+./histos test grok --tag mcp-optin 2>&1 | tee target/mcp-optin.log
 ```

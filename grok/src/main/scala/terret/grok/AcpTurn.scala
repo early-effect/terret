@@ -18,6 +18,8 @@ object AcpTurn:
       refusals: Ref[Map[String, String]],
       printed: Ref[Map[String, String]],
       hostCancel: Ref[Boolean],
+      mcp: McpAccess,
+      network: NetworkPolicy,
   )
 
   def await(pipe: RpcPipe, id: Int): IO[HarnessFailure, Json] =
@@ -64,7 +66,16 @@ object AcpTurn:
       scope: Scope,
   ): IO[HarnessFailure, Chunk[Event]] =
     if method == "session/request_permission" then
-      val decision = PermissionChoice.decide(scope.policy, scope.ceiling, scope.workspace, scope.writeRoots, params)
+      val decision =
+        PermissionChoice.decide(
+          scope.policy,
+          scope.ceiling,
+          scope.workspace,
+          scope.writeRoots,
+          params,
+          scope.mcp,
+          scope.network,
+        )
       remember(scope, decision) *> pipe.write(Wire.ok(requestId, PermissionChoice.body(decision))).as(Chunk.empty)
     else pipe.write(Wire.fail(requestId, Wire.methodNotFound, "Method not found")).as(Chunk.empty)
 

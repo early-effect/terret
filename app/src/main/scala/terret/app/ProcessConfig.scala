@@ -1,10 +1,21 @@
 package terret.app
 
 import terret.dsh.{DshConfig, DshConfigError}
-import terret.grok.{AcpBind, GrokApproval, GrokConfig, GrokConfigError, GrokTransport}
+import terret.grok.{
+  AcpBind,
+  GrokApproval,
+  GrokConfig,
+  GrokConfigError,
+  GrokTransport,
+  McpGrantError,
+  McpPolicy,
+  NetworkGrantError,
+  NetworkPolicy,
+}
+import terret.mcp.{EventPolicy, EventPolicyError, EventsKey}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
-import zio.{Chunk, Config}
+import zio.{Chunk, Config, Duration}
 
 enum ProcessHarness:
   case Grok(config: GrokConfig)
@@ -17,6 +28,10 @@ final case class ProcessConfig(
     version: String,
     harness: ProcessHarness,
     writeRoots: Chunk[Workspace] = Chunk.empty,
+    mcp: McpPolicy = McpPolicy.empty,
+    network: NetworkPolicy = NetworkPolicy.empty,
+    events: EventPolicy = EventPolicy.terret,
+    eventsKey: Option[EventsKey] = None,
 )
 
 object ProcessConfig:
@@ -27,6 +42,25 @@ object ProcessConfig:
     version = "dev",
     harness = ProcessHarness.Grok(GrokConfig.stdio),
   )
+
+  private final case class EventRaw(
+      verification: String,
+      floor: Duration,
+      default: Duration,
+      cap: Duration,
+      key: Option[String],
+  )
+
+  private val eventRaw: Config[EventRaw] =
+    (
+      Config.string("verification").withDefault(EventPolicy.name(EventPolicy.terret.verification)) ++
+        Config.duration("floor").withDefault(EventPolicy.terret.floor) ++
+        Config.duration("default").withDefault(EventPolicy.terret.default) ++
+        Config.duration("cap").withDefault(EventPolicy.terret.cap) ++
+        Config.string("key").optional
+    ).nested("events").map { (verification, floor, default, cap, key) =>
+      EventRaw(verification, floor, default, cap, key)
+    }
 
   val raw: Config[Raw] =
     (
@@ -45,7 +79,10 @@ object ProcessConfig:
         Config.string("bindHost").optional ++
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional ++
-        Config.string("writeRoots").optional
+        Config.string("writeRoots").optional ++
+        Config.string("mcp").optional ++
+        Config.string("network").optional ++
+        eventRaw
     ).nested("terret").map {
       (
           listen,
@@ -64,6 +101,9 @@ object ProcessConfig:
           bindPort,
           bindSecret,
           writeRoots,
+          mcp,
+          network,
+          events,
       ) =>
         Raw(
           listen,
@@ -82,6 +122,13 @@ object ProcessConfig:
           bindPort,
           bindSecret,
           writeRoots,
+          mcp,
+          network,
+          events.verification,
+          events.floor,
+          events.default,
+          events.cap,
+          events.key,
         )
     }
 
@@ -93,7 +140,11 @@ object ProcessConfig:
       version <- versionOf(raw.version)
       harness <- harnessOf(raw, policy)
       roots   <- rootsOf(raw.writeRoots)
-    yield ProcessConfig(listen, policy, root, version, harness, roots)
+      grants  <- grantsOf(raw.mcp)
+      network <- hostsOf(raw.network)
+      events  <- eventsOf(raw)
+      eventsKey = raw.eventKey.flatMap(EventsKey.from)
+    yield ProcessConfig(listen, policy, root, version, harness, roots, grants, network, events, eventsKey)
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -241,7 +292,30 @@ object ProcessConfig:
       bindPort: Option[Int],
       bindSecret: Option[String],
       writeRoots: Option[String] = None,
+      mcp: Option[String] = None,
+      network: Option[String] = None,
+      eventVerification: String = EventPolicy.name(EventPolicy.terret.verification),
+      eventFloor: Duration = EventPolicy.terret.floor,
+      eventDefault: Duration = EventPolicy.terret.default,
+      eventCap: Duration = EventPolicy.terret.cap,
+      eventKey: Option[String] = None,
   )
+
+  private def grantsOf(raw: Option[String]): Either[ProcessError, McpPolicy] =
+    raw match
+      case None       => Right(McpPolicy.empty)
+      case Some(text) => McpPolicy.parse(text).left.map(ProcessError.McpGrant(_))
+
+  private def hostsOf(raw: Option[String]): Either[ProcessError, NetworkPolicy] =
+    raw match
+      case None       => Right(NetworkPolicy.empty)
+      case Some(text) => NetworkPolicy.parse(text).left.map(ProcessError.NetworkGrant(_))
+
+  private def eventsOf(raw: Raw): Either[ProcessError, EventPolicy] =
+    EventPolicy
+      .from(raw.eventVerification, raw.eventFloor, raw.eventDefault, raw.eventCap)
+      .left
+      .map(ProcessError.Events(_))
 end ProcessConfig
 
 enum ProcessError:
@@ -262,31 +336,37 @@ enum ProcessError:
   case Workspace(error: WorkspaceError)
   case Grok(error: GrokConfigError)
   case Dsh(error: DshConfigError)
+  case NetworkGrant(error: NetworkGrantError)
   case Mcp(error: terret.mcp.TerretMcpError)
+  case McpGrant(error: McpGrantError)
+  case Events(error: EventPolicyError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
   case Config(error: zio.Config.Error)
 
   def render: String = this match
-    case Listen(value)     => s"listen is http or stdio, got $value"
-    case Host              => "host is empty"
-    case Port(value)       => s"port is 0 to 65535, got $value"
-    case Version           => "version is empty"
-    case Policy(value)     => s"policy is Closed, Inherit, or Clamp, got $value"
-    case Permission(value) => s"unknown permission $value"
-    case Transport(value)  => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
-    case Approval(value)   => s"approval is Ask or Always, got $value"
-    case Harness(value)    => s"harness is grok or dsh, got $value"
-    case ProfileUnexpected => "profile belongs on the dsh harness"
-    case GrokKeys          => "transport, approval, and bind belong on the grok harness"
-    case BindIncomplete    => "a socket transport needs bindHost, bindPort, and bindSecret"
-    case BindUnexpected    => "bind fields belong on a socket transport"
-    case CliAsk            => "the CLI transport cannot answer a permission prompt"
-    case Workspace(error)  => s"workspace ${error.toString}"
-    case Grok(error)       => s"grok ${error.toString}"
-    case Dsh(error)        => s"dsh ${error.toString}"
-    case Mcp(error)        => s"mcp ${error.toString}"
-    case Server(error)     => error.message
-    case Stdio(cause)      => s"stdio ${cause.toString}"
-    case Config(error)     => error.toString
+    case Listen(value)       => s"listen is http or stdio, got $value"
+    case Host                => "host is empty"
+    case Port(value)         => s"port is 0 to 65535, got $value"
+    case Version             => "version is empty"
+    case Policy(value)       => s"policy is Closed, Inherit, or Clamp, got $value"
+    case Permission(value)   => s"unknown permission $value"
+    case Transport(value)    => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
+    case Approval(value)     => s"approval is Ask or Always, got $value"
+    case Harness(value)      => s"harness is grok or dsh, got $value"
+    case ProfileUnexpected   => "profile belongs on the dsh harness"
+    case GrokKeys            => "transport, approval, and bind belong on the grok harness"
+    case BindIncomplete      => "a socket transport needs bindHost, bindPort, and bindSecret"
+    case BindUnexpected      => "bind fields belong on a socket transport"
+    case CliAsk              => "the CLI transport cannot answer a permission prompt"
+    case Workspace(error)    => s"workspace ${error.toString}"
+    case Grok(error)         => s"grok ${error.toString}"
+    case Dsh(error)          => s"dsh ${error.toString}"
+    case NetworkGrant(error) => error.render
+    case Mcp(error)          => s"mcp ${error.toString}"
+    case McpGrant(error)     => error.render
+    case Events(error)       => error.render
+    case Server(error)       => error.message
+    case Stdio(cause)        => s"stdio ${cause.toString}"
+    case Config(error)       => error.toString
 end ProcessError

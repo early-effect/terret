@@ -5,17 +5,29 @@ import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
-import zio.{Scope, ZIO, ZLayer}
+import zio.{Chunk, Scope, ZIO, ZLayer}
 
 trait AcpOpen:
-  def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe]
+  def open(
+      workspace: Workspace,
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      mcp: McpPolicy,
+      network: NetworkPolicy,
+  ): ZIO[Scope, HarnessFailure, RpcPipe]
 
 object AcpOpen:
   def live(config: GrokConfig, spawner: Spawner): AcpOpen = new:
-    def open(workspace: Workspace, policy: PermissionPolicy, ceiling: Ceiling): ZIO[Scope, HarnessFailure, RpcPipe] =
+    def open(
+        workspace: Workspace,
+        policy: PermissionPolicy,
+        ceiling: Ceiling,
+        mcp: McpPolicy,
+        network: NetworkPolicy,
+    ): ZIO[Scope, HarnessFailure, RpcPipe] =
       config.transport match
         case GrokTransport.AcpStdio =>
-          val argv = Launch.stdio(config, policy, ceiling)
+          val argv = Launch.stdio(config, policy, ceiling, mcp, network)
           for
             spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, workspace))(_.destroy)
             // stderr's read ignores interruption. Do not join it from this scope.
@@ -50,10 +62,10 @@ object AcpOpen:
       ),
     )
 
-  def sessionNew(config: GrokConfig, workspace: Workspace): Json =
+  def sessionNew(config: GrokConfig, workspace: Workspace, servers: Chunk[McpServer] = Chunk.empty): Json =
     val fields = List(
       "cwd"        -> Json.Str(workspace.path.toString),
-      "mcpServers" -> Json.Arr(),
+      "mcpServers" -> McpServer.encodeAll(servers),
     )
     val withMeta =
       if config.approval == GrokApproval.Always then fields :+ ("_meta" -> Json.Obj("yoloMode" -> Json.Bool(true)))

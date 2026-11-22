@@ -2,6 +2,7 @@ package terret.memory
 
 import terret.event.{Event, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure}
+import terret.milestone.MilestoneSink
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -101,12 +102,12 @@ object InMemory:
       policy: PermissionPolicy,
   )
 
-  def make(script: Script): UIO[InMemory] =
+  def make(script: Script, milestones: MilestoneSink = MilestoneSink.discard): UIO[InMemory] =
     for
       sessions  <- Ref.make(Map.empty[SessionId, Slot])
       gates     <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
       cancelled <- Ref.make(Chunk.empty[SessionId])
-      journal   <- Journal.make
+      journal   <- Journal.make(milestones)
     yield InMemory(sessions, gates, cancelled, journal, script)
 
   def layer(script: Script): ZLayer[Any, Nothing, Harness] =

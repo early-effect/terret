@@ -135,7 +135,12 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         search  <- checked(PermissionPolicy.Clamp(open), open, hosted("web_search"))
         image   <- checked(PermissionPolicy.Clamp(open), open, hosted("image_gen"))
         plain   <- checked(PermissionPolicy.Clamp(open), open, hosted("list_dir"))
-        granted <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"))
+        granted <- checked(
+          PermissionPolicy.Clamp(Ceiling.all),
+          Ceiling.all,
+          hosted("web_fetch"),
+          hosts = NetworkPolicy(Set("example.com")),
+        )
       yield assertTrue(
         fetch == PermissionAnswer.Refused(
           "reject-once",
@@ -175,7 +180,12 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         Json.Obj("optionId" -> Json.Str("reject-always-domain"), "kind" -> Json.Str("reject_always_domain")),
       )
       for
-        granted <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, fetch(domain))
+        granted <- checked(
+          PermissionPolicy.Clamp(Ceiling.all),
+          Ceiling.all,
+          fetch(domain),
+          hosts = NetworkPolicy(Set("example.com")),
+        )
         clamped <- checked(PermissionPolicy.Clamp(open), open, fetch(domain))
         session <- checked(PermissionPolicy.Clamp(Ceiling.all), open, fetch(domain))
         bare    <- checked(PermissionPolicy.Clamp(open), open, params("fetch"))
@@ -216,6 +226,67 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
           "reject-once",
           "",
           "search needs ReadWorkspace, clamped by server policy",
+        ),
+      )
+    },
+    test("an MCP call needs a grant, and a network use_tool stays Network") {
+      val version = McpAccess(McpPolicy(Chunk(McpGrant("histos", Some(Set("version"))))), Set("histos"))
+      val every   = McpAccess(McpPolicy(Chunk(McpGrant("histos", None))), Set("histos"))
+      val absent  = McpAccess(McpPolicy(Chunk(McpGrant("histos", None))), Set.empty)
+      for
+        search   <- checked(PermissionPolicy.Inherit, Ceiling.all, mcpSearch)
+        allowed  <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__version"), access = version)
+        tool     <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__compile"), access = version)
+        server   <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("metals__graph"), access = version)
+        prefixed <- checked(PermissionPolicy.Inherit, Ceiling.all, hosted("mcp__histos__cache_clean"), access = every)
+        missing  <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("histos__version"), access = absent)
+        unqualified <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("list_dir"), access = every)
+        network     <- checked(PermissionPolicy.Closed, Ceiling.closed, hosted("web_fetch"), access = every)
+      yield assertTrue(
+        search == PermissionAnswer.Refused("reject-once", "call_1", "search_tool needs an MCP grant in terret.mcp"),
+        allowed == PermissionAnswer.Selected("allow-once"),
+        tool == PermissionAnswer.Refused("reject-once", "call_1", "compile needs an MCP grant on histos"),
+        server == PermissionAnswer.Refused("reject-once", "call_1", "metals needs an MCP grant in terret.mcp"),
+        prefixed == PermissionAnswer.Selected("allow-once"),
+        missing == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "histos is granted but .mcp.json does not define it",
+        ),
+        unqualified == PermissionAnswer.Refused("reject-once", "call_1", "use_tool needs a granted permission"),
+        network == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "web_fetch needs Network, clamped by server policy",
+        ),
+      )
+    },
+    test("a host must be granted, and a missing Network still names Network") {
+      val open    = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val example = NetworkPolicy(Set("example.com"))
+      for
+        allowed  <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"), hosts = example)
+        other    <- checked(PermissionPolicy.Inherit, Ceiling.all, hosted("web_fetch"), hosts = example)
+        missing  <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, hosted("web_fetch"))
+        hostless <- checked(PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, searchTool, hosts = example)
+        closed   <- checked(PermissionPolicy.Clamp(open), open, hosted("web_fetch"), hosts = example)
+      yield assertTrue(
+        allowed == PermissionAnswer.Selected("allow-once"),
+        other == PermissionAnswer.Selected("allow-once"),
+        missing == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "example.com needs a network grant in terret.network",
+        ),
+        hostless == PermissionAnswer.Refused(
+          "reject-once",
+          "",
+          "web_search needs a host grant in terret.network",
+        ),
+        closed == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "web_fetch needs Network, clamped by server policy",
         ),
       )
     },
@@ -328,16 +399,29 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
       "options" -> options,
     )
 
+  private val mcpSearch: Json =
+    Json.Obj(
+      "toolCall" -> Json.Obj(
+        "toolCallId" -> Json.Str("call_1"),
+        "kind"       -> Json.Str("other"),
+        "title"      -> Json.Str("search_tool"),
+        "_meta"      -> Json.Obj("x.ai/tool" -> Json.Obj("name" -> Json.Str("search_tool"))),
+      ),
+      "options" -> options,
+    )
+
   private def checked(
       policy: PermissionPolicy,
       ceiling: Ceiling,
       params: Json,
       roots: Chunk[Workspace] = Chunk.empty,
+      access: McpAccess = McpAccess.closed,
+      hosts: NetworkPolicy = NetworkPolicy.empty,
   ) =
     ZIO
       .fromEither(Workspace.from("/work"))
       .map { root =>
-        PermissionChoice.decide(policy, ceiling, root, roots, params)
+        PermissionChoice.decide(policy, ceiling, root, roots, params, access, hosts)
       }
       .orDieWith(_ => new IllegalArgumentException("workspace"))
 end PermissionChoiceSpec

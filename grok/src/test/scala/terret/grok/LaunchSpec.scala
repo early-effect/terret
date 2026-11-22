@@ -115,7 +115,12 @@ object LaunchSpec extends ZIOSpecDefault:
       )
     },
     test("a clamp of every permission asks and denies only the ungoverned tools") {
-      val argv = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Clamp(Ceiling.all), Ceiling.all)
+      val argv = Launch.stdio(
+        GrokConfig.stdio,
+        PermissionPolicy.Clamp(Ceiling.all),
+        Ceiling.all,
+        network = NetworkPolicy(Set("example.com")),
+      )
       assertTrue(
         argv.rendered == Chunk(
           "grok",
@@ -143,10 +148,40 @@ object LaunchSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("a grant drops search_tool and use_tool, and an empty policy keeps them") {
+      val granted   = McpPolicy(Chunk(McpGrant("histos", Some(Set("version")))))
+      val hosts     = NetworkPolicy(Set("example.com"))
+      val withGrant = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Clamp(Ceiling.all), Ceiling.all, granted, hosts)
+      val empty     = Launch.stdio(
+        GrokConfig.stdio,
+        PermissionPolicy.Clamp(Ceiling.all),
+        Ceiling.all,
+        network = hosts,
+      )
+      assertTrue(
+        withGrant.rendered == Chunk("grok", "--permission-mode", "default", "agent", "stdio"),
+        empty.rendered == Chunk(
+          "grok",
+          "--permission-mode",
+          "default",
+          "--disallowed-tools",
+          "search_tool,use_tool",
+          "agent",
+          "stdio",
+        ),
+      )
+    },
+    test("an empty host allowlist keeps network tools denied") {
+      val argv = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Clamp(Ceiling.all), Ceiling.all)
+      assertTrue(
+        argv.args.contains("--disable-web-search"),
+        deny(argv).exists(names => names.contains("web_fetch") && names.contains("web_search")),
+      )
+    },
     test("denied names stay sorted and name the shell the model sees") {
       val onlyNetwork = Ceiling(Set(Permission.Network))
       assertTrue(
-        Launch.denied(onlyNetwork) == Chunk(
+        Launch.denied(onlyNetwork, network = NetworkPolicy(Set("example.com"))) == Chunk(
           "Agent",
           "get_command_or_subagent_output",
           "get_task_output",

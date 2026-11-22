@@ -19,6 +19,6 @@ object LiveRefusalSpec extends ZIOSpecDefault:
         LiveGrokSpec.heredocOutside,
       ).when(LiveGate.current == LiveGate.Decision.Ready)
         @@ TestAspect.beforeAll(LiveGrokSpec.prepare)
-        @@ TestAspect.sequential
+        @@ TestAspect.parallelN(LiveGrokSpec.parallelBound)
         @@ TestAspect.withLiveClock,
     ) @@ TestAspect.sequential
