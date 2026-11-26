@@ -5,15 +5,17 @@ import zio.*
 
 object build extends HistosBuild:
   def graph =
-    val library    = Ship("terret").next(0, 0, 1)
+    val ship       = Ship("terret")
+    val library    = ship.next(0, 0, 1)
     val scala3     = scala"3.10.1"
     val zio        = dep"dev.zio::zio:2.1.27"
     val zioStreams = dep"dev.zio::zio-streams:2.1.27"
     val zioJson    = dep"dev.zio::zio-json:1.1.2"
     val zioTest    = dep"dev.zio::zio-test:2.1.27"
     val zioTestSbt = dep"dev.zio::zio-test-sbt:2.1.27"
-    val core       = module("core", Jvm)(scala3)
-      .artifact(artifact"terret")
+    val core       = ship
+      .parent(Jvm)(scala3)
+      .in(path"core")
       .scalac(
         ScalacFlag.Deprecation,
         ScalacFlag.Feature,
@@ -23,7 +25,6 @@ object build extends HistosBuild:
       .libraryDependencies(zio, zioStreams, zioJson)
       .testDependencies(zioTest, zioTestSbt)
     val grok = module("grok", Jvm)(scala3)
-      .artifact(artifact"terret-grok")
       .dependsOn(core)
       .scalac(
         ScalacFlag.Deprecation,
@@ -34,7 +35,6 @@ object build extends HistosBuild:
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val dsh = module("dsh", Jvm)(scala3)
-      .artifact(artifact"terret-dsh")
       .dependsOn(core)
       .scalac(
         ScalacFlag.Deprecation,
@@ -45,7 +45,6 @@ object build extends HistosBuild:
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
     val mcp = module("mcp", Jvm)(scala3)
-      .artifact(artifact"terret-mcp")
       .dependsOn(core)
       .scalac(
         ScalacFlag.Deprecation,
@@ -56,7 +55,6 @@ object build extends HistosBuild:
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.16.0-a4fe367ee229-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val app = module("app", Jvm)(scala3)
-      .artifact(artifact"terret-app")
       .dependsOn(mcp, grok, dsh)
       .main(MainClass("terret.app.Main"))
       .scalac(
@@ -94,16 +92,16 @@ object build extends HistosBuild:
       .note(PluginId("dev.earlyeffect.specular"), NoteKey("library"), shipNote(library.released.revision))
     Projects
       .organization(organization"rocks.earlyeffect")
-      .license(License(license"Apache-2.0", url"https://www.apache.org/licenses/LICENSE-2.0.txt"))
+      .license(License(license"Apache-2.0", MetadataUri("https://www.apache.org/licenses/LICENSE-2.0.txt")))
       .developer(Developer(developer"russwyte", pom"Russ White"))
       .scm(
         Scm(
-          url"https://github.com/early-effect/terret",
+          MetadataUri("https://github.com/early-effect/terret"),
           connection"scm:git@github.com:early-effect/terret.git",
         )
       )
       .description(pom"Terret lets coding hosts talk to coding harnesses.")
-      .url(url"https://github.com/early-effect/terret")
+      .url(MetadataUri("https://github.com/early-effect/terret"))
       .locked(
         ships(library(core, grok, dsh, mcp, app)),
         core,
