@@ -17,7 +17,9 @@ the way a heddle is a guide on a loom. It is not the host, and it is not the har
 A coding host speaks MCP. Cursor, Claude Code, Grok Bot, and Warp are hosts. A coding harness does
 not speak MCP. Grok Build and dsh are harnesses. Terret takes MCP in and talks to the harness
 through an adapter. The core never learns a harness's name. The jobs a host calls stay `open`,
-`run`, `status`, `resume`, `export`, and `cancel`. `follow` is a subscription on that same API, not
+`run`, `status`, `resume`, `export`, and `cancel`. `open` takes an optional `model` key from the
+grok config. A grok process terret spawns is started with `--model`, and the result reports the
+chosen model. `follow` is a subscription on that same API, not
 a seventh job. A host listens with MCP `subscriptions/listen`, or opens
 `GET /sessions/{session}/events` as server-sent events. The event id is the log index. Send it back
 as `after` to continue strictly after that event. Closing the stream does not cancel the turn.
@@ -27,8 +29,10 @@ edge: one adapter per harness, then those same jobs promoted through heddle.
 From this repository, `./histos test` proves the suites. `./histos run app` listens on
 `http://127.0.0.1:8080/mcp`. `./histos run app -- restart` stops the supervised process, waits
 until that process has exited and the port is free, starts it, and returns when the new server is
-listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`, `foreground`, or `none`. `none` is the
-default and does not call a service manager.
+listening. That command stays in the caller's session. `scripts/terret-restart` is the one a
+session under the launchd job can run: it detaches, unloads the job, polls until the port is free,
+starts it, and polls until it is listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`,
+`foreground`, or `none`. `none` is the default and does not call a service manager.
 
 The default harness is Grok: command `grok`, transport `AcpStdio`,
 approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses ACP stdio, because

@@ -1,6 +1,6 @@
 # Terret
 
-Do not run `terret restart`, `terret-off`, `terret-on`, or `launchctl bootout` / `kickstart` / `kill` against the live launchd jobs (`rocks.earlyeffect.terret` and `rocks.earlyeffect.terret-tunnel`). This session is served by that process. Restart is tested through stubs.
+Do not run `terret restart`, `terret-off`, `terret-on`, `scripts/terret-restart` (except `--self-check`), or `launchctl bootout` / `kickstart` / `kill` against the live launchd jobs (`rocks.earlyeffect.terret` and `rocks.earlyeffect.terret-tunnel`). This session is served by that process. Restart is tested through stubs and `scripts/terret-restart --self-check`.
 
 Run only the tests a change touches.
 

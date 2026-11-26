@@ -50,22 +50,22 @@ object DshHarnessSpec extends ZIOSpecDefault:
     test("the first prompt omits --session-id and the next prompt adopts the reported id") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
-          spawner <- recording(Chunk((completed, 1), (resumed, 1)), calls)
-          harness <- DshHarness.make(DshConfig.headless, spawner)
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          kept    <- harness.applied(id)
+          calls    <- Ref.make(Chunk.empty[SpawnCall])
+          spawner  <- recording(Chunk((completed, 1), (resumed, 1)), calls)
+          harness  <- DshHarness.make(DshConfig.headless, spawner)
+          root     <- workspace
+          id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          kept     <- harness.applied(id)
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
           exported <- harness.transcript(id)
           replayed <- harness.resume(id).runCollect
           mid      <- calls.get
           again    <- harness.prompt(id, Prompt("again")).runCollect
           spawned  <- calls.get
-          first = Launch.argv(DshConfig.headless, Prompt("hello"), None)
+          first  = Launch.argv(DshConfig.headless, Prompt("hello"), None)
           second = Launch.argv(DshConfig.headless, Prompt("again"), Some("session-1"))
         yield assertTrue(
-          kept == (Ceiling.closed, PermissionPolicy.Closed),
+          kept == (Ceiling.closed, PermissionPolicy.Closed, None),
           streamed == Chunk(
             Event.Thought("thinking"),
             Event.Assistant("hi"),
@@ -85,7 +85,7 @@ object DshHarnessSpec extends ZIOSpecDefault:
     test("a turn_end decides the turn, so a non-zero exit is not a second failure") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
+          calls <- Ref.make(Chunk.empty[SpawnCall])
           body = """{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}"""
           spawner <- recording(Chunk((body, 1)), calls)
           harness <- DshHarness.make(DshConfig.headless, spawner)
@@ -106,15 +106,15 @@ object DshHarnessSpec extends ZIOSpecDefault:
           events  <- harness.prompt(id, Prompt("hello")).runCollect
         yield assertTrue(
           events == Chunk(
-            Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete))),
-          ),
+            Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Protocol(ProtocolFault.Incomplete)))
+          )
         )
       }
     },
     test("an aborted turn is cancelled") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
+          calls <- Ref.make(Chunk.empty[SpawnCall])
           body =
             """{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"aborted","reason":{"kind":"user"}}}
               |{"type":"final","text":""}
@@ -175,7 +175,7 @@ object DshHarnessSpec extends ZIOSpecDefault:
     test("a reported id that is not the resumed id is malformed") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
+          calls <- Ref.make(Chunk.empty[SpawnCall])
           first = """{"type":"session","sessionId":"session-1","cwd":"/work"}
                     |{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
                     |""".stripMargin
@@ -209,15 +209,15 @@ object DshHarnessSpec extends ZIOSpecDefault:
     test("resume does not spawn when the run never named a session") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
+          calls <- Ref.make(Chunk.empty[SpawnCall])
           body = """{"type":"text","text":"hi"}
                    |{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
                    |""".stripMargin
-          spawner <- recording(Chunk((body, 0), (body, 0)), calls)
-          harness <- DshHarness.make(DshConfig.headless, spawner)
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          _       <- harness.prompt(id, Prompt("hello")).runDrain
+          spawner  <- recording(Chunk((body, 0), (body, 0)), calls)
+          harness  <- DshHarness.make(DshConfig.headless, spawner)
+          root     <- workspace
+          id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          _        <- harness.prompt(id, Prompt("hello")).runDrain
           replayed <- harness.resume(id).runCollect
           _        <- harness.prompt(id, Prompt("again")).runDrain
           spawned  <- calls.get
@@ -228,13 +228,13 @@ object DshHarnessSpec extends ZIOSpecDefault:
     test("unknown sessions fail and an open session can be cancelled") {
       ZIO.scoped {
         for
-          calls   <- Ref.make(Chunk.empty[SpawnCall])
-          spawner <- recording(Chunk.empty, calls)
-          harness <- DshHarness.make(DshConfig.headless, spawner)
-          root    <- workspace
-          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
-          missing <- ZIO.fromEither(SessionId.from("missing")).orDieWith(_ => new IllegalArgumentException("session"))
-          unknown <- harness.transcript(missing).flip
+          calls     <- Ref.make(Chunk.empty[SpawnCall])
+          spawner   <- recording(Chunk.empty, calls)
+          harness   <- DshHarness.make(DshConfig.headless, spawner)
+          root      <- workspace
+          id        <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
+          missing   <- ZIO.fromEither(SessionId.from("missing")).orDieWith(_ => new IllegalArgumentException("session"))
+          unknown   <- harness.transcript(missing).flip
           cancelled <- harness.cancel(id)
         yield assertTrue(unknown == HarnessFailure.UnknownSession(missing), cancelled == ())
       }

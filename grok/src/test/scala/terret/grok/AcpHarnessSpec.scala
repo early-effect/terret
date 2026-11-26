@@ -3,6 +3,7 @@ package terret.grok
 import slayer.*
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.ModelKey
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.transcript.Retain
@@ -328,8 +329,15 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         pending <- Ref.make(frames)
         seen    <- Ref.make(Seen(Chunk.empty, Chunk.empty))
         _       <- stub[AcpOpen](
-          _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
-        ) { (_, _, _, _, _) =>
+          _.open(
+            any[Workspace],
+            any[PermissionPolicy],
+            any[Ceiling],
+            any[McpPolicy],
+            any[NetworkPolicy],
+            any[Option[ModelKey]],
+          )
+        ) { (_, _, _, _, _, _) =>
           ZIO.succeed(pipe)
         }
         _ <- stub[RpcPipe](_.read)(pull(pending, after))

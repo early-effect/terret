@@ -55,6 +55,10 @@ of the SHA-256 of the key. The key is not logged. `events.floor`, `events.defaul
 are the webhook TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor
 is raised, an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
 
+`grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models
+`open` may request. Absent, that file is `~/.grok/config.toml`. An empty path is rejected. Nested
+tables and the `[models]` settings table are not names. The file is read when `open` names a model.
+
 An empty version is rejected. A relative root is rejected. The packaged process does not spawn
 `grok agent serve`. It connects to a serve the user already started.
 
@@ -118,6 +122,22 @@ when it starts. Restart waits use `restart.pace`, `restart.exit`, `restart.port`
     },
     exampleValue(ProcessConfig.load(base.copy(network = Some("example.com,")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.NetworkGrant(NetworkGrantError.BadToken(""))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(grokConfig = Some("/var/terret/grok.toml"))).map(_.grokConfig)).assert {
+      path =>
+        assertTrue(path == Right(java.nio.file.Path.of("/var/terret/grok.toml")))
+    },
+    exampleValue(ProcessConfig.load(base.copy(grokConfig = Some("")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.GrokConfigPath))
+    },
+    exampleZIO {
+      ZIO
+        .config(ProcessConfig.raw)
+        .mapError(ProcessError.Config(_))
+        .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.grok.config" -> "/var/terret/grok.toml")))
+    }.assert { config =>
+      assertTrue(config.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"))
     },
     exampleValue(ProcessConfig.load(base).map(_.events)).assert { events =>
       assertTrue(

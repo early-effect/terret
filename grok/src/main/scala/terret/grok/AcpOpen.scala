@@ -2,6 +2,7 @@ package terret.grok
 
 import heddle.LinePipe
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
@@ -14,6 +15,7 @@ trait AcpOpen:
       ceiling: Ceiling,
       mcp: McpPolicy,
       network: NetworkPolicy,
+      model: Option[ModelKey] = None,
   ): ZIO[Scope, HarnessFailure, RpcPipe]
 
 object AcpOpen:
@@ -24,10 +26,11 @@ object AcpOpen:
         ceiling: Ceiling,
         mcp: McpPolicy,
         network: NetworkPolicy,
+        model: Option[ModelKey] = None,
     ): ZIO[Scope, HarnessFailure, RpcPipe] =
       config.transport match
         case GrokTransport.AcpStdio =>
-          val argv = Launch.stdio(config, policy, ceiling, mcp, network)
+          val argv = Launch.stdio(config, policy, ceiling, mcp, network, model)
           for
             spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, workspace))(_.destroy)
             // stderr's read ignores interruption. Do not join it from this scope.

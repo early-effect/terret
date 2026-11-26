@@ -71,6 +71,22 @@ object build extends HistosBuild:
         dep"rocks.earlyeffect::heddle-mcp:0.16.0-a4fe367ee229-SNAPSHOT",
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
+    val find = module("find", Jvm)(scala3)
+      .scalac(
+        ScalacFlag.Deprecation,
+        ScalacFlag.Feature,
+        ScalacFlag.UnusedAll,
+        ScalacFlag.ImplicitConversions,
+      )
+      .libraryDependencies(
+        zio,
+        zioStreams,
+        dep"com.microsoft.onnxruntime:onnxruntime:1.32.0",
+        dep"ai.djl.huggingface:tokenizers:0.40.0",
+        dep"rocks.earlyeffect::saferis:0.21.0",
+        dep"rocks.earlyeffect::saferis-sqlite-jdbc:0.21.0",
+      )
+      .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val docs = module("docs", Jvm)(scala3)
       .dependsOn(app, dsh)
       .scalac(
@@ -110,6 +126,7 @@ object build extends HistosBuild:
         mcp,
         app,
         docs,
+        find,
       )
 
   override def services =

@@ -3,6 +3,7 @@ package terret.memory
 import terret.event.{Event, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure}
 import terret.milestone.MilestoneSink
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -20,7 +21,12 @@ object Script:
       Event.TurnFinished(TurnOutcome.Completed),
     )
 
-final case class Applied(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy)
+final case class Applied(
+    workspace: Workspace,
+    ceiling: Ceiling,
+    policy: PermissionPolicy,
+    model: Option[ModelKey],
+)
 
 final class InMemory private (
     sessions: Ref[Map[SessionId, InMemory.Slot]],
@@ -33,14 +39,19 @@ final class InMemory private (
   def cancelled: UIO[Chunk[SessionId]] = cancelledIds.get
 
   def applied(id: SessionId): IO[HarnessFailure, Applied] =
-    slot(id).map(found => Applied(found.workspace, found.ceiling, found.policy))
+    slot(id).map(found => Applied(found.workspace, found.ceiling, found.policy, found.model))
 
-  def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
+  def open(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey] = None,
+  ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
       id = SessionId.trusted(uuid.toString)
       _ <- journal.open(id)
-      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy)))
+      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy, model)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -100,6 +111,7 @@ object InMemory:
       workspace: Workspace,
       ceiling: Ceiling,
       policy: PermissionPolicy,
+      model: Option[ModelKey],
   )
 
   def make(script: Script, milestones: MilestoneSink = MilestoneSink.discard): UIO[InMemory] =

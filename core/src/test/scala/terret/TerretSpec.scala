@@ -1,6 +1,7 @@
 package terret
 
 import terret.config.TerretConfig
+import terret.model.ModelCatalog
 import terret.error.TerretError
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.HarnessFailure
@@ -362,7 +363,13 @@ object TerretSpec extends ZIOSpecDefault:
           terret  <- ZIO.service[Terret]
           session <- terret.open(root)
         yield assertTrue(session.effective == Ceiling.closed, session.state == SessionState.Open)
-      program.provide(Terret.layer, InMemory.layer(Script.echo), ZLayer.succeed(TerretConfig.closed), Hooks.layer)
+      program.provide(
+        Terret.layer,
+        InMemory.layer(Script.echo),
+        ZLayer.succeed(TerretConfig.closed),
+        Hooks.layer,
+        ModelCatalog.emptyLayer,
+      )
     },
   )
 

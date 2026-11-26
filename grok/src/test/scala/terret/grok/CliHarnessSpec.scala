@@ -2,6 +2,7 @@ package terret.grok
 
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.workspace.Workspace
@@ -163,6 +164,27 @@ object CliHarnessSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("a chosen model is passed as --model") {
+      ZIO.scoped {
+        for
+          calls   <- Ref.make(Chunk.empty[SpawnCall])
+          harness <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead)
+          root    <- workspace
+          id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed, Some(ModelKey("grok-4.7")))
+          _       <- harness.prompt(id, Prompt("hello")).runCollect
+          spawned <- calls.get
+          expected = Launch.cli(
+            GrokConfig.cli,
+            id,
+            Prompt("hello"),
+            resume = false,
+            PermissionPolicy.Closed,
+            Ceiling.closed,
+            model = Some(ModelKey("grok-4.7")),
+          )
+        yield assertTrue(spawned.lift(0).exists(_.argv == expected.rendered))
+      }
+    },
     test("a non-json line is malformed") {
       ZIO.scoped {
         for
@@ -186,6 +208,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
         ceiling: Ceiling,
         mcp: McpPolicy,
         network: NetworkPolicy,
+        model: Option[ModelKey] = None,
     ): ZIO[Scope, HarnessFailure, RpcPipe] =
       ZIO.fail(HarnessFailure.Protocol(ProtocolFault.Incomplete))
 

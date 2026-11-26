@@ -6,6 +6,8 @@ import terret.grok.{
   GrokApproval,
   GrokConfig,
   GrokConfigError,
+  GrokModels,
+  GrokModelsPathError,
   GrokTransport,
   McpGrantError,
   McpPolicy,
@@ -16,6 +18,8 @@ import terret.mcp.{EventPolicy, EventPolicyError, EventsKey}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.{Workspace, WorkspaceError}
 import zio.{Chunk, Config, Duration}
+
+import java.nio.file.Path
 
 enum ProcessHarness:
   case Grok(config: GrokConfig)
@@ -32,6 +36,7 @@ final case class ProcessConfig(
     network: NetworkPolicy = NetworkPolicy.empty,
     events: EventPolicy = EventPolicy.terret,
     eventsKey: Option[EventsKey] = None,
+    grokConfig: Path,
 )
 
 object ProcessConfig:
@@ -41,6 +46,7 @@ object ProcessConfig:
     root = None,
     version = "dev",
     harness = ProcessHarness.Grok(GrokConfig.stdio),
+    grokConfig = GrokModels.defaultPath,
   )
 
   private final case class EventRaw(
@@ -82,7 +88,8 @@ object ProcessConfig:
         Config.string("writeRoots").optional ++
         Config.string("mcp").optional ++
         Config.string("network").optional ++
-        eventRaw
+        eventRaw ++
+        GrokModels.config
     ).nested("terret").map {
       (
           listen,
@@ -104,6 +111,7 @@ object ProcessConfig:
           mcp,
           network,
           events,
+          grokConfig,
       ) =>
         Raw(
           listen,
@@ -129,22 +137,36 @@ object ProcessConfig:
           events.default,
           events.cap,
           events.key,
+          grokConfig,
         )
     }
 
   def load(raw: Raw): Either[ProcessError, ProcessConfig] =
     for
-      listen  <- listenOf(raw)
-      policy  <- policyOf(raw.policy, raw.allow)
-      root    <- rootOf(raw.root)
-      version <- versionOf(raw.version)
-      harness <- harnessOf(raw, policy)
-      roots   <- rootsOf(raw.writeRoots)
-      grants  <- grantsOf(raw.mcp)
-      network <- hostsOf(raw.network)
-      events  <- eventsOf(raw)
+      listen     <- listenOf(raw)
+      policy     <- policyOf(raw.policy, raw.allow)
+      root       <- rootOf(raw.root)
+      version    <- versionOf(raw.version)
+      harness    <- harnessOf(raw, policy)
+      roots      <- rootsOf(raw.writeRoots)
+      grants     <- grantsOf(raw.mcp)
+      network    <- hostsOf(raw.network)
+      events     <- eventsOf(raw)
+      grokConfig <- grokConfigOf(raw.grokConfig)
       eventsKey = raw.eventKey.flatMap(EventsKey.from)
-    yield ProcessConfig(listen, policy, root, version, harness, roots, grants, network, events, eventsKey)
+    yield ProcessConfig(
+      listen,
+      policy,
+      root,
+      version,
+      harness,
+      roots,
+      grants,
+      network,
+      events,
+      eventsKey,
+      grokConfig,
+    )
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
     raw.listen match
@@ -299,6 +321,7 @@ object ProcessConfig:
       eventDefault: Duration = EventPolicy.terret.default,
       eventCap: Duration = EventPolicy.terret.cap,
       eventKey: Option[String] = None,
+      grokConfig: Option[String] = None,
   )
 
   private def grantsOf(raw: Option[String]): Either[ProcessError, McpPolicy] =
@@ -310,6 +333,11 @@ object ProcessConfig:
     raw match
       case None       => Right(NetworkPolicy.empty)
       case Some(text) => NetworkPolicy.parse(text).left.map(ProcessError.NetworkGrant(_))
+
+  private def grokConfigOf(raw: Option[String]): Either[ProcessError, Path] =
+    GrokModels.resolve(raw).left.map { case GrokModelsPathError.Empty =>
+      ProcessError.GrokConfigPath
+    }
 
   private def eventsOf(raw: Raw): Either[ProcessError, EventPolicy] =
     EventPolicy
@@ -335,6 +363,7 @@ enum ProcessError:
   case CliAsk
   case Workspace(error: WorkspaceError)
   case Grok(error: GrokConfigError)
+  case GrokConfigPath
   case Dsh(error: DshConfigError)
   case NetworkGrant(error: NetworkGrantError)
   case Mcp(error: terret.mcp.TerretMcpError)
@@ -361,6 +390,7 @@ enum ProcessError:
     case CliAsk              => "the CLI transport cannot answer a permission prompt"
     case Workspace(error)    => s"workspace ${error.toString}"
     case Grok(error)         => s"grok ${error.toString}"
+    case GrokConfigPath      => "grok.config is empty"
     case Dsh(error)          => s"dsh ${error.toString}"
     case NetworkGrant(error) => error.render
     case Mcp(error)          => s"mcp ${error.toString}"

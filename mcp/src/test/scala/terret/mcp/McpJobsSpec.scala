@@ -16,20 +16,23 @@ import heddle.mcp.protocol.{
 }
 import heddle.mcp.transport.Http
 import heddle.sse.{ServerSentEvent, SseCodec}
+import slayer.*
+import terret.Terret
 import terret.config.TerretConfig
+import terret.error.TerretError
 import terret.event.{Event, TurnOutcome}
 import terret.hooks.Hooks
 import terret.memory.{InMemory, Script}
 import terret.milestone.Milestones
+import terret.model.{CatalogError, ModelCatalog, ModelKey}
 import terret.permission.{Permission, PermissionPolicy}
 import terret.workspace.Workspace
-import terret.Terret
 import zio.json.*
 import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.test.*
 import zio.durationInt
-import zio.{Chunk, Promise, Queue, Ref, Scope, UIO, ZIO}
+import zio.{Chunk, Promise, Queue, Ref, Scope, UIO, ZIO, ZLayer}
 
 object McpJobsSpec extends ZIOSpecDefault:
   private val jobs = Set("open", "run", "status", "resume", "export", "cancel")
@@ -320,6 +323,57 @@ object McpJobsSpec extends ZIOSpecDefault:
         }
       yield out
     },
+    test("an omitted model does not read the catalog") {
+      catalogued(Script.echo, stubbed[ModelCatalog]) { host =>
+        host.open.map(opened => assertTrue(opened.model.isEmpty))
+      }
+    },
+    test("an unknown model names itself and lists the known keys") {
+      catalogued(Script.echo, stubbed[ModelCatalog]) { host =>
+        for
+          _ <- stub[ModelCatalog](_.known)(
+            ZIO.succeed(Chunk(ModelKey("grok-4.7"), ModelKey("grok-4.5")))
+          )
+          reply <- host.call("open", OpenJob("/work", Chunk(Permission.ReadWorkspace), Some("missing")))
+        yield assertTrue(
+          failure(reply) == Right(JobFailure.UnknownModel("missing", Chunk("grok-4.5", "grok-4.7")))
+        )
+      }
+    },
+    test("a known model is reported on the opened session") {
+      catalogued(Script.echo, stubbed[ModelCatalog]) { host =>
+        for
+          _     <- stub[ModelCatalog](_.known)(ZIO.succeed(Chunk(ModelKey("grok-4.7"))))
+          reply <- host.call("open", OpenJob("/work", Chunk(Permission.ReadWorkspace), Some("grok-4.7")))
+          found <- ZIO.fromEither(structured(reply.result).flatMap(_.as[Opened])).mapError(Fail.Decode(_))
+        yield assertTrue(found.model == Some("grok-4.7"))
+      }
+    },
+    test("an unreadable model file fails open") {
+      catalogued(Script.echo, stubbed[ModelCatalog]) { host =>
+        for
+          _     <- stub[ModelCatalog](_.known)(ZIO.fail(CatalogError.Unreadable("/var/terret/missing.toml")))
+          reply <- host.call("open", OpenJob("/work", Chunk(Permission.ReadWorkspace), Some("grok-4.7")))
+        yield assertTrue(
+          failure(reply) == Right(JobFailure.ModelsUnreadable("/var/terret/missing.toml"))
+        )
+      }
+    },
+    test("open without a model field decodes, and a malformed catalog is a gateway error") {
+      val job     = OpenJob("/work", Chunk.empty)
+      val decoded = job.toJsonAST match
+        case Right(obj: Json.Obj) =>
+          Json.Obj(obj.fields.filter((name, _) => name != "model")).toJson.fromJson[OpenJob]
+        case Right(other) => Left(other.toJson)
+        case Left(error)  => Left(error)
+      val opened = Opened("s", Chunk.empty, Chunk.empty, WireState.Open, Some("grok-4.7"))
+      assertTrue(
+        decoded == Right(job),
+        opened.toJson.fromJson[Opened] == Right(opened),
+        JobFailure.from(TerretError.Models(CatalogError.Malformed("/var/terret/grok.toml", 3))) ==
+          JobFailure.ModelsMalformed("/var/terret/grok.toml", 3),
+      )
+    },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
 
   private val openAll: OpenJob =
@@ -487,20 +541,25 @@ object McpJobsSpec extends ZIOSpecDefault:
   private def server(
       script: Script,
       config: TerretConfig = TerretConfig.closed,
+      catalog: ModelCatalog = ModelCatalog.empty,
   ): ZIO[Scope, Fail, (InMemory, Mcp[Env])] =
     for
       memory <- InMemory.make(script)
-      terret <- Terret.make(memory, config, Hooks.identity)
+      terret <- Terret.make(memory, config, Hooks.identity, catalog = catalog)
       mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
     yield (memory, mcp)
 
-  private def hosted(script: Script, config: TerretConfig = TerretConfig.closed)(
+  private def hosted(
+      script: Script,
+      config: TerretConfig = TerretConfig.closed,
+      catalog: ModelCatalog = ModelCatalog.empty,
+  )(
       use: (InMemory, Host) => ZIO[Any, Fail, TestResult]
   ): ZIO[Any, Fail, TestResult] =
     ZIO.scoped {
       for
         memory <- InMemory.make(script)
-        terret <- Terret.make(memory, config, Hooks.identity)
+        terret <- Terret.make(memory, config, Hooks.identity, catalog = catalog)
         mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
         pipes  <- LinePipe.connected
         (client, remote) = pipes
@@ -509,6 +568,25 @@ object McpJobsSpec extends ZIOSpecDefault:
         result <- use(memory, host).ensuring(client.close *> fiber.interrupt.ignore)
       yield result
     }
+
+  private def catalogued[R <: ModelCatalog](script: Script, layer: ZLayer[Any, Nothing, R])(
+      use: Host => ZIO[R, Fail, TestResult]
+  ): ZIO[Any, Fail, TestResult] =
+    ZIO
+      .scoped {
+        for
+          catalog <- ZIO.service[ModelCatalog]
+          memory  <- InMemory.make(script)
+          terret  <- Terret.make(memory, TerretConfig.closed, Hooks.identity, catalog = catalog)
+          mcp     <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
+          pipes   <- LinePipe.connected
+          (client, remote) = pipes
+          fiber  <- supply(mcp)(mcp.stdio(remote)).forkScoped
+          host   <- Host.make(client)
+          result <- use(host).ensuring(client.close *> fiber.interrupt.ignore)
+        yield result
+      }
+      .provide(layer)
 
   private def sessionId(mcp: Mcp[Env]): ZIO[Scope, Fail, String] =
     for

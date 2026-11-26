@@ -4,6 +4,7 @@ import heddle.LinePipe
 import terret.event.Event
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -20,14 +21,19 @@ final class DshHarness private (
     journal: Journal,
 ) extends Harness:
 
-  def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
+  def open(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey] = None,
+  ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
       id   <- ZIO
         .fromEither(SessionId.from(uuid.toString))
         .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
       _ <- journal.open(id)
-      _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy)))
+      _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy, model)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -68,8 +74,8 @@ final class DshHarness private (
   def close: UIO[Unit] =
     gates.get.flatMap(open => ZIO.foreachDiscard(open.values)(_.succeed(())))
 
-  private[dsh] def applied(id: SessionId): IO[HarnessFailure, (Ceiling, PermissionPolicy)] =
-    require(id).map(slot => (slot.ceiling, slot.policy))
+  private[dsh] def applied(id: SessionId): IO[HarnessFailure, (Ceiling, PermissionPolicy, Option[ModelKey])] =
+    require(id).map(slot => (slot.ceiling, slot.policy, slot.model))
 
   private def turn(id: SessionId, slot: DshHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrapScoped {
@@ -110,11 +116,17 @@ object DshHarness:
       ceiling: Ceiling,
       policy: PermissionPolicy,
       remote: Option[String],
+      model: Option[ModelKey],
   )
 
   private[dsh] object Slot:
-    def empty(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): Slot =
-      Slot(workspace, ceiling, policy, None)
+    def empty(
+        workspace: Workspace,
+        ceiling: Ceiling,
+        policy: PermissionPolicy,
+        model: Option[ModelKey] = None,
+    ): Slot =
+      Slot(workspace, ceiling, policy, None, model)
 
   def make(
       config: DshConfig,

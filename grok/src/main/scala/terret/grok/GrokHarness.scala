@@ -4,6 +4,7 @@ import heddle.LinePipe
 import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -27,10 +28,15 @@ final class GrokHarness private (
     hosts: HostAllowlist,
 ) extends Harness:
 
-  def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
+  def open(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey] = None,
+  ): IO[HarnessFailure, SessionId] =
     config.transport match
-      case GrokTransport.Cli => openCli(workspace, ceiling, policy)
-      case _                 => openAcp(workspace, ceiling, policy)
+      case GrokTransport.Cli => openCli(workspace, ceiling, policy, model)
+      case _                 => openAcp(workspace, ceiling, policy, model)
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
@@ -88,7 +94,12 @@ final class GrokHarness private (
       }
     }
 
-  private def openCli(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
+  private def openCli(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey],
+  ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
       id   <- ZIO
@@ -105,18 +116,23 @@ final class GrokHarness private (
           id,
           GrokHarness.Slot
             .empty(workspace, ceiling, policy, names, refusals, printed, hostCancel)
-            .copy(network = network),
+            .copy(network = network, model = model),
         )
       )
     yield id
 
-  private def openAcp(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId] =
+  private def openAcp(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey],
+  ): IO[HarnessFailure, SessionId] =
     scope.extend {
       for
         loaded <- catalog.load(workspace).mapError(_ => HarnessFailure.Protocol(ProtocolFault.Malformed))
         passed = mcp.granted(loaded)
         network    <- hosts.load
-        pipe       <- acp.open(workspace, policy, ceiling, mcp, network)
+        pipe       <- acp.open(workspace, policy, ceiling, mcp, network, model)
         result     <- handshake(pipe, workspace, passed).tapError(_ => pipe.close)
         id         <- ZIO.fromEither(AcpEvents.sessionId(result)).mapError(HarnessFailure.Protocol(_))
         names      <- Ref.make(Map.empty[String, ToolName])
@@ -129,7 +145,7 @@ final class GrokHarness private (
             id,
             GrokHarness.Slot
               .empty(workspace, ceiling, policy, names, refusals, printed, hostCancel)
-              .copy(pipe = Some(pipe), nextId = 3, mcpServers = passed, network = network),
+              .copy(pipe = Some(pipe), nextId = 3, mcpServers = passed, network = network, model = model),
           )
         )
       yield id
@@ -196,7 +212,8 @@ final class GrokHarness private (
 
   private def cliTurn(id: SessionId, slot: GrokHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrapScoped {
-      val argv = Launch.cli(config, id, prompt, slot.prompted, slot.policy, slot.ceiling, mcp, slot.network)
+      val argv =
+        Launch.cli(config, id, prompt, slot.prompted, slot.policy, slot.ceiling, mcp, slot.network, slot.model)
       for
         spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, slot.workspace))(_.destroy)
         _       <- markPrompted(id)
@@ -294,6 +311,7 @@ object GrokHarness:
       hostCancel: Ref[Boolean],
       mcpServers: Chunk[McpServer] = Chunk.empty,
       network: NetworkPolicy = NetworkPolicy.empty,
+      model: Option[ModelKey] = None,
   )
 
   private[grok] object Slot:

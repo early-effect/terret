@@ -17,7 +17,10 @@ object Jobs extends DocSpec:
     md"""
 A host attaches to six jobs: `open`, `run`, `status`, `resume`, `export`, and `cancel`.
 
-`open` starts a session on a workspace. `run` accepts one prompt and returns while the turn is
+`open` starts a session on a workspace. It takes an optional `model`. When set, the name must be a
+`[model.<name>]` key in the grok config, and a grok process terret spawns is started with `--model`.
+An unknown name fails and lists the known keys. The result reports the chosen model. Omit `model`
+to keep grok's default. `run` accepts one prompt and returns while the turn is
 running. The turn keeps going if that call is cancelled. `status` is the poll: it stays `Running`
 until the turn ends, and then it carries the outcome. `resume` replays the retained log and does
 not send a prompt. `export` returns that log, including whatever has been retained while the turn

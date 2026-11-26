@@ -1,7 +1,7 @@
 package terret.app
 
 import terret.dsh.DshHarness
-import terret.grok.GrokHarness
+import terret.grok.{GrokHarness, GrokModels}
 import terret.harness.Harness
 import terret.milestone.MilestoneGate
 import zio.{ExitCode, Scope, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer}
@@ -24,7 +24,10 @@ object Main extends ZIOAppDefault:
         loaded  <- ZIO.fromEither(ServiceConfig.load(service)).mapError(AppFailure.Service(_))
         _       <- PidFile.write(loaded.pidFile).mapError(AppFailure.Service(_))
         gate    <- MilestoneGate.make
-        _       <- Process.listen(config, gate).provideSomeLayer(wired(config, gate)).mapError(AppFailure.Process(_))
+        _       <- Process
+          .listen(config, gate)
+          .provideSomeLayer(wired(config, gate) ++ GrokModels.layer(config.grokConfig))
+          .mapError(AppFailure.Process(_))
       yield ()
     served.foldZIO(
       error => report(error.render),

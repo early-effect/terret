@@ -4,6 +4,7 @@ import heddle.Schema
 import terret.event.{Event, TurnOutcome}
 import terret.error.TerretError
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.CatalogError
 import terret.permission.Permission
 import terret.session.SessionState
 import terret.workspace.WorkspaceError
@@ -108,6 +109,9 @@ enum JobFailure derives Schema, JsonCodec:
   case BadCursor
   case BadLatest
   case Harness(failure: WireFailure)
+  case UnknownModel(name: String, known: Chunk[String])
+  case ModelsUnreadable(path: String)
+  case ModelsMalformed(path: String, line: Int)
 
 object JobFailure:
   def from(error: TerretError): JobFailure =
@@ -118,8 +122,18 @@ object JobFailure:
       case TerretError.UnknownSession(id)        => UnknownSession(id.value)
       case TerretError.Busy(id)                  => Busy(id.value)
       case TerretError.Harness(failure)          => Harness(WireFailure.from(failure))
+      case TerretError.UnknownModel(name, known) => UnknownModel(name, known)
+      case TerretError.Models(error)             =>
+        error match
+          case CatalogError.Unreadable(path)      => ModelsUnreadable(path)
+          case CatalogError.Malformed(path, line) => ModelsMalformed(path, line)
 
-final case class OpenJob(workspace: String, allow: Chunk[Permission]) derives Schema, JsonCodec
+final case class OpenJob(
+    workspace: String,
+    allow: Chunk[Permission],
+    model: Option[String] = None,
+) derives Schema,
+      JsonCodec
 
 final case class RunJob(session: String, prompt: String) derives Schema, JsonCodec
 
@@ -138,6 +152,7 @@ final case class Opened(
     effective: Chunk[Permission],
     dropped: Chunk[Permission],
     state: WireState,
+    model: Option[String] = None,
 ) derives Schema,
       JsonCodec
 

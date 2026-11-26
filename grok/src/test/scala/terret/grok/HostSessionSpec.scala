@@ -2,6 +2,7 @@ package terret.grok
 
 import slayer.*
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
@@ -48,8 +49,15 @@ object HostSessionSpec extends ZIOSpecDefault:
       seen    <- Ref.make(NetworkPolicy.empty)
       _       <- stub[HostAllowlist](_.load)(loaded)
       _       <- stub[AcpOpen](
-        _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
-      ) { (_, _, _, _, network) =>
+        _.open(
+          any[Workspace],
+          any[PermissionPolicy],
+          any[Ceiling],
+          any[McpPolicy],
+          any[NetworkPolicy],
+          any[Option[ModelKey]],
+        )
+      ) { (_, _, _, _, network, _) =>
         seen.set(network) *> ZIO.succeed(pipe)
       }
       _       <- stub[RpcPipe](_.read)(pull(pending))

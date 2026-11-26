@@ -5,6 +5,7 @@ import terret.config.TerretConfig
 import terret.error.TerretError
 import terret.harness.HarnessFailure
 import terret.hooks.Hooks
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import terret.Terret
@@ -23,8 +24,15 @@ object ShutdownSpec extends ZIOSpecDefault:
           pending <- Ref.make(handshake)
           trace   <- Ref.make(Chunk.empty[String])
           _       <- stub[AcpOpen](
-            _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
-          ) { (_, _, _, _, _) =>
+            _.open(
+              any[Workspace],
+              any[PermissionPolicy],
+              any[Ceiling],
+              any[McpPolicy],
+              any[NetworkPolicy],
+              any[Option[ModelKey]],
+            )
+          ) { (_, _, _, _, _, _) =>
             ZIO.succeed(pipe)
           }
           _       <- stub[RpcPipe](_.read)(pull(pending))
