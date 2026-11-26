@@ -11,7 +11,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: early-effect/histos/.github/actions/setup@0c472062f123c6de8d16e9b61b6930f7352ae50d # 0c472062f123c6de8d16e9b61b6930f7352ae50d
+      - uses: early-effect/histos/.github/actions/setup@6d1eb0f2850b3e99870a9627c4da4cd68c8d82a4 # 6d1eb0f2850b3e99870a9627c4da4cd68c8d82a4
       - run: ./histos doctor --preflight release-terret
       - run: "./histos publish release terret"
         env:
