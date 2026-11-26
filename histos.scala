@@ -80,8 +80,11 @@ object build extends HistosBuild:
       )
       .libraryDependencies(
         zio,
+        zioStreams,
         dep"com.microsoft.onnxruntime:onnxruntime:1.32.0",
         dep"ai.djl.huggingface:tokenizers:0.40.0",
+        dep"rocks.earlyeffect::saferis:0.21.0",
+        dep"rocks.earlyeffect::saferis-sqlite-jdbc:0.21.0",
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val docs = module("docs", Jvm)(scala3)

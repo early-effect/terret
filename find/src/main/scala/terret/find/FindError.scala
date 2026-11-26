@@ -24,6 +24,12 @@ enum FindError:
   /** A vector has no direction: it is empty or it is all zeroes. */
   case Degenerate
 
+  /** `limit` was zero or negative. */
+  case NonPositive(limit: Int)
+
+  /** The index could not read or write. The detail is diagnostic. Callers do not branch on it. */
+  case Storage(detail: String)
+
   /** A weight download failed. */
   case Fetch(url: String, problem: FetchProblem)
 
