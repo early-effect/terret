@@ -1,4 +1,4 @@
-cell core 3.10.1 jvm
+cell terret 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
@@ -14,7 +14,7 @@ artifact org.scala-lang scala-library 3.9.0 b844bf6fb3080c73df6b9c523b7a69b9ef4a
 artifact dev.zio izumi-reflect-thirdparty-boopickle-shaded_3 3.0.11 290f8a4b6d35b7de2150142a75252be4eb3fbdac8156b49ec6a13b2a884b9561 central
 evict org.scala-lang scala3-library_3 3.3.6 3.9.0
 evict org.scala-lang scala3-library_3 3.3.8 3.9.0
-test core 3.10.1 jvm
+test terret 3.10.1 jvm
 direct dev.zio zio 2.1.27 binary
 direct dev.zio zio-streams 2.1.27 binary
 direct dev.zio zio-json 1.1.2 binary
