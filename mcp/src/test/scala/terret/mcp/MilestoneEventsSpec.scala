@@ -99,6 +99,59 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("finished output publishes a commit, a test result, and a question") {
+      val question = "How should a restart keep webhook subscriptions?"
+      val ask      = ToolCall(
+        CallId("ask"),
+        ToolName("ask_user_question"),
+        Json.Obj("questions" -> Json.Arr(Json.Obj("question" -> Json.Str(question)))),
+      )
+      val commit = ToolCall(
+        CallId("commit"),
+        ToolName("run_terminal_command"),
+        Json.Obj(
+          "command"   -> Json.Str("git commit -F target/commit-msg.txt"),
+          "exit_code" -> Json.Num(0),
+          "output"    -> Json.Str("[histos-0.7.1 7077bce] Pin Histos 0.7.1\n"),
+        ),
+      )
+      val tested = ToolCall(
+        CallId("test"),
+        ToolName("get_command_or_subagent_output"),
+        Json.Obj(
+          "type"   -> Json.Str("TaskOutput"),
+          "Result" -> Json.Obj(
+            "command"   -> Json.Str("./histos test --quick"),
+            "exit_code" -> Json.Num(0),
+            "output"    -> Json.Str("tests passed: 7 failed: 0 cached: 10 modules: 7"),
+          ),
+        ),
+      )
+      val script =
+        Script((_, _) => ZStream(Event.ToolStarted(ask), Event.ToolUpdated(commit), Event.ToolUpdated(tested)))
+      drive(script, Milestones.live) { (terret, publisher) =>
+        for
+          _       <- TestClock.setTime(when)
+          session <- turn(terret)
+          _       <- publisher.settled
+          polled  <- poll(MilestoneFilter(None, Chunk.empty), Some("0"))
+          found   <- ZIO.fromEither(polled)
+        yield assertTrue(
+          found.map(row => (row.kind, row.summary, row.cursor, row.at)) == Chunk(
+            (MilestoneKind.TurnStarted, "started", None, when.toString),
+            (MilestoneKind.WaitingOnPermission, question, Some(0), when.toString),
+            (MilestoneKind.Commit, "[histos-0.7.1 7077bce] Pin Histos 0.7.1", Some(1), when.toString),
+            (
+              MilestoneKind.TestResult,
+              "tests passed: 7 failed: 0 cached: 10 modules: 7",
+              Some(2),
+              when.toString,
+            ),
+          ),
+          found.forall(_.session == session.id.value),
+        )
+      }
+    },
   )
 
   private def drive[R <: Milestones](script: Script, layer: zio.ULayer[R])(
