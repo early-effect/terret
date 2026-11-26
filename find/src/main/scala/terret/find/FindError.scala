@@ -30,6 +30,9 @@ enum FindError:
   /** The index could not read or write. The detail is diagnostic. Callers do not branch on it. */
   case Storage(detail: String)
 
+  /** A stored capability is not one this service knows. */
+  case UnknownCapability(raw: String)
+
   /** A weight download failed. */
   case Fetch(url: String, problem: FetchProblem)
 
