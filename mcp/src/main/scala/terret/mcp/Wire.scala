@@ -3,6 +3,7 @@ package terret.mcp
 import heddle.Schema
 import terret.event.{Event, TurnOutcome}
 import terret.error.TerretError
+import terret.find.{CallError, EmbeddingProblem, FetchProblem, FindError}
 import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.model.CatalogError
 import terret.permission.Permission
@@ -112,6 +113,14 @@ enum JobFailure derives Schema, JsonCodec:
   case UnknownModel(name: String, known: Chunk[String])
   case ModelsUnreadable(path: String)
   case ModelsMalformed(path: String, line: Int)
+  case EmptyQuery
+  case BadLimit
+  case NotCallable
+  case NotGranted(server: String, tool: String)
+  case UnknownServer(server: String)
+  case BadArguments
+  case BadTool
+  case ToolUnavailable(detail: String)
 
 object JobFailure:
   def from(error: TerretError): JobFailure =
@@ -127,6 +136,48 @@ object JobFailure:
         error match
           case CatalogError.Unreadable(path)      => ModelsUnreadable(path)
           case CatalogError.Malformed(path, line) => ModelsMalformed(path, line)
+
+  def fromFind(error: FindError): JobFailure =
+    error match
+      case FindError.EmptyQuery     => EmptyQuery
+      case FindError.NonPositive(_) => BadLimit
+      case other                    => ToolUnavailable(detail(other))
+
+  def fromCall(error: CallError): JobFailure =
+    error match
+      case CallError.NotCallable              => NotCallable
+      case CallError.NotGranted(server, tool) => NotGranted(server.value, tool.value)
+      case CallError.UnknownServer(server)    => UnknownServer(server.value)
+      case CallError.BadTool                  => BadTool
+      case CallError.BadArguments             => BadArguments
+      case CallError.Unavailable(detail)      => ToolUnavailable(detail)
+
+  /** Diagnostic text. Callers do not branch on it. */
+  private def detail(error: FindError): String =
+    error match
+      case FindError.EmptyQuery                 => "empty query"
+      case FindError.HomeUnavailable            => "model home unavailable"
+      case FindError.ModelMissing(paths)        => paths.map(_.toString).mkString(",")
+      case FindError.DimMismatch(left, right)   => s"dims $left $right"
+      case FindError.ModelMismatch(left, right) => s"models $left $right"
+      case FindError.Degenerate                 => "degenerate vector"
+      case FindError.NonPositive(limit)         => s"limit $limit"
+      case FindError.Storage(text)              => text
+      case FindError.Remote(text)               => text
+      case FindError.Fetch(url, problem)        => s"$url ${fetch(problem)}"
+      case FindError.Embedding(problem)         => embedding(problem)
+
+  private def fetch(problem: FetchProblem): String =
+    problem match
+      case FetchProblem.Status(code)      => s"status $code"
+      case FetchProblem.Unavailable(text) => text
+
+  private def embedding(problem: EmbeddingProblem): String =
+    problem match
+      case EmbeddingProblem.Shape           => "shape"
+      case EmbeddingProblem.Tokenizer(text) => text
+      case EmbeddingProblem.Runtime(text)   => text
+end JobFailure
 
 final case class OpenJob(
     workspace: String,
@@ -169,3 +220,32 @@ final case class Log(
       JsonCodec
 
 final case class Stopped(session: String) derives Schema, JsonCodec
+
+final case class FindJob(query: String, k: Int) derives Schema, JsonCodec
+
+final case class CallJob(
+    server: Option[String] = None,
+    tool: String,
+    arguments: String,
+) derives Schema,
+      JsonCodec
+
+final case class FoundTool(server: String, tool: String, description: String) derives Schema, JsonCodec
+
+enum WireEnable derives Schema, JsonCodec:
+  case AddGrant(entry: String)
+  case DefineServer(server: String)
+
+final case class WithheldTool(server: String, tool: String, enable: WireEnable) derives Schema, JsonCodec
+
+enum WireHint derives Schema, JsonCodec:
+  case NoGrants
+
+final case class Found(
+    hits: Chunk[FoundTool],
+    withheld: Chunk[WithheldTool],
+    hint: Option[WireHint],
+) derives Schema,
+      JsonCodec
+
+final case class Called(text: String) derives Schema, JsonCodec

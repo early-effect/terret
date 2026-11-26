@@ -13,16 +13,21 @@ object TerretMcp:
   val name    = "terret"
   val summary = "Sessions against a coding harness."
 
-  def api(terret: Terret, version: String): Either[TerretMcpError, Api[Milestones]] =
-    checked(version).map(Jobs.api(terret, _))
+  def api(
+      terret: Terret,
+      version: String,
+      tools: ToolSurface = ToolSurface.closed,
+  ): Either[TerretMcpError, Api[Milestones]] =
+    checked(version).map(Jobs.api(terret, _, tools))
 
   def mcp(
       terret: Terret,
       version: String,
       events: EventPolicy = EventPolicy.terret,
       key: Option[EventsKey] = None,
+      tools: ToolSurface = ToolSurface.closed,
   ): Either[TerretMcpError, Mcp[Milestones & Events.Env]] =
-    served(terret, version, events, key).map(_.mcp)
+    served(terret, version, events, key, tools).map(_.mcp)
 
   /** MCP on `/mcp`, plus the API routes. HTTP serves both. Stdio serves `mcp` only. */
   def served(
@@ -30,8 +35,9 @@ object TerretMcp:
       version: String,
       events: EventPolicy = EventPolicy.terret,
       key: Option[EventsKey] = None,
+      tools: ToolSurface = ToolSurface.closed,
   ): Either[TerretMcpError, Served] =
-    api(terret, version).flatMap { built =>
+    api(terret, version, tools).flatMap { built =>
       Mcp.from(built).left.map(TerretMcpError.Rejected(_)).flatMap { raw =>
         raw
           .instructions(summary)

@@ -5,24 +5,21 @@ import zio.test.*
 
 object IndexSpec extends ZIOSpecDefault:
   private val compile = Entry(
-    "histos-build",
-    "def build: IO[BuildError, Unit]",
+    Some(ServerName("histos")),
+    ToolId("build"),
     "compile the scala project and run scala tests",
-    Chunk("build", "test"),
     Embedding(ModelId.bgeSmall, Chunk(1f, 0f, 0f)),
   )
   private val bread = Entry(
-    "bake-bread",
-    "def bake: IO[BakeError, Loaf]",
+    Some(ServerName("kitchen")),
+    ToolId("bake"),
     "recipe for sourdough bread",
-    Chunk("cook"),
     Embedding(ModelId.bgeSmall, Chunk(0f, 1f, 0f)),
   )
   private val other = Entry(
-    "other-space",
-    "def elsewhere: IO[Unit, Unit]",
+    None,
+    ToolId("other-space"),
     "scala in another model",
-    Chunk.empty,
     Embedding(ModelId("other"), Chunk(1f, 0f, 0f)),
   )
 
@@ -47,21 +44,21 @@ object IndexSpec extends ZIOSpecDefault:
         blank   <- index.lexical("  ", 5)
         top     <- index.nearest(compile.embedding, 1)
         near    <- index.nearest(compile.embedding, 5)
-        found   <- index.lookup("histos-build")
+        found   <- index.lookup(compile.key)
         missing <- index.lookup("absent")
-        _       <- index.put(compile.copy(doc = "release notes only"))
+        _       <- index.put(compile.copy(description = "release notes only"))
         renamed <- index.lexical("release notes", 5)
         stale   <- index.lexical("sourdough", 5)
       yield assertTrue(
-        scala.map(_.name) == Chunk("histos-build", "other-space"),
-        loaf.map(_.name) == Chunk("bake-bread"),
+        scala.map(_.name) == Chunk(compile.key, other.key),
+        loaf.map(_.name) == Chunk(bread.key),
         blank.isEmpty,
-        top == Chunk(Hit("histos-build", 1.0)),
-        near == Chunk(Hit("histos-build", 1.0), Hit("bake-bread", 0.0)),
+        top == Chunk(Hit(compile.key, 1.0)),
+        near == Chunk(Hit(compile.key, 1.0), Hit(bread.key, 0.0)),
         found == Some(compile),
         missing == None,
-        renamed.map(_.name) == Chunk("histos-build"),
-        stale.map(_.name) == Chunk("bake-bread"),
+        renamed.map(_.name) == Chunk(compile.key),
+        stale.map(_.name) == Chunk(bread.key),
       )
     }.provideSome[Scope](SqliteIndex.temporary),
     test("a non-positive limit is refused") {

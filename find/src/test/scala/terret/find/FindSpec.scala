@@ -10,42 +10,38 @@ object FindSpec extends ZIOSpecDefault:
   private val axes: Map[String, Int] =
     Seeds.all.zipWithIndex.foldLeft(Map.empty[String, Int]): (acc, placed) =>
       val (ref, index) = placed
-      acc.updated(ref.doc, index)
+      acc.updated(ref.description, index)
 
   private val refused = (stubbed[Embedder] ++ stubbed[Index]) >+> Find.layer
 
   private val indexed = (stubbed[Embedder] ++ SqliteIndex.temporary) >+> Find.layer
 
+  private val open = Access(Chunk(Grant(ServerName("histos"), None)), Set(ServerName("histos")))
+
   def spec = suite("find")(
-    test("every capability survives its wire form and an unknown one is refused") {
-      val sample = Entry("n", "s", "d", Chunk("nope"), Embedding(ModelId.bgeSmall, Chunk(1f)))
-      assertTrue(
-        Capability.values.forall(cap => Capability.from(cap.wire) == Right(cap)),
-        Capability.from("nope") == Left(FindError.UnknownCapability("nope")),
-        ToolRef.from(sample) == Left(FindError.UnknownCapability("nope")),
-      )
-    },
     test("a blank query and a non-positive limit never embed") {
       for
-        blank <- Find.find("   ", 3).either
-        limit <- Find.find("compile the project", 0).either
+        blank <- Find.find("   ", 3, open).either
+        limit <- Find.find("compile the project", 0, open).either
       yield assertTrue(
         blank == Left(FindError.EmptyQuery),
         limit == Left(FindError.NonPositive(0)),
       )
     }.provide(refused),
-    test("each seed query ranks its tool first") {
+    test("a seed is stored and find omits it because it has no server") {
       for
         _      <- stub[Embedder](_.embedQuery(any[String]))((text: String) => embed(text))
         _      <- stub[Embedder](_.embedPassage(any[String]))((text: String) => embed(text))
         _      <- Seeds.index
         loaded <- ZIO.foreach(Seeds.all): ref =>
-          Find.find(ref.doc, 1).map(_.headOption)
-        none <- Find.find(unmatched, 1)
+          ZIO.serviceWithZIO[Index](_.lookup(ref.tool.value))
+        found <- Find.find("compile the project", 1, open)
+        none  <- Find.find(unmatched, 1, open)
       yield assertTrue(
-        loaded == Seeds.all.map(Some(_)),
-        loaded.exists(_.exists(ref => ref.name == "histos-build" && ref.capabilities.contains(Capability.RunCommands))),
-        none.isEmpty,
+        Seeds.all.forall(_.server.isEmpty),
+        loaded.map(_.map(_.ref)) == Seeds.all.map(Some(_)),
+        found == FindResult.empty,
+        none == FindResult.empty,
       )
     }.provideSome[Scope](indexed),
   )

@@ -45,7 +45,9 @@ optional comma-separated list of absolute paths a shell write may use besides th
 A socket transport needs `bindHost`, `bindPort`, and `bindSecret`. Bind fields on any other transport
 are rejected. `mcp` is an opt-in grant for harness MCP calls. Empty denies them. `histos` grants
 every tool on that server. `histos:version` grants only `version`. dsh stores the value and does
-not pass servers. An allowed server comes from the workspace `.mcp.json`. `network` is a host
+not pass servers. An allowed server comes from the workspace `.mcp.json`. `find` and `call` use
+that same grant. Empty returns no hits and hint `NoGrants`. A call also needs the server defined
+in `.mcp.json`. `network` is a host
 allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does
 not apply it. `events.verification` is `Skip` or `Required`. The default is `Skip`, because the
 edge already rejects a request with no `x-terret-key`. `events.key` (`TERRET_EVENTS_KEY`) is optional.

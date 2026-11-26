@@ -61,9 +61,10 @@ object Process:
     for
       catalog <- ZIO.service[ModelCatalog]
       terret  <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate, catalog)
+      surface <- ToolRuntime.make(config)
       served  <- ZIO
         .fromEither(
-          TerretMcp.served(terret, config.version, config.events, config.eventsKey)
+          TerretMcp.served(terret, config.version, config.events, config.eventsKey, surface)
         )
         .mapError(ProcessError.Mcp(_))
     yield Prepared(served, terret.shutdown)
