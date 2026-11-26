@@ -150,7 +150,7 @@ object ProcessSpec extends ZIOSpecDefault:
           server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           status <- listed(port)
-        yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel")))
+        yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel", "find", "call")))
       }
     },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock

@@ -2,14 +2,21 @@ package terret.find
 
 import zio.{Chunk, IO}
 
-/** A stored tool: its text, the capabilities it declares, and the passage vector. */
+/** A stored tool and the passage vector of its description. */
 final case class Entry(
-    name: String,
-    signature: String,
-    doc: String,
-    capabilities: Chunk[String],
+    server: Option[ServerName],
+    tool: ToolId,
+    description: String,
     embedding: Embedding,
-)
+):
+  /** Seeds use the tool name. A catalog tool is `server/tool`, so two servers can share a tool name. */
+  def key: String =
+    server match
+      case None       => tool.value
+      case Some(name) => s"${name.value}/${tool.value}"
+
+  def ref: ToolRef = ToolRef(server, tool, description)
+end Entry
 
 /** One ranked hit. A higher score is a closer match. */
 final case class Hit(name: String, score: Double)

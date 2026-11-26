@@ -12,7 +12,7 @@ Phase 5, more adapters. The dsh headless adapter is in. The process defaults to 
 | --- | --- | --- | --- |
 | 1. Core | Done | Library with no network and no Grok: harness, session, prompt, streamed events, workspace, ceiling, hooks | Tests against an in-memory harness |
 | 2. Grok Build adapter | Done | One adapter, three transports: `grok -p` / `--prompt-file`, ACP stdio, WebSocket ACP | The adapter contract; the user picks the transport |
-| 3. MCP inbound | Done | A heddle `Api`. `Mcp.from` serves `open`, `run`, `status`, `resume`, `export`, and `cancel` on `mcp.routes` and `mcp.stdio()`. `follow` is a subscription on the same API, not a tool | Hosts attach without grok-specific tool names |
+| 3. MCP inbound | Done | A heddle `Api`. `Mcp.from` serves `open`, `run`, `status`, `resume`, `export`, `cancel`, `find`, and `call` on `mcp.routes` and `mcp.stdio()`. `follow` is a subscription on the same API, not a tool | Hosts attach without grok-specific tool names |
 | 4. Packaging | Process landed; `main` publishes the site | A runnable process, Warp's `.warp/.mcp.json`, and DocSpecs for attach, jobs, ceiling, and config | Config picks HTTP or stdio; HTTP is the documented attach path; snippets are proven by `./histos test` |
 | 5. More adapters | dsh headless landed | The dsh adapter speaks the headless `--json` stream. Later harnesses use the same traits | The MCP jobs do not change |
 

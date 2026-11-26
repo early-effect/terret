@@ -25,6 +25,20 @@ import terret.hooks.Hooks
 import terret.memory.{InMemory, Script}
 import terret.milestone.Milestones
 import terret.model.{CatalogError, ModelCatalog, ModelKey}
+import terret.find.{
+  Access,
+  Enable,
+  Find,
+  FindError,
+  FindResult,
+  Grant,
+  NameError,
+  Runner,
+  ServerName,
+  ToolId,
+  ToolRef,
+  Withheld,
+}
 import terret.permission.{Permission, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.*
@@ -32,10 +46,10 @@ import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.test.*
 import zio.durationInt
-import zio.{Chunk, Promise, Queue, Ref, Scope, UIO, ZIO, ZLayer}
+import zio.{Chunk, IO, Promise, Queue, Ref, Scope, UIO, ZIO, ZLayer}
 
 object McpJobsSpec extends ZIOSpecDefault:
-  private val jobs = Set("open", "run", "status", "resume", "export", "cancel")
+  private val jobs = Set("open", "run", "status", "resume", "export", "cancel", "find", "call")
 
   private type Env = Milestones & Events.Env
 
@@ -189,7 +203,7 @@ object McpJobsSpec extends ZIOSpecDefault:
         )
       }
     },
-    test("follow is a subscription and the tool list stays the six jobs") {
+    test("follow is a subscription and the tool list is the jobs") {
       ZIO.scoped {
         for
           (_, mcp) <- server(Script.echo)
@@ -199,6 +213,8 @@ object McpJobsSpec extends ZIOSpecDefault:
           disc  = found.fold("")(_.toJson)
         yield assertTrue(
           tools.contains("\"export\""),
+          tools.contains("\"find\""),
+          tools.contains("\"call\""),
           !tools.contains("\"follow\""),
           disc.contains("\"follow\""),
           disc.contains("subscriptions"),
@@ -373,6 +389,64 @@ object McpJobsSpec extends ZIOSpecDefault:
         JobFailure.from(TerretError.Models(CatalogError.Malformed("/var/terret/grok.toml", 3))) ==
           JobFailure.ModelsMalformed("/var/terret/grok.toml", 3),
       )
+    },
+    test("call refuses a missing server, an ungranted tool, and a seed before the runner") {
+      for
+        built  <- ZIO.fromEither(scenario)
+        runner <- ZIO.service[Runner].provide(stubbed[Runner])
+        (access, searching) = built
+        out <- toolsOf(ToolSurface.direct(searching, runner, access)) { host =>
+          for
+            unknown <- host.call("call", CallJob(Some("linear"), "list_issues", "{}"))
+            denied  <- host.call("call", CallJob(Some("github"), "create_pr", "{}"))
+            seed    <- host.call("call", CallJob(None, "triage-issue", "{}"))
+            blank   <- host.call("call", CallJob(Some("  "), "create_pr", "{}"))
+            badTool <- host.call("call", CallJob(Some("github"), " ", "{}"))
+            badArgs <- host.call("call", CallJob(Some("github"), "search_code", "nope"))
+            found   <- host.call("find", FindJob("open a pull request", 1))
+          yield assertTrue(
+            failure(unknown) == Right(JobFailure.UnknownServer("linear")),
+            failure(denied) == Right(JobFailure.NotGranted("github", "create_pr")),
+            failure(seed) == Right(JobFailure.NotCallable),
+            failure(blank) == Right(JobFailure.NotCallable),
+            failure(badTool) == Right(JobFailure.BadTool),
+            failure(badArgs) == Right(JobFailure.BadArguments),
+            foundOf(found) == Right(
+              Found(
+                Chunk(FoundTool("github", "search_code", "search code in the repository")),
+                Chunk(WithheldTool("github", "create_pr", WireEnable.AddGrant("github/create_pr"))),
+                None,
+              )
+            ),
+          )
+        }
+      yield out
+    },
+    test("a granted call returns the runner text") {
+      for
+        built  <- ZIO.fromEither(scenario)
+        runner <- (
+          stub[Runner](_.call(any[ServerName], any[ToolId], any[String]))(ZIO.succeed("ok")) *>
+            ZIO.service[Runner]
+        ).provide(stubbed[Runner])
+        (access, searching) = built
+        out <- toolsOf(ToolSurface.direct(searching, runner, access)) { host =>
+          host.call("call", CallJob(Some("histos"), "test", """{"suite":"grants"}""")).map { reply =>
+            assertTrue(calledOf(reply) == Right(Called("ok")))
+          }
+        }
+      yield out
+    },
+    test("an empty grant is NoGrants on the wire and call is NotGranted") {
+      toolsOf(ToolSurface.closed) { host =>
+        for
+          found  <- host.call("find", FindJob("open a pull request", 1))
+          denied <- host.call("call", CallJob(Some("linear"), "list_issues", "{}"))
+        yield assertTrue(
+          foundOf(found) == Right(Found(Chunk.empty, Chunk.empty, Some(WireHint.NoGrants))),
+          failure(denied) == Right(JobFailure.NotGranted("linear", "list_issues")),
+        )
+      }
     },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
 
@@ -549,6 +623,53 @@ object McpJobsSpec extends ZIOSpecDefault:
       mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
     yield (memory, mcp)
 
+  private def toolsOf(tools: ToolSurface)(
+      use: Host => ZIO[Any, Fail, TestResult]
+  ): ZIO[Any, Fail, TestResult] =
+    ZIO.scoped {
+      for
+        memory <- InMemory.make(Script.echo)
+        terret <- Terret.make(memory, TerretConfig.closed, Hooks.identity)
+        mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test", tools = tools)).mapError(Fail.Build(_))
+        pipes  <- LinePipe.connected
+        (client, remote) = pipes
+        fiber  <- supply(mcp)(mcp.stdio(remote)).forkScoped
+        host   <- Host.make(client)
+        result <- use(host).ensuring(client.close *> fiber.interrupt.ignore)
+      yield result
+    }
+
+  private def scenario: Either[NameError, (Access, Find)] =
+    for
+      histos <- ServerName.from("histos")
+      github <- ServerName.from("github")
+      linear <- ServerName.from("linear")
+      search <- ToolId.from("search_code")
+      create <- ToolId.from("create_pr")
+    yield
+      val access = Access(
+        Chunk(
+          Grant(histos, None),
+          Grant(github, Some(Set(search))),
+          Grant(linear, None),
+        ),
+        Set(histos, github),
+      )
+      val searching = new Find:
+        def find(query: String, k: Int, grant: Access): IO[FindError, FindResult] =
+          Find.screen(query, k, grant).flatMap {
+            case Find.Screened.Done(result) => ZIO.succeed(result)
+            case Find.Screened.Query(_)     =>
+              ZIO.succeed(
+                FindResult(
+                  Chunk(ToolRef(Some(github), search, "search code in the repository")),
+                  Chunk(Withheld(github, create, Enable.AddGrant("github/create_pr"))),
+                  None,
+                )
+              )
+          }
+      (access, searching)
+
   private def hosted(
       script: Script,
       config: TerretConfig = TerretConfig.closed,
@@ -650,6 +771,12 @@ object McpJobsSpec extends ZIOSpecDefault:
 
   private def log(reply: Reply): Either[String, Log] =
     structured(reply.result).flatMap(_.as[Log])
+
+  private def foundOf(reply: Reply): Either[String, Found] =
+    structured(reply.result).flatMap(_.as[Found])
+
+  private def calledOf(reply: Reply): Either[String, Called] =
+    structured(reply.result).flatMap(_.as[Called])
 
   private def failure(reply: Reply): Either[String, JobFailure] =
     structured(reply.result).flatMap(_.get("value") match

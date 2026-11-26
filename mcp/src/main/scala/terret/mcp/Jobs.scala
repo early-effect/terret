@@ -2,17 +2,20 @@ package terret.mcp
 
 import heddle.*
 import terret.Terret
+import terret.find.{Enable, FindHint, FindResult, ToolRef}
 import terret.milestone.Milestones
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
 import terret.transcript.Entry
 import terret.workspace.Workspace
+import zio.json.*
+import zio.json.ast.Json
 import zio.stream.ZStream
 import zio.{Chunk, IO, ZIO}
 
 private[mcp] object Jobs:
-  def api(terret: Terret, version: String): Api[Milestones] =
+  def api(terret: Terret, version: String, tools: ToolSurface): Api[Milestones] =
     Api(TerretMcp.name, version, Some(TerretMcp.summary))
       .job(open)(openSession(terret, _))
       .job(run)(runTurn(terret, _))
@@ -20,6 +23,8 @@ private[mcp] object Jobs:
       .job(resume)(replay(terret, _))
       .job(exportLog)(exported(terret, _))
       .job(cancel)(stop(terret, _))
+      .job(find)(searched(tools, _))
+      .job(call)(called(tools, _))
       .stream(follow)(followed(terret, _))
 
   private def fallible[In, Out](endpoint: Endpoint[In, Nothing, Out]): Endpoint[In, JobFailure, Out] =
@@ -35,6 +40,14 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.UnknownModel](Status.BadRequest),
       ErrorCase[JobFailure.ModelsUnreadable](Status.BadGateway),
       ErrorCase[JobFailure.ModelsMalformed](Status.BadGateway),
+      ErrorCase[JobFailure.EmptyQuery.type](Status.BadRequest),
+      ErrorCase[JobFailure.BadLimit.type](Status.BadRequest),
+      ErrorCase[JobFailure.NotCallable.type](Status.Forbidden),
+      ErrorCase[JobFailure.NotGranted](Status.Forbidden),
+      ErrorCase[JobFailure.UnknownServer](Status.NotFound),
+      ErrorCase[JobFailure.BadArguments.type](Status.BadRequest),
+      ErrorCase[JobFailure.BadTool.type](Status.BadRequest),
+      ErrorCase[JobFailure.ToolUnavailable](Status.BadGateway),
     )
 
   private val openSummary =
@@ -101,6 +114,56 @@ private[mcp] object Jobs:
       .summary("Cancel the open turn")
       .hints(Hint.Destructive, Hint.Idempotent)
       .mcp("cancel")
+
+  private val findSummary =
+    "Search the indexed MCP tools. Hits are only tools the grant allows and .mcp.json defines. " +
+      "withheld names a few stronger matches that were refused, and how to enable them. " +
+      "An empty terret.mcp grant returns no hits and hint NoGrants."
+
+  private val find =
+    fallible(Endpoint.post("find").in[FindJob].out[Found])
+      .name("find")
+      .summary(findSummary)
+      .hints(Hint.ReadOnly)
+      .mcp("find")
+
+  private val callSummary =
+    "Call one MCP tool. arguments is a JSON object as text. A tool with no server is NotCallable. " +
+      "A missing grant is NotGranted. A granted server that .mcp.json does not define is UnknownServer."
+
+  private val call =
+    fallible(Endpoint.post("call").in[CallJob].out[Called])
+      .name("call")
+      .summary(callSummary)
+      .mcp("call")
+
+  private def searched(tools: ToolSurface, job: FindJob): IO[JobFailure, Found] =
+    tools.find(job.query, job.k).mapBoth(JobFailure.fromFind, shown)
+
+  private def called(tools: ToolSurface, job: CallJob): IO[JobFailure, Called] =
+    for
+      _    <- arguments(job.arguments)
+      text <- tools.call(job.server, job.tool, job.arguments).mapError(JobFailure.fromCall)
+    yield Called(text)
+
+  private def arguments(raw: String): IO[JobFailure, Unit] =
+    raw.fromJson[Json] match
+      case Right(_: Json.Obj) => ZIO.unit
+      case _                  => ZIO.fail(JobFailure.BadArguments)
+
+  private def shown(result: FindResult): Found =
+    Found(
+      result.hits.collect { case ToolRef(Some(server), tool, description) =>
+        FoundTool(server.value, tool.value, description)
+      },
+      result.withheld.map(row => WithheldTool(row.server.value, row.tool.value, shownEnable(row.enable))),
+      result.hint.map { case FindHint.NoGrants => WireHint.NoGrants },
+    )
+
+  private def shownEnable(enable: Enable): WireEnable =
+    enable match
+      case Enable.AddGrant(entry)      => WireEnable.AddGrant(entry)
+      case Enable.DefineServer(server) => WireEnable.DefineServer(server.value)
 
   private def openSession(terret: Terret, job: OpenJob): IO[JobFailure, Opened] =
     for

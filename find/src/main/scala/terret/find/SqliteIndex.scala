@@ -57,7 +57,7 @@ object SqliteIndex:
           db:
             transact:
               for
-                _ <- dml.deleteWhere[StoredTool](sql"name = ${entry.name}")
+                _ <- dml.deleteWhere[StoredTool](sql"id = ${entry.key}")
                 _ <- dml.insert(stored)
               yield ()
 
@@ -66,7 +66,7 @@ object SqliteIndex:
         FtsQuery.matchOf(text) match
           case None       => ZIO.succeed(Chunk.empty)
           case Some(expr) =>
-            db(sql"""select tool.name as name, cast(-bm25(tool_fts) as double) as score
+            db(sql"""select tool.id as name, cast(-bm25(tool_fts) as double) as score
                      from tool
                      join tool_fts on tool.rowid = tool_fts.rowid
                      where tool_fts match $expr""".query[Ranked]).map: rows =>
@@ -81,14 +81,14 @@ object SqliteIndex:
               entries
                 .foldLeft(Chunk.empty[Hit])((acc, entry) =>
                   score(query, entry) match
-                    case Some(value) => acc :+ Hit(entry.name, value)
+                    case Some(value) => acc :+ Hit(entry.key, value)
                     case None        => acc
                 )
                 .sortBy(hit => (-hit.score, hit.name))
                 .take(count)
 
     def lookup(name: String): IO[FindError, Option[Entry]] =
-      db(sql"select * from tool where name = $name".queryOne[StoredTool]).flatMap:
+      db(sql"select * from tool where id = $name".queryOne[StoredTool]).flatMap:
         case None         => ZIO.succeed(None)
         case Some(stored) => ZIO.fromEither(Stored.decode(stored)).map(Some(_))
 
@@ -113,38 +113,38 @@ object SqliteIndex:
 
     private val fts =
       sql"""create virtual table if not exists tool_fts using fts5(
-            name, signature, doc, capabilities,
+            id, server, tool, description,
             content='tool', content_rowid='rowid'
           )"""
 
     private val afterInsert =
       sql"""create trigger if not exists tool_ai after insert on tool begin
-              insert into tool_fts(rowid, name, signature, doc, capabilities)
-              values (new.rowid, new.name, new.signature, new.doc, new.capabilities);
+              insert into tool_fts(rowid, id, server, tool, description)
+              values (new.rowid, new.id, new.server, new.tool, new.description);
             end"""
 
     private val afterDelete =
       sql"""create trigger if not exists tool_ad after delete on tool begin
-              insert into tool_fts(tool_fts, rowid, name, signature, doc, capabilities)
-              values ('delete', old.rowid, old.name, old.signature, old.doc, old.capabilities);
+              insert into tool_fts(tool_fts, rowid, id, server, tool, description)
+              values ('delete', old.rowid, old.id, old.server, old.tool, old.description);
             end"""
 
     private val afterUpdate =
       sql"""create trigger if not exists tool_au after update on tool begin
-              insert into tool_fts(tool_fts, rowid, name, signature, doc, capabilities)
-              values ('delete', old.rowid, old.name, old.signature, old.doc, old.capabilities);
-              insert into tool_fts(rowid, name, signature, doc, capabilities)
-              values (new.rowid, new.name, new.signature, new.doc, new.capabilities);
+              insert into tool_fts(tool_fts, rowid, id, server, tool, description)
+              values ('delete', old.rowid, old.id, old.server, old.tool, old.description);
+              insert into tool_fts(rowid, id, server, tool, description)
+              values (new.rowid, new.id, new.server, new.tool, new.description);
             end"""
   end Schema
 end SqliteIndex
 
 @tableName("tool")
 private[find] final case class StoredTool(
-    @key name: String,
-    signature: String,
-    doc: String,
-    capabilities: String,
+    @key id: String,
+    server: String,
+    tool: String,
+    description: String,
     model: String,
     dims: Int,
     vector: zio.Chunk[Byte],
@@ -153,41 +153,34 @@ private[find] final case class StoredTool(
 private[find] final case class Ranked(name: String, score: Double) derives Table
 
 private[find] object Stored:
-  private val Sep = "\u001f"
-
   def encode(entry: Entry): Either[FindError, StoredTool] =
-    if entry.capabilities.exists(_.contains(Sep)) then
-      Left(FindError.Storage("a capability contains the field separator"))
-    else
-      Right(
-        StoredTool(
-          entry.name,
-          entry.signature,
-          entry.doc,
-          entry.capabilities.mkString(Sep),
-          entry.embedding.model.value,
-          entry.embedding.dims,
-          VectorBytes.encode(entry.embedding.values),
-        )
+    Right(
+      StoredTool(
+        entry.key,
+        entry.server.fold("")(_.value),
+        entry.tool.value,
+        entry.description,
+        entry.embedding.model.value,
+        entry.embedding.dims,
+        VectorBytes.encode(entry.embedding.values),
       )
+    )
 
   def decode(stored: StoredTool): Either[FindError, Entry] =
-    VectorBytes
-      .decode(stored.vector)
-      .flatMap: values =>
-        if values.length != stored.dims then Left(FindError.DimMismatch(values.length, stored.dims))
-        else
-          Right(
-            Entry(
-              stored.name,
-              stored.signature,
-              stored.doc,
-              capabilities(stored.capabilities),
-              Embedding(ModelId(stored.model), values),
-            )
-          )
+    for
+      values <- VectorBytes.decode(stored.vector)
+      _      <- check(values.length, stored.dims)
+      server <- serverOf(stored.server)
+      tool   <- ToolId.from(stored.tool).left.map(_ => FindError.Storage("blank tool"))
+    yield Entry(server, tool, stored.description, Embedding(ModelId(stored.model), values))
 
-  private def capabilities(raw: String): zio.Chunk[String] =
-    if raw.isEmpty then zio.Chunk.empty
-    else zio.Chunk.fromArray(raw.split(Sep, -1)).filter(_.nonEmpty)
+  private def check(length: Int, dims: Int): Either[FindError, Unit] =
+    if length == dims then Right(()) else Left(FindError.DimMismatch(length, dims))
+
+  private def serverOf(raw: String): Either[FindError, Option[ServerName]] =
+    if raw.isEmpty then Right(None)
+    else
+      ServerName.from(raw) match
+        case Left(_)     => Left(FindError.Storage("blank server"))
+        case Right(name) => Right(Some(name))
 end Stored
