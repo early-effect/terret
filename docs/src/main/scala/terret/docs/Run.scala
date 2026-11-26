@@ -29,8 +29,10 @@ edge: one adapter per harness, then those same jobs promoted through heddle.
 From this repository, `./histos test` proves the suites. `./histos run app` listens on
 `http://127.0.0.1:8080/mcp`. `./histos run app -- restart` stops the supervised process, waits
 until that process has exited and the port is free, starts it, and returns when the new server is
-listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`, `foreground`, or `none`. `none` is the
-default and does not call a service manager.
+listening. That command stays in the caller's session. `scripts/terret-restart` is the one a
+session under the launchd job can run: it detaches, unloads the job, polls until the port is free,
+starts it, and polls until it is listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`,
+`foreground`, or `none`. `none` is the default and does not call a service manager.
 
 The default harness is Grok: command `grok`, transport `AcpStdio`,
 approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses ACP stdio, because

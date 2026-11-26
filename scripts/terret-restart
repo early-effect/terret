@@ -1,0 +1,334 @@
+#!/bin/zsh
+# Restart launchd job rocks.earlyeffect.terret from a caller that job will kill.
+#
+# A session under the job is a child of the job. The first run double-forks
+# into a new session and returns before launchctl runs, so the grandchild
+# still runs after the job dies. The grandchild logs through tee.
+#
+# `launchctl kickstart -k` starts the service immediately and does not probe
+# the listen port (launchctl: "immediately, regardless of its configured
+# launch conditions"). The old JVM can still hold the port. Unload with
+# bootout, not disable, poll until a bind succeeds, then bootstrap.
+# The tunnel job is left loaded. It does not hold the server port.
+#
+# `--self-check` proves the port poll and the detach. It does not call launchctl.
+
+set -eu
+setopt pipefail
+
+label=${TERRET_RESTART_LABEL:-rocks.earlyeffect.terret}
+host=${TERRET_RESTART_HOST:-127.0.0.1}
+port=${TERRET_RESTART_PORT:-8080}
+pace=${TERRET_RESTART_PACE:-0.25}
+# bootout returns while the process can still hold the socket. launchd's
+# default ExitTimeOut is 20s, then the port budget, so the free wait is 40s.
+port_limit=${TERRET_RESTART_PORT_LIMIT:-40}
+listen_limit=${TERRET_RESTART_LISTEN_LIMIT:-120}
+log=${TERRET_RESTART_LOG:-$HOME/Library/Logs/terret-restart.log}
+plist=${TERRET_RESTART_PLIST:-$HOME/Library/LaunchAgents/${label}.plist}
+
+say() {
+  print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ) terret-restart: $*"
+}
+
+require_int() {
+  [[ $2 == <-> && $2 -gt 0 ]] || {
+    print -r -- "terret-restart: $1 must be a positive integer, got $2" >&2
+    exit 1
+  }
+}
+
+prepare() {
+  require_int port "$port"
+  require_int "port limit" "$port_limit"
+  require_int "listen limit" "$listen_limit"
+  [[ -n $host ]] || {
+    print -r -- "terret-restart: host is empty" >&2
+    exit 1
+  }
+  [[ -f $plist ]] || {
+    print -r -- "terret-restart: missing plist $plist" >&2
+    exit 1
+  }
+  mkdir -p -- "${log:h}"
+}
+
+# free: bind with SO_REUSEADDR off. listening: connect, 200ms budget.
+# Matches terret.app.PortProbe.
+port_state() {
+  perl - "$1" "$2" "$3" <<'PERL'
+use strict;
+use warnings;
+use Socket;
+use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
+use IO::Select;
+use Errno qw(EINPROGRESS);
+
+my ($mode, $host, $port) = @ARGV;
+die "usage: mode host port\n" unless defined $port;
+socket(my $sock, PF_INET, SOCK_STREAM, getprotobyname("tcp")) or die "socket: $!\n";
+my $ip = inet_aton($host) or die "host: $host\n";
+my $addr = sockaddr_in($port, $ip);
+if ($mode eq "free") {
+  setsockopt($sock, SOL_SOCKET, SO_REUSEADDR, pack("i", 0)) or die "setsockopt: $!\n";
+  bind($sock, $addr) or exit 1;
+  exit 0;
+}
+die "mode: $mode\n" unless $mode eq "listening";
+my $flags = fcntl($sock, F_GETFL, 0);
+fcntl($sock, F_SETFL, $flags | O_NONBLOCK) or die "fcntl: $!\n";
+if (!connect($sock, $addr)) {
+  exit 1 unless $! == EINPROGRESS;
+  my $ready = IO::Select->new($sock);
+  exit 1 unless $ready->can_write(0.2);
+  my $packed = getsockopt($sock, SOL_SOCKET, SO_ERROR);
+  exit 1 unless defined $packed;
+  my $err = unpack("i", $packed);
+  exit($err == 0 ? 0 : 1);
+}
+exit 0;
+PERL
+}
+
+wait_until() {
+  local mode=$1 limit=$2 step=$3
+  local start=$SECONDS
+  while (( SECONDS - start < limit )); do
+    if port_state "$mode" "$host" "$port"; then
+      return 0
+    fi
+    sleep "$pace"
+  done
+  if port_state "$mode" "$host" "$port"; then
+    return 0
+  fi
+  if (( ${wait_quiet:-0} )); then
+    return 1
+  fi
+  say "timed out waiting for $step after ${limit}s"
+  return 1
+}
+
+# Double-fork into a new session. Returns once the grandchild has exec'd.
+# The caller is not the grandchild's parent. Grandchild stdio is /dev/null.
+detach_exec() {
+  perl - "$@" <<'PERL'
+use strict;
+use warnings;
+use POSIX ();
+use Fcntl qw(F_SETFD FD_CLOEXEC);
+
+my $pid = fork();
+die "fork: $!\n" unless defined $pid;
+if ($pid) {
+  waitpid($pid, 0);
+  exit($? >> 8);
+}
+
+POSIX::setsid() or die "setsid: $!\n";
+pipe(my $rd, my $wr) or die "pipe: $!\n";
+my $grand = fork();
+die "fork: $!\n" unless defined $grand;
+if ($grand) {
+  close $wr;
+  my $err = do { local $/; <$rd> };
+  if (defined $err && length $err) {
+    print STDERR $err;
+    exit 1;
+  }
+  exit 0;
+}
+
+close $rd;
+fcntl($wr, F_SETFD, FD_CLOEXEC) or do {
+  print $wr "cloexec: $!\n";
+  exit 1;
+};
+open STDIN, "<", "/dev/null" or do { print $wr "stdin: $!\n"; exit 1; };
+open STDOUT, ">", "/dev/null" or do { print $wr "stdout: $!\n"; exit 1; };
+open STDERR, ">&STDOUT" or do { print $wr "stderr: $!\n"; exit 1; };
+exec @ARGV or do {
+  print $wr "exec: $!\n";
+  exit 1;
+};
+PERL
+}
+
+ephemeral_port() {
+  perl -MSocket -e 'use Socket; socket(my $s, PF_INET, SOCK_STREAM, getprotobyname("tcp")) or die $!; bind($s, sockaddr_in(0, INADDR_LOOPBACK)) or die $!; my ($p) = sockaddr_in(getsockname($s)); print $p;'
+}
+
+hold_port() {
+  exec perl - "$1" <<'PERL'
+use strict;
+use warnings;
+use Socket;
+my $port = shift;
+socket(my $sock, PF_INET, SOCK_STREAM, getprotobyname("tcp")) or die "socket: $!\n";
+setsockopt($sock, SOL_SOCKET, SO_REUSEADDR, pack("i", 0)) or die "setsockopt: $!\n";
+bind($sock, sockaddr_in($port, INADDR_LOOPBACK)) or die "bind: $!\n";
+listen($sock, 1) or die "listen: $!\n";
+sleep 60;
+PERL
+}
+
+self_check() {
+  local host=127.0.0.1
+  local pace=0.05
+  local port holder=""
+  trap '[[ -n ${holder:-} ]] && kill "$holder" 2>/dev/null || true' EXIT
+
+  port=$(ephemeral_port)
+  port_state free "$host" "$port" || {
+    print -r -- "self-check: $port was not free" >&2
+    exit 1
+  }
+  local start=$SECONDS
+  wait_until free 30 "a free port" || exit 1
+  (( SECONDS - start < 2 )) || {
+    print -r -- "self-check: a free port burned the budget" >&2
+    exit 1
+  }
+
+  hold_port "$port" &
+  holder=$!
+  wait_until listening 5 "listening" || {
+    print -r -- "self-check: holder did not listen on $port" >&2
+    exit 1
+  }
+  if port_state free "$host" "$port"; then
+    print -r -- "self-check: bind succeeded while $port was held" >&2
+    exit 1
+  fi
+
+  local held=$port
+  (
+    sleep 0.4
+    kill "$holder" 2>/dev/null || true
+  ) &
+  local killer=$!
+  start=$SECONDS
+  wait_until free 5 "a free port" || {
+    print -r -- "self-check: $held did not become free" >&2
+    exit 1
+  }
+  (( SECONDS - start < 5 )) || {
+    print -r -- "self-check: free wait used the whole budget" >&2
+    exit 1
+  }
+  wait "$killer" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  holder=""
+
+  port=$(ephemeral_port)
+  start=$SECONDS
+  if wait_quiet=1 wait_until listening 1 "listening"; then
+    print -r -- "self-check: listening wait succeeded on a closed port" >&2
+    exit 1
+  fi
+  local elapsed=$((SECONDS - start))
+  (( elapsed >= 1 && elapsed <= 3 )) || {
+    print -r -- "self-check: listening timeout took ${elapsed}s" >&2
+    exit 1
+  }
+
+  # macOS ps prints sess as 0, so the new session is the process group
+  # setsid created. launchd kills the job's process group, not this one.
+  local dir parent_pgid child_pgid child_ppid
+  dir=$(mktemp -d)
+  parent_pgid=$(ps -o pgid= -p $$ | tr -d ' ')
+  cat > "$dir/child.zsh" <<'EOF'
+#!/bin/zsh
+sleep 0.2
+echo $$ > "$1"
+ps -o pgid= -p $$ | tr -d ' ' > "$2"
+echo $PPID > "$3"
+echo ok > "$4"
+EOF
+  chmod +x "$dir/child.zsh"
+  detach_exec "$dir/child.zsh" "$dir/pid" "$dir/pgid" "$dir/ppid" "$dir/marker"
+  local spins=0
+  while [[ ! -s $dir/marker && spins -lt 30 ]]; do
+    sleep 0.1
+    spins=$((spins + 1))
+  done
+  [[ -s $dir/marker ]] || {
+    print -r -- "self-check: grandchild did not run" >&2
+    exit 1
+  }
+  child_pgid=$(<"$dir/pgid")
+  child_ppid=$(tr -d ' ' < "$dir/ppid")
+  [[ $child_pgid != "$parent_pgid" ]] || {
+    print -r -- "self-check: grandchild stayed in process group $parent_pgid" >&2
+    exit 1
+  }
+  [[ $child_ppid == 1 ]] || {
+    print -r -- "self-check: grandchild ppid is $child_ppid, expected 1" >&2
+    exit 1
+  }
+  rm -rf -- "$dir"
+  print -r -- "self-check ok"
+}
+
+restart() {
+  local uid domain target
+  uid=$(id -u)
+  domain="gui/${uid}"
+  target="${domain}/${label}"
+  local unloaded=0
+  say "stop $target"
+  if launchctl bootout "$target"; then
+    unloaded=1
+    say "unloaded $target"
+  else
+    say "bootout $target returned non-zero"
+  fi
+  wait_until free "$port_limit" "a free port" || {
+    if (( unloaded )); then
+      say "left $target unloaded"
+    else
+      say "did not start $target"
+    fi
+    exit 1
+  }
+  say "port ${host}:${port} is free"
+  launchctl enable "$target" || {
+    say "enable $target failed"
+    if (( unloaded )); then
+      say "left $target unloaded"
+    fi
+    exit 1
+  }
+  if launchctl bootstrap "$domain" "$plist"; then
+    say "bootstrapped $target"
+  else
+    say "bootstrap failed; kickstart $target"
+    if ! launchctl kickstart "$target"; then
+      say "kickstart $target failed"
+      if (( unloaded )); then
+        say "left $target unloaded"
+      fi
+      exit 1
+    fi
+  fi
+  wait_until listening "$listen_limit" "listening" || exit 1
+  say "listening on ${host}:${port}"
+}
+
+if [[ ${1:-} == "--self-check" ]]; then
+  self_check
+  exit 0
+fi
+
+prepare
+
+if [[ ${TERRET_RESTART_DETACHED:-} != 1 ]]; then
+  export TERRET_RESTART_DETACHED=1
+  detach_exec "$0"
+  say "detached; log: $log" | tee -a -- "$log"
+  exit 0
+fi
+
+{
+  restart
+} 2>&1 | tee -a -- "$log"
