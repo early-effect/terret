@@ -32,12 +32,20 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.BadCursor.type](Status.BadRequest),
       ErrorCase[JobFailure.BadLatest.type](Status.BadRequest),
       ErrorCase[JobFailure.Harness](Status.BadGateway),
+      ErrorCase[JobFailure.UnknownModel](Status.BadRequest),
+      ErrorCase[JobFailure.ModelsUnreadable](Status.BadGateway),
+      ErrorCase[JobFailure.ModelsMalformed](Status.BadGateway),
     )
+
+  private val openSummary =
+    "Open a session on a workspace. model is optional. When set, it must be a [model.<name>] key in the grok config, " +
+      "and a grok process terret spawns is started with --model. An unknown name fails and lists the known keys. " +
+      "The result reports the chosen model. Omit model to keep grok's default."
 
   private val open =
     fallible(Endpoint.post("sessions").in[OpenJob].out[Opened])
       .name("open")
-      .summary("Open a session on a workspace")
+      .summary(openSummary)
       .mcp("open")
 
   private val runSummary =
@@ -97,12 +105,13 @@ private[mcp] object Jobs:
   private def openSession(terret: Terret, job: OpenJob): IO[JobFailure, Opened] =
     for
       workspace <- workspaceOf(job.workspace)
-      session   <- terret.open(workspace, Ceiling(job.allow.toSet)).mapError(JobFailure.from)
+      session   <- terret.open(workspace, Ceiling(job.allow.toSet), job.model).mapError(JobFailure.from)
     yield Opened(
       session.id.value,
       named(session.effective.allow),
       named(session.dropped),
       WireState.from(session.state),
+      session.model.map(_.value),
     )
 
   private def runTurn(terret: Terret, job: RunJob): IO[JobFailure, RunAccepted] =

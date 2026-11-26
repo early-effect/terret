@@ -7,15 +7,20 @@ import terret.Terret
 import terret.config.TerretConfig
 import terret.harness.Harness
 import terret.hooks.Hooks
+import terret.model.ModelCatalog
 import terret.mcp.{MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
 import zio.{Scope, UIO, ZIO}
 
 object Process:
-  def listen(config: ProcessConfig, gate: MilestoneGate): ZIO[Harness & Scope, ProcessError, Unit] =
+  def listen(config: ProcessConfig, gate: MilestoneGate): ZIO[Harness & ModelCatalog & Scope, ProcessError, Unit] =
     ZIO.serviceWithZIO[Harness](listen(config, _, gate))
 
-  def listen(config: ProcessConfig, harness: Harness, gate: MilestoneGate): ZIO[Scope, ProcessError, Unit] =
+  def listen(
+      config: ProcessConfig,
+      harness: Harness,
+      gate: MilestoneGate,
+  ): ZIO[ModelCatalog & Scope, ProcessError, Unit] =
     assemble(config, harness, gate).flatMap { prepared =>
       val body = config.listen match
         case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
@@ -26,7 +31,7 @@ object Process:
     }
 
   /** Bind HTTP and leave the socket open until the scope closes. */
-  def bind(config: ProcessConfig, harness: Harness): ZIO[Scope, ProcessError, Server] =
+  def bind(config: ProcessConfig, harness: Harness): ZIO[ModelCatalog & Scope, ProcessError, Server] =
     config.listen match
       case Listen.Stdio            => ZIO.fail(ProcessError.Listen("stdio"))
       case Listen.Http(host, port) =>
@@ -52,10 +57,11 @@ object Process:
       config: ProcessConfig,
       harness: Harness,
       gate: MilestoneGate,
-  ): ZIO[Scope, ProcessError, Prepared] =
+  ): ZIO[ModelCatalog & Scope, ProcessError, Prepared] =
     for
-      terret <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate)
-      served <- ZIO
+      catalog <- ZIO.service[ModelCatalog]
+      terret  <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate, catalog)
+      served  <- ZIO
         .fromEither(
           TerretMcp.served(terret, config.version, config.events, config.eventsKey)
         )

@@ -1,5 +1,6 @@
 package terret.grok
 
+import terret.model.ModelKey
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -40,6 +41,39 @@ object LaunchSpec extends ZIOSpecDefault:
     test("a later prompt resumes that session") {
       val argv = Launch.cli(GrokConfig.cli, id, Prompt("next"), resume = true, PermissionPolicy.Closed, Ceiling.closed)
       assertTrue(argv.args.contains("-r"), !argv.args.contains("-s"))
+    },
+    test("a model flag sits before the other flags, and an omitted model adds none") {
+      val chosen = Launch.cli(
+        GrokConfig.cli,
+        id,
+        Prompt("hello"),
+        resume = false,
+        PermissionPolicy.Inherit,
+        Ceiling.all,
+        model = Some(ModelKey("grok-4.7")),
+      )
+      val plain = Launch.stdio(GrokConfig.stdio, PermissionPolicy.Inherit, Ceiling.all)
+      val stdio = Launch.stdio(
+        GrokConfig.stdio,
+        PermissionPolicy.Inherit,
+        Ceiling.all,
+        model = Some(ModelKey("grok-4.7")),
+      )
+      assertTrue(
+        chosen.rendered == Chunk(
+          "grok",
+          "-p",
+          "hello",
+          "-s",
+          id.value,
+          "--output-format",
+          "streaming-json",
+          "--model",
+          "grok-4.7",
+        ),
+        stdio.rendered == Chunk("grok", "--model", "grok-4.7", "agent", "stdio"),
+        !plain.args.contains("--model"),
+      )
     },
     test("inherit ask passes no permission flags") {
       val argv = Launch.cli(GrokConfig.cli, id, Prompt("hi"), resume = false, PermissionPolicy.Inherit, Ceiling.all)

@@ -2,6 +2,7 @@ package terret.grok
 
 import slayer.*
 import terret.harness.{HarnessFailure, ProtocolFault}
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
@@ -34,8 +35,15 @@ object McpSessionSpec extends ZIOSpecDefault:
           opened  <- Ref.make(false)
           _       <- stub[McpCatalog](_.load(any[Workspace]))(ZIO.fail(McpDocumentError.Malformed))
           _       <- stub[AcpOpen](
-            _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
-          ) { (_, _, _, _, _) =>
+            _.open(
+              any[Workspace],
+              any[PermissionPolicy],
+              any[Ceiling],
+              any[McpPolicy],
+              any[NetworkPolicy],
+              any[Option[ModelKey]],
+            )
+          ) { (_, _, _, _, _, _) =>
             opened.set(true) *> ZIO.succeed(pipe)
           }
           _       <- stub[RpcPipe](_.read)(ZIO.succeed(None))
@@ -69,8 +77,15 @@ object McpSessionSpec extends ZIOSpecDefault:
       written <- Ref.make(Chunk.empty[Json])
       _       <- stub[McpCatalog](_.load(any[Workspace]))(loaded)
       _       <- stub[AcpOpen](
-        _.open(any[Workspace], any[PermissionPolicy], any[Ceiling], any[McpPolicy], any[NetworkPolicy])
-      ) { (_, _, _, _, _) =>
+        _.open(
+          any[Workspace],
+          any[PermissionPolicy],
+          any[Ceiling],
+          any[McpPolicy],
+          any[NetworkPolicy],
+          any[Option[ModelKey]],
+        )
+      ) { (_, _, _, _, _, _) =>
         ZIO.succeed(pipe)
       }
       _       <- stub[RpcPipe](_.read)(pull(pending))

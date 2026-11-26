@@ -1,5 +1,6 @@
 package terret.grok
 
+import terret.model.ModelKey
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -18,11 +19,12 @@ object Launch:
       ceiling: Ceiling,
       mcp: McpPolicy = McpPolicy.empty,
       network: NetworkPolicy = NetworkPolicy.empty,
+      model: Option[ModelKey] = None,
   ): Argv =
     val session = if resume then Chunk("-r", id.value) else Chunk("-s", id.value)
     Argv(
       config.command,
-      Chunk("-p", prompt.text) ++ session ++ Chunk("--output-format", "streaming-json") ++ flags(
+      Chunk("-p", prompt.text) ++ session ++ Chunk("--output-format", "streaming-json") ++ modelArg(model) ++ flags(
         config,
         policy,
         ceiling,
@@ -37,8 +39,17 @@ object Launch:
       ceiling: Ceiling,
       mcp: McpPolicy = McpPolicy.empty,
       network: NetworkPolicy = NetworkPolicy.empty,
+      model: Option[ModelKey] = None,
   ): Argv =
-    Argv(config.command, flags(config, policy, ceiling, mcp, network) ++ Chunk("agent", "stdio"))
+    Argv(
+      config.command,
+      modelArg(model) ++ flags(config, policy, ceiling, mcp, network) ++ Chunk("agent", "stdio"),
+    )
+
+  private def modelArg(model: Option[ModelKey]): Chunk[String] =
+    model match
+      case Some(key) => Chunk("--model", key.value)
+      case None      => Chunk.empty
 
   def flags(
       config: GrokConfig,

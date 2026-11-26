@@ -3,13 +3,14 @@ package terret.app
 import heddle.mcp.protocol.{ClientRequest, Message, Methods, ProtocolVersion, RequestId}
 import heddle.mcp.transport.Http
 import terret.memory.{InMemory, Script}
+import terret.model.ModelCatalog
 import terret.permission.PermissionPolicy
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.json.*
 import zio.test.*
 import zio.durationInt
-import zio.{ConfigProvider, ZIO}
+import zio.{ConfigProvider, Scope, ZIO, ZLayer}
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 
@@ -117,6 +118,22 @@ object ProcessSpec extends ZIOSpecDefault:
         relative == Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
       )
     },
+    test("terret.grok.config selects the model file") {
+      val stdio      = defaults.copy(transport = None)
+      val selected   = ProcessConfig.load(stdio.copy(grokConfig = Some("/var/terret/grok.toml")))
+      val empty      = ProcessConfig.load(stdio.copy(grokConfig = Some("")))
+      val overridden = ZIO
+        .config(ProcessConfig.raw)
+        .mapError(ProcessError.Config(_))
+        .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.grok.config" -> "/var/terret/grok.toml")))
+      for chosen <- overridden
+      yield assertTrue(
+        selected.map(_.grokConfig) == Right(java.nio.file.Path.of("/var/terret/grok.toml")),
+        empty == Left(ProcessError.GrokConfigPath),
+        chosen.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"),
+      )
+    },
     test("the Warp file names the local HTTP endpoint") {
       val doc = WarpLocal.http(WarpLocal.url("0.0.0.0", 8080))
       assertTrue(
@@ -130,7 +147,7 @@ object ProcessSpec extends ZIOSpecDefault:
         for
           memory <- InMemory.make(Script.echo)
           config = ProcessConfig.local.copy(listen = Listen.Http("127.0.0.1", 0))
-          server <- Process.bind(config, memory)
+          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           status <- listed(port)
         yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel")))

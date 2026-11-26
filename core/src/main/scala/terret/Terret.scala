@@ -6,6 +6,7 @@ import terret.event.{Event, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.hooks.Hooks
 import terret.milestone.MilestoneSink
+import terret.model.{ModelCatalog, ModelKey}
 import terret.permission.Ceiling
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
@@ -22,13 +23,20 @@ final class Terret private (
     scope: Scope,
     closed: Ref[Boolean],
     sink: MilestoneSink,
+    catalog: ModelCatalog,
 ):
-  def open(workspace: Workspace, requested: Ceiling = Ceiling.all): IO[TerretError, Session] =
+  def open(
+      workspace: Workspace,
+      requested: Ceiling = Ceiling.all,
+      model: Option[String] = None,
+  ): IO[TerretError, Session] =
     confine(workspace).flatMap { _ =>
-      val (effective, dropped) = requested.clamp(config.policy.ceiling)
-      harness.open(workspace, effective, config.policy).mapError(TerretError.Harness(_)).flatMap { id =>
-        val session = Session(id, workspace, effective, dropped, SessionState.Open)
-        sessions.update(_.updated(id, Terret.Held(session, 0L, None))).as(session)
+      resolve(model).flatMap { chosen =>
+        val (effective, dropped) = requested.clamp(config.policy.ceiling)
+        harness.open(workspace, effective, config.policy, chosen).mapError(TerretError.Harness(_)).flatMap { id =>
+          val session = Session(id, workspace, effective, dropped, SessionState.Open, chosen)
+          sessions.update(_.updated(id, Terret.Held(session, 0L, None))).as(session)
+        }
       }
     }
 
@@ -148,6 +156,8 @@ final class Terret private (
       case TerretError.Busy(_)               => HarnessFailure.Protocol(ProtocolFault.Incomplete)
       case TerretError.WorkspaceDenied(_, _) => HarnessFailure.Protocol(ProtocolFault.Incomplete)
       case TerretError.WorkspaceInvalid(_)   => HarnessFailure.Protocol(ProtocolFault.Incomplete)
+      case TerretError.UnknownModel(_, _)    => HarnessFailure.Protocol(ProtocolFault.Incomplete)
+      case TerretError.Models(_)             => HarnessFailure.Protocol(ProtocolFault.Incomplete)
 
   private def cursorOf(id: SessionId): UIO[Option[Long]] =
     harness.page(id, None).map(_.cursor).catchAll(_ => ZIO.succeed(None))
@@ -213,6 +223,16 @@ final class Terret private (
       case Some(root) =>
         if workspace.path.normalize.startsWith(root.path.normalize) then ZIO.unit
         else ZIO.fail(TerretError.WorkspaceDenied(workspace, root))
+
+  private def resolve(model: Option[String]): IO[TerretError, Option[ModelKey]] =
+    model match
+      case None       => ZIO.succeed(None)
+      case Some(name) =>
+        catalog.known.mapError(TerretError.Models(_)).flatMap { keys =>
+          ZIO.fromEither(ModelKey.choose(Some(name), keys)).mapError { unknown =>
+            TerretError.UnknownModel(unknown.name, unknown.known)
+          }
+        }
 end Terret
 
 object Terret:
@@ -223,20 +243,22 @@ object Terret:
       config: TerretConfig,
       hooks: Hooks,
       milestones: MilestoneSink = MilestoneSink.discard,
+      catalog: ModelCatalog = ModelCatalog.empty,
   ): URIO[Scope, Terret] =
     for
       sessions <- Ref.make(Map.empty[SessionId, Held])
       scope    <- ZIO.scope
       closed   <- Ref.make(false)
-    yield Terret(harness, config, hooks, sessions, scope, closed, milestones)
+    yield Terret(harness, config, hooks, sessions, scope, closed, milestones, catalog)
 
-  val layer: ZLayer[Harness & TerretConfig & Hooks, Nothing, Terret] =
+  val layer: ZLayer[Harness & TerretConfig & Hooks & ModelCatalog, Nothing, Terret] =
     ZLayer.scoped {
       for
         harness <- ZIO.service[Harness]
         config  <- ZIO.service[TerretConfig]
         hooks   <- ZIO.service[Hooks]
-        terret  <- make(harness, config, hooks)
+        catalog <- ZIO.service[ModelCatalog]
+        terret  <- make(harness, config, hooks, catalog = catalog)
       yield terret
     }
 end Terret

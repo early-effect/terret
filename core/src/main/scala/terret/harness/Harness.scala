@@ -1,6 +1,7 @@
 package terret.harness
 
 import terret.event.Event
+import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.SessionId
@@ -10,7 +11,12 @@ import zio.stream.ZStream
 import zio.{IO, UIO}
 
 trait Harness:
-  def open(workspace: Workspace, ceiling: Ceiling, policy: PermissionPolicy): IO[HarnessFailure, SessionId]
+  def open(
+      workspace: Workspace,
+      ceiling: Ceiling,
+      policy: PermissionPolicy,
+      model: Option[ModelKey] = None,
+  ): IO[HarnessFailure, SessionId]
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event]
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event]
   def transcript(id: SessionId): IO[HarnessFailure, Transcript]

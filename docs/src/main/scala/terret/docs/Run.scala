@@ -17,7 +17,9 @@ the way a heddle is a guide on a loom. It is not the host, and it is not the har
 A coding host speaks MCP. Cursor, Claude Code, Grok Bot, and Warp are hosts. A coding harness does
 not speak MCP. Grok Build and dsh are harnesses. Terret takes MCP in and talks to the harness
 through an adapter. The core never learns a harness's name. The jobs a host calls stay `open`,
-`run`, `status`, `resume`, `export`, and `cancel`. `follow` is a subscription on that same API, not
+`run`, `status`, `resume`, `export`, and `cancel`. `open` takes an optional `model` key from the
+grok config. A grok process terret spawns is started with `--model`, and the result reports the
+chosen model. `follow` is a subscription on that same API, not
 a seventh job. A host listens with MCP `subscriptions/listen`, or opens
 `GET /sessions/{session}/events` as server-sent events. The event id is the log index. Send it back
 as `after` to continue strictly after that event. Closing the stream does not cancel the turn.
