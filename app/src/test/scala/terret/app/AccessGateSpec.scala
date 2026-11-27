@@ -1,6 +1,8 @@
 package terret.app
 
+import heddle.http.{Method, Request, Response, Status}
 import heddle.http.header.Headers
+import heddle.route.{Handler, PathDsl, Routes}
 import zio.json.*
 import zio.json.ast.Json
 import zio.test.*
@@ -19,16 +21,18 @@ object AccessGateSpec extends ZIOSpecDefault:
   private val when = Instant.parse("2026-11-21T15:04:05Z")
   private val Aud  = "aud-tag"
   private val Kid  = "k1"
+  private val Iss  = "https://example.cloudflareaccess.com"
 
   def spec = suite("cloudflare access")(
     test("a token is RS256 for this audience and still unexpired") {
       material.map { keys =>
-        val exp   = when.plusSeconds(60).getEpochSecond
-        val token = jwt(keys.signing, Some(Kid), Json.Str(Aud), exp)
-        val array = jwt(keys.signing, Some(Kid), Json.Arr(Json.Str("other"), Json.Str(Aud)), exp)
-        val late  = Instant.ofEpochSecond(exp)
-        val wrong = jwt(keys.signing, Some("missing"), Json.Str(Aud), exp)
-        val round = AccessJwt.keys(keys.jwks).flatMap { parsed =>
+        val exp     = when.plusSeconds(60).getEpochSecond
+        val token   = jwt(keys.signing, Some(Kid), Json.Str(Aud), exp)
+        val array   = jwt(keys.signing, Some(Kid), Json.Arr(Json.Str("other"), Json.Str(Aud)), exp)
+        val late    = Instant.ofEpochSecond(exp)
+        val wrong   = jwt(keys.signing, Some("missing"), Json.Str(Aud), exp)
+        val foreign = jwt(keys.signing, Some(Kid), Json.Str(Aud), exp, "https://evil.example")
+        val round   = AccessJwt.keys(keys.jwks).flatMap { parsed =>
           check(token, parsed, Aud, when)
         }
         assertTrue(
@@ -37,8 +41,9 @@ object AccessGateSpec extends ZIOSpecDefault:
           check(array, keys.loaded, Aud, when) == Right(()),
           check(token, keys.loaded, "other", when) == Left(AccessError.Rejected),
           check(token, keys.loaded, Aud, late) == Left(AccessError.Rejected),
+          check(foreign, keys.loaded, Aud, when) == Left(AccessError.Rejected),
           check(wrong, keys.loaded, Aud, when) == Left(AccessError.UnknownKid),
-          AccessJwt.verify("a.b.c", keys.loaded, Aud, when) == Left(AccessError.Malformed),
+          AccessJwt.verify("a.b.c", keys.loaded, Aud, Iss, when) == Left(AccessError.Malformed),
           round == Right(()),
         )
       }
@@ -73,6 +78,26 @@ object AccessGateSpec extends ZIOSpecDefault:
         passed == (),
       )
     },
+    test("a refused token is logged as the reason and the path") {
+      import PathDsl.*
+      ZIO.scoped {
+        for
+          _    <- TestClock.setTime(when)
+          keys <- material
+          hits <- Ref.make(0)
+          gate <- gate(keys, hits)
+          env  <- (ZLayer.succeed(gate) ++ AuthLog.live).build
+          route = Routes(Method.GET / "watch" -> Handler.succeed(Response.text("ok"))) @@ AccessGate.http
+          denied   <- route(Request.get("/watch")).provideEnvironment(env)
+          recorded <- env.get[AuthLog].recent
+        yield assertTrue(
+          denied.status == Status.Unauthorized,
+          denied.body.text.contains("access denied"),
+          recorded.length == 1,
+          recorded.exists(row => row.reason == "Rejected" && row.path == "/watch" && row.at == when),
+        )
+      }
+    },
   )
 
   private final case class Material(loaded: Chunk[AccessJwt.RsaKey], signing: PrivateKey, jwks: String)
@@ -92,13 +117,13 @@ object AccessGateSpec extends ZIOSpecDefault:
       .flatMap(ZIO.fromEither)
 
   private def gate(found: Material, hits: Ref[Int]): ZIO[Any, String, AccessGate] =
-    Audience.from(Aud) match
-      case Left(_)    => ZIO.fail("audience")
-      case Right(tag) =>
+    (TeamHost.from("example.cloudflareaccess.com"), Audience.from(Aud)) match
+      case (Right(team), Right(tag)) =>
         val certs = new AccessCerts:
           def keys: zio.IO[AccessError, Chunk[AccessJwt.RsaKey]] =
             hits.update(_ + 1).as(found.loaded)
-        ZIO.scoped((ZLayer.succeed(certs) >>> AccessGate.layer(tag)).build.map(_.get[AccessGate]))
+        ZIO.scoped((ZLayer.succeed(certs) >>> AccessGate.layer(team, tag)).build.map(_.get[AccessGate]))
+      case _ => ZIO.fail("access")
 
   private def check(
       built: Either[String, String],
@@ -108,7 +133,7 @@ object AccessGateSpec extends ZIOSpecDefault:
   ): Either[AccessError, Unit] =
     built match
       case Left(_)    => Left(AccessError.Malformed)
-      case Right(raw) => AccessJwt.verify(raw, keys, audience, now)
+      case Right(raw) => AccessJwt.verify(raw, keys, audience, Iss, now)
 
   private def document(rsa: RSAPublicKey): String =
     Json
@@ -125,12 +150,18 @@ object AccessGateSpec extends ZIOSpecDefault:
       )
       .toJson
 
-  private def jwt(key: PrivateKey, kid: Option[String], aud: Json, exp: Long): Either[String, String] =
+  private def jwt(
+      key: PrivateKey,
+      kid: Option[String],
+      aud: Json,
+      exp: Long,
+      iss: String = Iss,
+  ): Either[String, String] =
     Try {
       val header = kid match
         case Some(id) => Json.Obj("alg" -> Json.Str("RS256"), "kid" -> Json.Str(id))
         case None     => Json.Obj("alg" -> Json.Str("RS256"))
-      val payload = Json.Obj("aud" -> aud, "exp" -> Json.Num(BigDecimal(exp)))
+      val payload = Json.Obj("aud" -> aud, "exp" -> Json.Num(BigDecimal(exp)), "iss" -> Json.Str(iss))
       val encoded = s"${url(header.toJson)}.${url(payload.toJson)}"
       val signer  = Signature.getInstance("SHA256withRSA")
       signer.initSign(key)

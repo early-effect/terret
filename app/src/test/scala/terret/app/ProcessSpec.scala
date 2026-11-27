@@ -2,19 +2,21 @@ package terret.app
 
 import heddle.mcp.protocol.{ClientRequest, Message, Methods, ProtocolVersion, RequestId}
 import heddle.mcp.transport.Http
+import terret.mcp.{OpenJob, Opened, RunJob, SessionJob, StatusView, WireState}
 import terret.memory.{InMemory, Script}
 import terret.model.ModelCatalog
-import terret.permission.PermissionPolicy
+import terret.permission.{Permission, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.json.*
 import zio.test.*
 import zio.durationInt
-import zio.{ConfigProvider, Scope, ZIO, ZLayer}
+import zio.{Chunk, ConfigProvider, Scope, ZIO, ZLayer}
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 object ProcessSpec extends ZIOSpecDefault:
   def spec = suite("process")(
@@ -244,15 +246,110 @@ object ProcessSpec extends ZIOSpecDefault:
             subscriptions = dir.resolve("subscriptions.json"),
             access = Some(access),
           )
-          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
-          local  <- server.port
-          open   <- sessions(local)
-          denied <- sessions(tunnel)
+          server      <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          local       <- server.port
+          open        <- sessions(local)
+          denied      <- sessions(tunnel)
+          localWatch  <- exchange(local, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
+          tunnelWatch <- exchange(tunnel, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
+          mcp         <- listed(tunnel)
         yield assertTrue(
           open.status == 200,
           open.body.contains("["),
+          open.headers.get("X-Content-Type-Options").contains("nosniff"),
+          open.headers.get("X-Frame-Options").contains("DENY"),
+          open.headers.get("Referrer-Policy").contains("no-referrer"),
+          open.headers.get("Strict-Transport-Security").isEmpty,
+          open.headers.get("Access-Control-Allow-Origin").isEmpty,
           denied.status == 401,
           denied.body.contains("access denied"),
+          denied.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
+          localWatch.status == 404,
+          localWatch.headers.get("Strict-Transport-Security").isEmpty,
+          localWatch.headers.get("X-Content-Type-Options").contains("nosniff"),
+          tunnelWatch.status == 401,
+          tunnelWatch.body.contains("access denied"),
+          tunnelWatch.headers.get("X-Content-Type-Options").contains("nosniff"),
+          tunnelWatch.headers.get("X-Frame-Options").contains("DENY"),
+          tunnelWatch.headers.get("Referrer-Policy").contains("no-referrer"),
+          tunnelWatch.headers.get("Content-Security-Policy").exists(_.contains("frame-ancestors 'none'")),
+          tunnelWatch.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
+          tunnelWatch.headers.get("Access-Control-Allow-Origin").isEmpty,
+          mcp == Right(Set("open", "run", "status", "resume", "export", "cancel", "find", "call")),
+        )
+      }
+    },
+    test("a cross-site run does not start a turn") {
+      ZIO.scoped {
+        for
+          memory <- InMemory.make(Script.echo)
+          dir    <- ZIO.acquireRelease(
+            ZIO.attempt {
+              val root = Path.of("target")
+              Files.createDirectories(root)
+              Files.createTempDirectory(root, "process-subscriptions")
+            }
+          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          space <- ZIO.acquireRelease(
+            ZIO.attempt {
+              val root = Path.of("target")
+              Files.createDirectories(root)
+              Files.createTempDirectory(root, "watch-workspace")
+            }
+          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+          )
+          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          port   <- server.port
+          opened <- exchange(
+            port,
+            "POST",
+            "/sessions",
+            Some(OpenJob(space.toAbsolutePath.toString, Chunk.empty[Permission]).toJson),
+            "Content-Type" -> "application/json",
+            "Accept"       -> "application/json",
+          )
+          session <- decoded[Opened](opened.body)
+          run = RunJob(session.session, "go").toJson
+          refused <- exchange(
+            port,
+            "POST",
+            "/sessions/run",
+            Some(run),
+            "Content-Type"   -> "application/json",
+            "Origin"         -> "https://evil.example",
+            "Sec-Fetch-Site" -> "cross-site",
+          )
+          held <- exchange(
+            port,
+            "POST",
+            "/sessions/status",
+            Some(SessionJob(session.session).toJson),
+            "Content-Type" -> "application/json",
+            "Accept"       -> "application/json",
+          )
+          view    <- decoded[StatusView](held.body)
+          allowed <- exchange(
+            port,
+            "POST",
+            "/sessions/run",
+            Some(run),
+            "Content-Type" -> "application/json",
+            "Accept"       -> "application/json",
+          )
+          done <- untilEnded(port, session.session, 40)
+        yield assertTrue(
+          opened.status == 200,
+          refused.status == 403,
+          refused.body.contains("access denied"),
+          view.state == WireState.Open,
+          allowed.status == 200,
+          (done.state match
+            case WireState.Ended(_)                 => true
+            case WireState.Open | WireState.Running => false
+          ),
         )
       }
     },
@@ -301,24 +398,72 @@ object ProcessSpec extends ZIOSpecDefault:
       port
     }
 
-  private final case class HttpText(status: Int, body: String)
+  private final case class HttpText(status: Int, body: String, headers: Map[String, String])
 
   private def sessions(port: Int): ZIO[Any, Throwable, HttpText] =
+    exchange(
+      port,
+      "GET",
+      "/sessions",
+      None,
+      "Accept"           -> "application/json",
+      "CF-Connecting-IP" -> "203.0.113.4",
+    )
+
+  private def exchange(
+      port: Int,
+      method: String,
+      path: String,
+      body: Option[String],
+      headers: (String, String)*
+  ): ZIO[Any, Throwable, HttpText] =
     ZIO.scoped {
       ZIO
         .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
         .flatMap { client =>
           ZIO.attemptBlocking {
-            val request = HttpRequest
-              .newBuilder(URI.create(s"http://127.0.0.1:$port/sessions"))
-              .header("Accept", "application/json")
-              .header("CF-Connecting-IP", "203.0.113.4")
-              .GET()
-              .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-            HttpText(response.statusCode(), Option(response.body()).getOrElse(""))
+            val builder = HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port$path"))
+            headers.foreach((name, value) => builder.header(name, value))
+            val publisher = body match
+              case Some(text) => HttpRequest.BodyPublishers.ofString(text)
+              case None       => HttpRequest.BodyPublishers.noBody()
+            method match
+              case "GET"  => builder.GET()
+              case "POST" => builder.POST(publisher)
+              case other  => builder.method(other, publisher)
+            val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+            val kept     = List(
+              "X-Content-Type-Options",
+              "X-Frame-Options",
+              "Referrer-Policy",
+              "Content-Security-Policy",
+              "Strict-Transport-Security",
+              "Access-Control-Allow-Origin",
+            ).flatMap(name => response.headers().firstValue(name).toScala.map(name -> _)).toMap
+            HttpText(response.statusCode(), Option(response.body()).getOrElse(""), kept)
           }
         }
+    }
+
+  private def decoded[A: JsonDecoder](body: String): ZIO[Any, Throwable, A] =
+    ZIO.fromEither(body.fromJson[A]).mapError(message => new IllegalArgumentException(message))
+
+  private def untilEnded(port: Int, session: String, left: Int): ZIO[Any, Throwable, StatusView] =
+    exchange(
+      port,
+      "POST",
+      "/sessions/status",
+      Some(SessionJob(session).toJson),
+      "Content-Type" -> "application/json",
+      "Accept"       -> "application/json",
+    ).flatMap { reply =>
+      decoded[StatusView](reply.body).flatMap { view =>
+        view.state match
+          case WireState.Ended(_)                 => ZIO.succeed(view)
+          case WireState.Open | WireState.Running =>
+            if left <= 0 then ZIO.fail(new IllegalStateException(reply.body))
+            else ZIO.sleep(25.millis) *> untilEnded(port, session, left - 1)
+      }
     }
 
   private def listed(port: Int): ZIO[Any, Throwable, Either[String, Set[String]]] =

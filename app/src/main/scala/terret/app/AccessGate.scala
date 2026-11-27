@@ -75,20 +75,25 @@ object AccessGate:
     ZLayer.succeed(new:
       def allow(headers: Headers): IO[AccessError, Unit] = ZIO.unit)
 
-  def layer(audience: Audience): ZLayer[AccessCerts, Nothing, AccessGate] =
+  def layer(team: TeamHost, audience: Audience): ZLayer[AccessCerts, Nothing, AccessGate] =
     ZLayer.scoped {
       for
         certs <- ZIO.service[AccessCerts]
         cache <- Ref.make(Option.empty[(Chunk[AccessJwt.RsaKey], Instant)])
-      yield Live(certs, audience, cache)
+      yield Live(certs, audience, AccessJwt.issuer(team), cache)
     }
 
-  /** The tunnel listener. A missing token is rejected. There is no localhost exemption: cloudflared connects from
-    * 127.0.0.1, so an exemption would let every tunnel request through. The local listener does not install this.
+  /** The tunnel listener, on every path except `/mcp`. A missing token is rejected. There is no localhost exemption:
+    * cloudflared connects from 127.0.0.1, so an exemption would let every tunnel request through. The local listener
+    * does not install this, and `/mcp` keeps the events-key check.
     */
-  def http: Middleware[AccessGate] =
+  def http: Middleware[AccessGate & AuthLog] =
     Middleware.interceptZIO { request =>
-      ZIO.serviceWithZIO[AccessGate](_.allow(request.headers)).mapError(_ => denied).as(request)
+      ZIO
+        .serviceWithZIO[AccessGate](_.allow(request.headers))
+        .tapError(error => ZIO.serviceWithZIO[AuthLog](_.record(AuthReason.from(error), request.path.render)))
+        .mapError(_ => denied)
+        .as(request)
     }
 
   private val denied: Response =
@@ -97,6 +102,7 @@ object AccessGate:
   private final class Live(
       certs: AccessCerts,
       audience: Audience,
+      issuer: String,
       cache: Ref[Option[(Chunk[AccessJwt.RsaKey], Instant)]],
   ) extends AccessGate:
     def allow(headers: Headers): IO[AccessError, Unit] =
@@ -112,7 +118,7 @@ object AccessGate:
           }
 
     private def check(jwt: String, keys: Chunk[AccessJwt.RsaKey], now: Instant): IO[AccessError, Unit] =
-      ZIO.fromEither(AccessJwt.verify(jwt, keys, audience.value, now))
+      ZIO.fromEither(AccessJwt.verify(jwt, keys, audience.value, issuer, now))
 
     /** An unknown kid refreshes once. A cache younger than 30 seconds stays, so a bad kid cannot stampede the certs. */
     private def load(force: Boolean): IO[AccessError, Chunk[AccessJwt.RsaKey]] =

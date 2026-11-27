@@ -64,11 +64,14 @@ Past that, the oldest entries drop and the indexes that remain do not move. Zero
 is rejected. `access.team` and `access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`) turn
 on Cloudflare Access. Set both or neither. A port without both is rejected. The team value is a hostname
 such as `example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
-When both are set, the configured HTTP listener (default `127.0.0.1:8080`) has no Access check. A second
-listener on `127.0.0.1` and `access.port` (default 8081, `TERRET_ACCESS_PORT`) always requires
+When both are set, the local listener (default `127.0.0.1:8080`) has no Access check and does not serve
+`GET /watch`. The tunnel listener on `127.0.0.1` and `access.port` (default 8081, `TERRET_ACCESS_PORT`)
+keeps the events-key check on `/mcp`. Every other tunnel path, including `GET /watch`, requires
 `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against `https://<team>/cdn-cgi/access/certs`,
-for that audience, and not be expired. A missing token is rejected. There is no exemption for a direct
-client or for loopback: cloudflared connects from 127.0.0.1, so point it at the tunnel port. The same
+for that audience, with issuer `https://<team>`, and not be expired. A missing token is rejected. There
+is no exemption for loopback or a Cloudflare header: cloudflared connects from 127.0.0.1, so point it at
+the tunnel port, not 8080. `GET /watch` is read-only and does not call `open`, `run`, `cancel`, or
+`resume`. The same
 port as the local listener is rejected. Nothing in this config is a secret.
 
 `grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models

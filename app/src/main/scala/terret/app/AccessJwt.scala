@@ -12,14 +12,25 @@ import java.time.Instant
 import java.util.Base64
 import scala.util.Try
 
-/** Checks a Cloudflare Access JWT: RS256 against the team keys, then audience and expiry. */
+/** Checks a Cloudflare Access JWT: RS256 against the team keys, then issuer, audience, and expiry. */
 object AccessJwt:
   final case class RsaKey(kid: Option[String], publicKey: PublicKey)
+
+  /** Issuer for a team hostname, such as `https://example.cloudflareaccess.com`. */
+  def issuer(team: TeamHost): String = s"https://${team.value}"
+
+  /** A map key for the stream cap. A `sub` claim is hashed, and so is the token when `sub` is absent. Neither value is
+    * kept.
+    */
+  def viewer(token: String): String =
+    val material = subject(token).filter(_.nonEmpty).getOrElse(token)
+    digest(material)
 
   def verify(
       token: String,
       keys: Chunk[RsaKey],
       audience: String,
+      issuer: String,
       now: Instant,
   ): Either[AccessError, Unit] =
     val parts = token.split("\\.", -1)
@@ -33,6 +44,8 @@ object AccessJwt:
         _       <- if alg == "RS256" then Right(()) else Left(AccessError.Rejected)
         key     <- select(keys, optional(header, "kid"))
         _       <- if signed(parts(0), parts(1), sig, key.publicKey) then Right(()) else Left(AccessError.Rejected)
+        iss     <- text(payload, "iss")
+        _       <- if iss == issuer then Right(()) else Left(AccessError.Rejected)
         _       <- audienceOf(payload, audience)
         exp     <- epoch(payload, "exp")
         _       <- if now.isBefore(Instant.ofEpochSecond(exp)) then Right(()) else Left(AccessError.Rejected)
@@ -110,6 +123,17 @@ object AccessJwt:
 
   private def optional(obj: Json.Obj, name: String): Option[String] =
     obj.get(name).collect { case Json.Str(value) if value.nonEmpty => value }
+
+  private def subject(token: String): Option[String] =
+    val parts = token.split("\\.", -1)
+    if parts.length != 3 then None
+    else obj(parts(1)).toOption.flatMap(payload => optional(payload, "sub"))
+
+  private def digest(raw: String): String =
+    Try {
+      val md = java.security.MessageDigest.getInstance("SHA-256")
+      md.digest(raw.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").take(8).mkString
+    }.getOrElse("anonymous")
 
   private def b64(raw: String): Either[AccessError, Array[Byte]] =
     val normalized = raw.replace('-', '+').replace('_', '/')

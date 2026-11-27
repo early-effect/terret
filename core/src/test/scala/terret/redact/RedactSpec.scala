@@ -8,15 +8,16 @@ object RedactSpec extends ZIOSpecDefault:
       val aws = "0123456789abcdef0123456789abcdef01234567"
       val raw =
         "ghp_Abcdefghij gho_Abcdefghij github_pat_abc_DEF whsec_abc-DEF " +
-          "Bearer hunter2 x-terret-key: hunter2 AKIAIOSFODNN7EXAMPLE " +
+          "Bearer hunter2 xai-secretvalue x-terret-key: hunter2 AKIAIOSFODNN7EXAMPLE " +
           s"aws_secret_access_key=$aws user@example.com still here"
       val cleaned = Redact.text(raw)
       assertTrue(
         cleaned ==
           "[redacted] [redacted] [redacted] [redacted] " +
-          "[redacted] x-terret-key: [redacted] [redacted] " +
+          "[redacted] [redacted] x-terret-key: [redacted] [redacted] " +
           "aws_secret_access_key=[redacted] [redacted] still here",
         !cleaned.contains("ghp_"),
+        !cleaned.contains("xai-"),
         !cleaned.contains("hunter2"),
         !cleaned.contains(aws),
         !cleaned.contains("user@example.com"),
