@@ -44,6 +44,7 @@ object Wire:
     )
 
   val methodNotFound: Int = -32601
+  val invalidParams: Int  = -32602
 
   def parse(json: Json): Either[ProtocolFault, Wire] =
     json match

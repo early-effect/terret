@@ -186,6 +186,7 @@ object ConfineSpec extends ZIOSpecDefault:
           commandOf(command, cwd),
           files,
           home = home,
+          sandbox = ShellSandbox.ready,
         )
       }
     }

@@ -27,10 +27,24 @@ object PermissionChoice:
       access: McpAccess = McpAccess.closed,
       hosts: NetworkPolicy = NetworkPolicy.empty,
       home: Path = FileRoots.home,
+      sandbox: ShellSandbox = ShellSandbox.live,
   ): UIO[PermissionAnswer] =
     val tool = toolOf(params)
     val kind = JsonFields.str(tool, "kind").getOrElse("")
-    allows(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, access, hosts, files, home).map { decision =>
+    allows(
+      policy,
+      ceiling,
+      workspace,
+      readRoots,
+      writeRoots,
+      tool,
+      kind,
+      access,
+      hosts,
+      files,
+      home,
+      sandbox,
+    ).map { decision =>
       pick(options(params), decision, callId(tool))
     }
 
@@ -71,6 +85,7 @@ object PermissionChoice:
       hosts: NetworkPolicy,
       files: FileRoots,
       home: Path,
+      sandbox: ShellSandbox,
   ): UIO[Decision] =
     if networkKind(kind) || webTool(tool) then ZIO.succeed(networkDecision(policy, ceiling, tool, kind, hosts))
     else
@@ -80,12 +95,36 @@ object PermissionChoice:
           call match
             case Some(found) => ZIO.succeed(mcpDecision(access, found))
             case None        =>
-              route(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, files, home, inherited = true)
+              route(
+                policy,
+                ceiling,
+                workspace,
+                readRoots,
+                writeRoots,
+                tool,
+                kind,
+                files,
+                home,
+                inherited = true,
+                sandbox,
+              )
         case _ =>
           call match
             case Some(found) => ZIO.succeed(mcpDecision(access, found))
             case None        =>
-              route(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, files, home, inherited = false)
+              route(
+                policy,
+                ceiling,
+                workspace,
+                readRoots,
+                writeRoots,
+                tool,
+                kind,
+                files,
+                home,
+                inherited = false,
+                sandbox,
+              )
 
   private def route(
       policy: PermissionPolicy,
@@ -98,6 +137,7 @@ object PermissionChoice:
       files: FileRoots,
       home: Path,
       inherited: Boolean,
+      sandbox: ShellSandbox,
   ): UIO[Decision] =
     val name = label(tool, kind)
     normalize(kind) match
@@ -130,7 +170,7 @@ object PermissionChoice:
           home,
         )
       case "execute" | "bash" | "terminal" =>
-        shell(policy, ceiling, tool, workspace, writeRoots, files, home)
+        shell(policy, ceiling, tool, workspace, readRoots, writeRoots, files, home, sandbox)
       case "think" | "thought" => ZIO.succeed(Decision.Allow)
       case _ if locations(tool).nonEmpty =>
         val mode = if readOnly(tool) then Permission.ReadWorkspace else Permission.WriteWorkspace
@@ -186,9 +226,11 @@ object PermissionChoice:
       ceiling: Ceiling,
       tool: Json.Obj,
       workspace: Workspace,
+      readRoots: Chunk[Workspace],
       writeRoots: Chunk[Workspace],
       files: FileRoots,
       home: Path,
+      sandbox: ShellSandbox,
   ): UIO[Decision] =
     val name = label(tool, "execute")
     if !ceiling.allow.contains(Permission.RunCommands) then
@@ -203,7 +245,7 @@ object PermissionChoice:
             case ShellEffect.ReadOnly  => located.nonEmpty
             case ShellEffect.Writes(_) => true
             case ShellEffect.Opaque    => true
-          if !writing then ZIO.succeed(Decision.Allow)
+          if !writing then gate(name, ceiling, workspace, readRoots, writeRoots, base, sandbox)
           else if !ceiling.allow.contains(Permission.WriteWorkspace) then
             ZIO.succeed(Decision.Deny(missing(policy, Permission.WriteWorkspace, name)))
           else
@@ -219,8 +261,25 @@ object PermissionChoice:
               rootPaths(workspace, writeRoots),
               home,
               files,
-            )
+            ).flatMap {
+              case Decision.Allow     => gate(name, ceiling, workspace, readRoots, writeRoots, base, sandbox)
+              case denied: Decision.Deny => ZIO.succeed(denied)
+            }
       }
+
+  private def gate(
+      name: String,
+      ceiling: Ceiling,
+      workspace: Workspace,
+      readRoots: Chunk[Workspace],
+      writeRoots: Chunk[Workspace],
+      cwd: Path,
+      sandbox: ShellSandbox,
+  ): UIO[Decision] =
+    sandbox.profile(ShellBounds.of(ceiling, workspace, readRoots, writeRoots, cwd)).fold(
+      err => Decision.Deny(err.explain(name)),
+      _ => Decision.Allow,
+    )
 
   private def confine(
       policy: PermissionPolicy,
