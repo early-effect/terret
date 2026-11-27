@@ -3,7 +3,7 @@ package terret.app.watch
 /** The only scripts and styles the watch page loads. Both are same-origin and fixed. There is no directory listing. */
 object WatchAssets:
   val js: String =
-    """(function () {
+    s"""(function () {
       var feed = document.getElementById("feed");
       var scroller = feed || document.body;
       var pinned = true;
@@ -46,6 +46,7 @@ object WatchAssets:
           if (next.indexOf("/watch") === 0) location.assign(next);
         });
       }
+      ${WatchKeys.dispatch}
       var search = document.querySelector("[data-search='q']");
       if (search) {
         search.addEventListener("change", function () {
@@ -55,15 +56,7 @@ object WatchAssets:
           location.assign(url.toString());
         });
       }
-      document.addEventListener("keydown", function (ev) {
-        var mode = document.documentElement.getAttribute("data-keys");
-        var tag = ev.target && ev.target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        if (mode === "vim" && ev.key === "j") scroller.scrollTop += 48;
-        if (mode === "vim" && ev.key === "k") scroller.scrollTop -= 48;
-        if (mode === "plain" && ev.key === "ArrowDown") scroller.scrollTop += 48;
-        if (mode === "plain" && ev.key === "ArrowUp") scroller.scrollTop -= 48;
-      });
+      document.addEventListener("keydown", function (ev) { watchKey(ev); });
       if (!feed) return;
       var source = feed.getAttribute("data-stream");
       if (!source) return;
@@ -120,14 +113,16 @@ object WatchAssets:
       [data-row] [data-detail]{display:none;white-space:pre-wrap}
       [data-row][data-open="true"] [data-detail]{display:block}
       [data-follow="paused"]{color:#e6c07b}
-      [data-composer="inert"]{opacity:.55;border:1px dashed #2c3844;padding:.6rem;margin-top:.6rem}
+      [data-composer="live"]{border:1px solid #2c3844;padding:.6rem;margin-top:.6rem}
+      [data-composer="live"] form{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+      [data-composer="live"] textarea{min-width:16rem;min-height:3rem}
       [data-control="new-session"]{margin-top:.4rem}
       @media (max-width:720px){
         [data-chrome="phone"]{display:flex;flex-direction:column;gap:.4rem}
         [data-chrome="desk"]{display:none}
         [data-chrome-part="picker"]{width:100%}
         [data-layout="panel"] [data-panel="detail"]{position:fixed;inset:0;background:#0f1419;z-index:2;overflow:auto;padding:1rem}
-        [data-composer="inert"]{position:sticky;bottom:0;background:#0f1419}
+        [data-composer="live"]{position:sticky;bottom:0;background:#0f1419}
       }
     """
 end WatchAssets

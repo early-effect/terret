@@ -17,8 +17,9 @@ object Jobs extends DocSpec:
     md"""
 A host attaches to `open`, `list`, `run`, `status`, `resume`, `export`, `cancel`, `find`, and `call`.
 `list` is `GET /sessions` and is not an MCP tool. It returns each session this process holds, with
-its state. `GET /watch` is served only on the tunnel listener. It is read-only: it does not call
-`open`, `run`, `cancel`, or `resume`. The local listener does not serve it.
+its state. `GET /watch` is served only on the tunnel listener and reads the feed. Steering is POST on that
+listener: `POST /watch/{id}/run`, `/cancel`, `/resume`, and `POST /watch/open`. The local listener
+does not serve those paths.
 
 `open` starts a session on a workspace. It takes an optional `model`. When set, the name must be a
 `[model.<name>]` key in the grok config, and a grok process terret spawns is started with `--model`.

@@ -82,6 +82,7 @@ object WatchFeed:
       case ActivityKind.TestLine     => WatchKind.TestLine
       case ActivityKind.Plan         => WatchKind.Plan
       case ActivityKind.Message      => WatchKind.Message
+      case ActivityKind.Refused      => WatchKind.Refused
 
   private def withTurns(rows: Chunk[WatchRow]): Chunk[WatchRow] =
     val ids     = rows.map(_.id).toSet

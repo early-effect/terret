@@ -73,8 +73,8 @@ keeps the events-key check on `/mcp`. Every other tunnel path, including `GET /w
 `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against `https://<team>/cdn-cgi/access/certs`,
 for that audience, with issuer `https://<team>`, and not be expired. A missing token is rejected. There
 is no exemption for loopback or a Cloudflare header: cloudflared connects from 127.0.0.1, so point it at
-the tunnel port, not 8080. `GET /watch` is read-only and does not call `open`, `run`, `cancel`, or
-`resume`. The same
+the tunnel port, not 8080. `GET /watch` reads the feed. Steering is POST on that tunnel listener
+(`run`, `cancel`, `resume`, and `open`). The same
 port as the local listener is rejected. Nothing in this config is a secret.
 
 `grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models

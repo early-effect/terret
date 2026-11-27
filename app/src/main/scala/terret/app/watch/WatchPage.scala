@@ -12,7 +12,7 @@ import java.time.Instant
 /** One session in the picker, with the time of its newest journal entry. */
 final case class Listed(session: Session, at: Instant)
 
-/** The read-only watch document. Controls are GET links. The composer does not call a write route. */
+/** The watch document. View controls are GET links. The composer, the queue, and new-session submit POST forms. */
 object WatchPage:
   def listed(terret: Terret): UIO[Chunk[Listed]] =
     terret.list
@@ -54,8 +54,10 @@ object WatchPage:
       feedRows: Chunk[WatchRow],
       query: WatchQuery,
       stream: Option[String],
+      csrf: String,
+      queue: Chunk[Queued],
   ): UIO[String] =
-    Html.render(page(rows, selected, feedRows, query, stream))
+    Html.render(page(rows, selected, feedRows, query, stream, csrf, queue))
 
   def feedHtml(
       feedRows: Chunk[WatchRow],
@@ -71,6 +73,8 @@ object WatchPage:
       feedRows: Chunk[WatchRow],
       query: WatchQuery,
       stream: Option[String],
+      csrf: String,
+      queue: Chunk[Queued],
   ): UI[Any] =
     val shown    = visible(rows, query)
     val ended    = endedIds(rows)
@@ -79,6 +83,7 @@ object WatchPage:
     el("div", "id" -> "page")(
       phone(shown, selected, query, tools, statuses, ended),
       desk(shown, selected, query, tools, statuses, ended),
+      composer(selected, query, csrf, queue),
       feed(feedRows, selected, query, stream),
     )
 
@@ -95,7 +100,6 @@ object WatchPage:
       el("div", "data-chrome-part" -> "toolbar")(controls(selected, query, ended, compact = true)),
       el("div", "data-chrome-part" -> "chips")(chips(selected, query, tools, statuses)),
       jump,
-      composer,
     )
 
   private def desk(
@@ -112,7 +116,6 @@ object WatchPage:
         el("div", "data-chrome-part" -> "toolbar")(controls(selected, query, ended, compact = false)),
         el("div", "data-chrome-part" -> "chips")(chips(selected, query, tools, statuses)),
         jump,
-        composer,
       ),
     )
 
@@ -251,13 +254,60 @@ object WatchPage:
   private val jump: UI[Any] =
     el("button", "type" -> "button", "data-jump" -> "latest", "data-pending" -> "0")(t("latest"))
 
-  /** Placeholder only. It has no href and it does not submit. */
-  private val composer: UI[Any] =
-    frag(
-      el("div", "data-composer" -> "inert")(t("Composer is not live yet.")),
-      el("button", "type" -> "button", "data-control" -> "new-session", "disabled" -> "disabled")(
-        t("New session")
+  private def composer(
+      selected: Option[String],
+      query: WatchQuery,
+      csrf: String,
+      queue: Chunk[Queued],
+  ): UI[Any] =
+    el("div", "data-composer" -> "live")(
+      selected.fold(frag()) { id =>
+        frag(
+          form(s"/watch/$id/cancel", query, csrf)(
+            el("button", "type" -> "submit", "data-control" -> "cancel")(t("Stop"))
+          ),
+          form(s"/watch/$id/resume", query, csrf)(
+            el("button", "type" -> "submit", "data-control" -> "resume")(t("Resume"))
+          ),
+          form(s"/watch/$id/run", query, csrf)(
+            el("textarea", "name" -> "prompt", "data-prompt" -> "send")(),
+            el("button", "type" -> "submit", "name" -> "mode", "value" -> "send")(t("Send")),
+            el("button", "type" -> "submit", "name" -> "mode", "value" -> "stop", "data-control" -> "stop-send")(
+              t("Stop and send")
+            ),
+          ),
+          queueOf(id, query, csrf, queue),
+        )
+      },
+      form("/watch/open", query, csrf)(
+        el("input", "type" -> "text", "name" -> "workspace", "data-field" -> "workspace")(),
+        el("input", "type" -> "text", "name" -> "model", "data-field" -> "model")(),
+        el("input", "type" -> "text", "name" -> "allow", "data-field" -> "allow")(),
+        el("input", "type" -> "text", "name" -> "mcp", "data-field" -> "mcp")(),
+        el("button", "type" -> "submit", "data-control" -> "new-session")(t("New session")),
       ),
+    )
+
+  private def queueOf(id: String, query: WatchQuery, csrf: String, queue: Chunk[Queued]): UI[Any] =
+    el("div", "data-queue" -> "prompts")(
+      queue.map { item =>
+        el("div", "data-queue-item" -> item.id)(
+          form(s"/watch/$id/queue/${item.id}", query, csrf)(
+            el("textarea", "name" -> "prompt")(t(item.text)),
+            el("button", "type" -> "submit", "data-control" -> "queue-save")(t("Save")),
+          ),
+          form(s"/watch/$id/queue/${item.id}/drop", query, csrf)(
+            el("button", "type" -> "submit", "data-control" -> "queue-drop")(t("Drop"))
+          ),
+        )
+      }*
+    )
+
+  private def form(action: String, query: WatchQuery, csrf: String)(kids: UI[Any]*): UI[Any] =
+    el("form", "method" -> "post", "action" -> action)(
+      el("input", "type" -> "hidden", "name" -> "csrf", "value" -> csrf)(),
+      el("input", "type" -> "hidden", "name" -> "keys", "value" -> query.keys.wire)(),
+      frag(kids*),
     )
 
   private def link(selected: Option[String], query: WatchQuery, attr: (String, String), label: String): UI[Any] =

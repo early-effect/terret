@@ -1,6 +1,6 @@
 package terret.app.watch
 
-import heddle.http.{Method, Request, Response, Status}
+import heddle.http.{MediaType, Method, Request, Response, Status}
 import zio.{UIO, ZIO}
 
 import java.util.Base64
@@ -21,6 +21,9 @@ object WatchSecurity:
   def busy: Response =
     Response.text("too many streams", Status.TooManyRequests)
 
+  def unsupported: Response =
+    Response.text("unsupported media type", Status.UnsupportedMediaType)
+
   def html(body: String, nonce: String): Response =
     Response
       .html(body)
@@ -32,7 +35,8 @@ object WatchSecurity:
     val marked = response
       .withHeader("X-Content-Type-Options", "nosniff")
       .withHeader("X-Frame-Options", "DENY")
-      .withHeader("Referrer-Policy", "no-referrer")
+      // `no-referrer` makes Chromium send Origin: null on a same-origin form POST, which sameSite then refuses.
+      .withHeader("Referrer-Policy", "strict-origin")
       .withHeader("Content-Security-Policy", policy)
     if hsts then marked.withHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     else marked
@@ -41,7 +45,7 @@ object WatchSecurity:
     val style = nonce match
       case Some(value) => s"style-src 'self' 'nonce-$value'"
       case None        => "style-src 'self'"
-    s"default-src 'self'; script-src 'self'; $style; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    s"default-src 'self'; script-src 'self'; $style; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
   /** `/mcp` keeps the events-key check. Every other tunnel path requires the Access JWT. */
   def mcp(request: Request): Boolean =
@@ -53,12 +57,46 @@ object WatchSecurity:
     )
 
   /** A present `Sec-Fetch-Site: cross-site`, or an Origin whose host is not the request Host, refuses a mutating
-    * request. `/mcp` is left alone: a local client often sends no Origin. Absent browser headers are allowed.
+    * request, including `/mcp`. Absent browser headers are allowed, so a local client that sends no Origin still
+    * reaches the JSON check.
     */
   def crossSite(request: Request): Option[Response] =
-    if !mutating(request.method) || mcp(request) then None
+    if !mutating(request.method) || !crossed(request) then None
+    else Some(forbidden)
+
+  /** Mutating requests, in order: cross-site metadata, then a positive same-site check on `/watch`, then the content
+    * type. JSON routes require `application/json`. Watch forms require `application/x-www-form-urlencoded` and a
+    * same-site `Origin` plus `Sec-Fetch-Site`. The synchronizer token is checked by the watch handler.
+    */
+  def screen(request: Request): Option[Response] =
+    if !mutating(request.method) then None
     else if crossed(request) then Some(forbidden)
-    else None
+    else if watch(request) then
+      if sameSite(request) && formContent(request) then None
+      else if !sameSite(request) then Some(forbidden)
+      else Some(unsupported)
+    else if jsonContent(request) then None
+    else Some(unsupported)
+
+  private def sameSite(request: Request): Boolean =
+    val fetch  = request.header("Sec-Fetch-Site").map(_.trim.toLowerCase)
+    val origin = request.header("Origin").map(_.trim).filter(_.nonEmpty)
+    val host   = request.header("Host").map(hostOnly)
+    val byFetch = fetch.contains("same-origin") || fetch.contains("same-site")
+    val byOrigin = origin.exists { raw =>
+      hostOf(raw) match
+        case Some(originHost) => host.contains(originHost)
+        case None             => false
+    }
+    byFetch && byOrigin
+
+  private def jsonContent(request: Request): Boolean =
+    request.header("Content-Type").flatMap(MediaType.parse).exists(_.isJson)
+
+  private def formContent(request: Request): Boolean =
+    request.header("Content-Type").flatMap(MediaType.parse).exists { kind =>
+      kind.mainType == "application" && kind.subType == "x-www-form-urlencoded"
+    }
 
   private def mutating(method: Method): Boolean =
     method match

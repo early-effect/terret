@@ -7,7 +7,7 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.hooks.Hooks
 import terret.milestone.MilestoneSink
 import terret.model.{ModelCatalog, ModelKey}
-import terret.permission.Ceiling
+import terret.permission.{Ceiling, SessionTools}
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
 import terret.transcript.{Entry, Page, Transcript}
@@ -29,11 +29,15 @@ final class Terret private (
       workspace: Workspace,
       requested: Ceiling = Ceiling.all,
       model: Option[String] = None,
+      tools: SessionTools = SessionTools.Unset,
   ): IO[TerretError, Session] =
     confine(workspace).flatMap { _ =>
       resolve(model).flatMap { chosen =>
         val (effective, dropped) = requested.clamp(config.policy.ceiling)
-        harness.open(workspace, effective, config.policy, chosen).mapError(TerretError.Harness(_)).flatMap { id =>
+        harness
+          .open(workspace, effective, config.policy, chosen, tools)
+          .mapError(TerretError.Harness(_))
+          .flatMap { id =>
           val session = Session(id, workspace, effective, dropped, SessionState.Open, chosen)
           sessions.update(_.updated(id, Terret.Held(session, 0L, None))).as(session)
         }
@@ -100,6 +104,10 @@ final class Terret private (
 
   def cancel(id: SessionId): IO[TerretError, Unit] =
     require(id) *> halt(id).mapError(TerretError.Harness(_))
+
+  /** Append an event the adapter did not produce. The journal stamps the entry time from `Clock`. */
+  def note(id: SessionId, event: Event): IO[TerretError, Unit] =
+    require(id) *> harness.note(id, event)
 
   /** Cancel every session, wait for its turn to finish, then close harness children. */
   def shutdown: UIO[Unit] =

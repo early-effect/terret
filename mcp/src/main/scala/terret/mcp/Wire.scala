@@ -94,6 +94,11 @@ enum WireEvent derives Schema, JsonCodec:
   case Plan(steps: Chunk[String])
   case Refused(call: String, name: String, reason: String)
   case TurnFinished(outcome: WireOutcome)
+  case SteerQueued(actor: String, item: String, text: String, at: String)
+  case SteerSent(actor: String, text: String, at: String)
+  case TurnCancelled(actor: String, at: String)
+  case SessionResumed(actor: String, at: String)
+  case SessionOpened(actor: String, workspace: String, model: Option[String], at: String)
   case Activity(
       id: String,
       parent: String,
@@ -114,10 +119,17 @@ object WireEvent:
         ToolStarted(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
       case Event.ToolUpdated(call) =>
         ToolUpdated(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
-      case Event.Plan(steps)                     => Plan(steps.map(step => Redact.text(step.text)))
-      case Event.Refused(call, name, reason)     =>
+      case Event.Plan(steps)                 => Plan(steps.map(step => Redact.text(step.text)))
+      case Event.Refused(call, name, reason) =>
         Refused(call, Redact.text(name), Redact.text(reason))
-      case Event.TurnFinished(outcome)           => TurnFinished(WireOutcome.from(outcome))
+      case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
+      case Event.SteerQueued(actor, item, text, at) =>
+        SteerQueued(actor, item, Redact.text(text), at.toString)
+      case Event.SteerSent(actor, text, at) => SteerSent(actor, Redact.text(text), at.toString)
+      case Event.TurnCancelled(actor, at)   => TurnCancelled(actor, at.toString)
+      case Event.SessionResumed(actor, at)  => SessionResumed(actor, at.toString)
+      case Event.SessionOpened(actor, workspace, model, at) =>
+        SessionOpened(actor, workspace, model, at.toString)
 
   def activity(event: terret.activity.ActivityEvent): WireEvent =
     Activity(

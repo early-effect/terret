@@ -80,6 +80,7 @@ object AccessGateSpec extends ZIOSpecDefault:
     },
     test("a refused token is logged as the reason and the path") {
       import PathDsl.*
+      val garbage = "not-a-jwt"
       ZIO.scoped {
         for
           _    <- TestClock.setTime(when)
@@ -88,13 +89,25 @@ object AccessGateSpec extends ZIOSpecDefault:
           gate <- gate(keys, hits)
           env  <- (ZLayer.succeed(gate) ++ AuthLog.live).build
           route = Routes(Method.GET / "watch" -> Handler.succeed(Response.text("ok"))) @@ AccessGate.http
-          denied   <- route(Request.get("/watch")).provideEnvironment(env)
+          denied <- route(Request.get("/watch")).provideEnvironment(env)
+          forged <- route(Request.get("/watch/forged").withHeader("cf-access-jwt-assertion", garbage))
+            .provideEnvironment(env)
           recorded <- env.get[AuthLog].recent
         yield assertTrue(
           denied.status == Status.Unauthorized,
           denied.body.text.contains("access denied"),
-          recorded.length == 1,
-          recorded.exists(row => row.reason == "Rejected" && row.path == "/watch" && row.at == when),
+          forged.status == Status.Unauthorized,
+          forged.body.text.contains("access denied"),
+          recorded.length == 2,
+          recorded.exists(row =>
+            row.reason == "Rejected" && row.path == "/watch" && row.at == when && row.actor.isEmpty
+          ),
+          recorded.exists(row =>
+            row.reason == "Malformed" &&
+              row.path == "/watch/forged" &&
+              row.at == when &&
+              row.actor.contains(AccessJwt.viewer(garbage))
+          ),
         )
       }
     },

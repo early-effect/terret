@@ -109,7 +109,7 @@ object WatchSpec extends ZIOSpecDefault:
           body.contains("data-chrome-part=\"picker\""),
           body.contains("data-chrome-part=\"toolbar\""),
           body.contains("data-chip"),
-          body.contains("data-composer=\"inert\""),
+          body.contains("data-composer=\"live\""),
           body.contains("data-jump=\"latest\""),
           body.contains("data-control=\"new-session\""),
           body.contains("data-control=\"clear-inactive\""),
@@ -125,9 +125,16 @@ object WatchSpec extends ZIOSpecDefault:
           !body.contains("hidden thought"),
           hidden.contains("hidden thought") && !hidden.contains("ghp_"),
           !body.contains("/sessions"),
-          !body.contains("action="),
+          !body.contains("data-composer=\"inert\""),
+          body.contains("action=\"/watch/open\""),
+          body.contains(s"""action="/watch/${id.value}/run""""),
+          body.contains(s"""action="/watch/${id.value}/cancel""""),
+          body.contains(s"""action="/watch/${id.value}/resume""""),
+          body.contains("name=\"csrf\""),
+          body.contains("Stop and send"),
+          body.contains("data-keys-choice=\"plain\""),
           phone(body).contains("data-chrome-part=\"picker\""),
-          phone(body).contains("data-composer=\"inert\""),
+          !phone(body).contains("data-composer"),
         )
       }
     },
@@ -250,11 +257,12 @@ object WatchSpec extends ZIOSpecDefault:
           page.status.code == 200,
           headers.get("X-Content-Type-Options").contains("nosniff"),
           headers.get("X-Frame-Options").contains("DENY"),
-          headers.get("Referrer-Policy").contains("no-referrer"),
+          headers.get("Referrer-Policy").contains("strict-origin"),
           headers.get("Content-Security-Policy").exists { policy =>
             policy.contains("default-src 'self'") &&
             policy.contains("frame-ancestors 'none'") &&
             policy.contains("script-src 'self'") &&
+            policy.contains("form-action 'self'") &&
             !policy.contains("unsafe-inline")
           },
           headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
@@ -316,20 +324,29 @@ object WatchSpec extends ZIOSpecDefault:
       streams <- WatchStreams.make
       space   <- ZIO.fromEither(Workspace.from("/work")).mapError(_.toString)
       _       <- terret.open(space).mapError(_.toString)
-      routes = WatchRoutes.routes(terret, streams)
+      routes  <- wired(terret, streams)
     yield (
       (request: Request) => routes(request).provide(AuthLog.live),
       streams,
       terret,
     )
 
-  private def routesOf(terret: Terret): ZIO[Any, Nothing, heddle.route.Routes[AuthLog, Nothing]] =
-    WatchStreams.make.map(WatchRoutes.routes(terret, _))
+  private def routesOf(terret: Terret): ZIO[Scope, Nothing, heddle.route.Routes[AuthLog, Nothing]] =
+    WatchStreams.make.flatMap(wired(terret, _))
 
-  private def ask(terret: Terret, request: Request): ZIO[Any, Nothing, heddle.http.Response] =
+  private def wired(
+      terret: Terret,
+      streams: WatchStreams,
+  ): ZIO[Scope, Nothing, heddle.route.Routes[AuthLog, Nothing]] =
+    for
+      csrf  <- CsrfTokens.make
+      steer <- Steer.make(terret, Chunk.empty)
+    yield WatchRoutes.routes(terret, streams, steer, csrf)
+
+  private def ask(terret: Terret, request: Request): ZIO[Scope, Nothing, heddle.http.Response] =
     routesOf(terret).flatMap(routes => routes(request).provide(AuthLog.live))
 
-  private def html(terret: Terret, path: String): ZIO[Any, Nothing, String] =
+  private def html(terret: Terret, path: String): ZIO[Scope, Nothing, String] =
     ask(terret, Request.get(path)).map(_.body.text.getOrElse(""))
 
   private def only(terret: Terret): ZIO[Any, String, SessionId] =
@@ -348,15 +365,17 @@ object WatchSpec extends ZIOSpecDefault:
       else ZIO.yieldNow *> TestClock.adjust(15.seconds) *> awaitPing(raw, left - 1)
     }
 
-  /** The scripted drain is forked. Yield until it publishes `Ended`, then the journal is stable. */
+  /** The drain is forked onto Terret's scope. Polling with `repeatUntil` suspends on the test clock
+    * between reads, which is what lets that fiber run. A bare `yieldNow` loop does not.
+    */
   private def awaitEnded(terret: Terret, id: SessionId): ZIO[Any, String, Unit] =
-    def go(left: Int): ZIO[Any, String, Unit] =
-      if left <= 0 then ZIO.fail("session did not end")
-      else
-        terret.status(id).mapError(_.toString).flatMap { session =>
-          session.state match
-            case SessionState.Ended(_) => ZIO.unit
-            case _                     => ZIO.yieldNow *> go(left - 1)
-        }
-    go(10000)
+    terret
+      .status(id)
+      .mapError(_.toString)
+      .repeatUntil { session =>
+        session.state match
+          case SessionState.Ended(_) => true
+          case _                     => false
+      }
+      .unit
 end WatchSpec

@@ -27,6 +27,7 @@ enum WatchKind:
   case TestLine
   case Plan
   case Message
+  case Refused
   case Thought
   case Turn
 
@@ -37,6 +38,7 @@ enum WatchKind:
     case WatchKind.TestLine     => "TestLine"
     case WatchKind.Plan         => "Plan"
     case WatchKind.Message      => "Message"
+    case WatchKind.Refused      => "Refused"
     case WatchKind.Thought      => "Thought"
     case WatchKind.Turn         => "Turn"
 end WatchKind
@@ -94,6 +96,7 @@ object WatchQuery:
       WatchKind.TestLine,
       WatchKind.Plan,
       WatchKind.Message,
+      WatchKind.Refused,
     )
 
   val default: WatchQuery =

@@ -10,10 +10,10 @@ import terret.config.TerretConfig
 import terret.harness.Harness
 import terret.hooks.Hooks
 import terret.model.ModelCatalog
-import terret.app.watch.{WatchRoutes, WatchStreams}
+import terret.app.watch.{CsrfTokens, Steer, WatchRoutes, WatchStreams}
 import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
-import zio.{Scope, ULayer, ZIO, ZLayer}
+import zio.{Chunk, Scope, ULayer, ZIO, ZLayer}
 
 object Process:
   def listen(
@@ -31,7 +31,7 @@ object Process:
       val body = config.listen match
         case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
         case Listen.Http(host, port) =>
-          http(prepared.served, prepared.terret, host, port, config.access) *> ZIO.never
+          http(prepared.served, prepared.terret, host, port, config) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
       armed(prepared.served, gate, config)(body).ensuring(prepared.terret.shutdown)
@@ -46,7 +46,7 @@ object Process:
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
           server   <- armed(prepared.served, gate, config)(
-            http(prepared.served, prepared.terret, host, port, config.access)
+            http(prepared.served, prepared.terret, host, port, config)
           )
         yield server
 
@@ -58,13 +58,15 @@ object Process:
       terret: Terret,
       host: String,
       port: Int,
-      access: Option[AccessConfig],
+      config: ProcessConfig,
   ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
     for
       streams <- WatchStreams.make
-      watch = WatchRoutes.routes(terret, streams)
+      csrf    <- CsrfTokens.make
+      steer   <- Steer.make(terret, Chunk.from(config.root))
+      watch = WatchRoutes.routes(terret, streams, steer, csrf)
       local <- openListener(served, host, port)
-      _     <- ZIO.foreachDiscard(access)(cfg => tunnelListener(served, watch, cfg.port))
+      _     <- ZIO.foreachDiscard(config.access)(cfg => tunnelListener(served, watch, cfg.port))
     yield local
 
   private def openListener(

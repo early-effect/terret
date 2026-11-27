@@ -68,6 +68,11 @@ object Milestones:
         Chunk(Notice(MilestoneKind.TurnFinished, "cancelled", "turn-finished:cancelled"))
       case Event.TurnFinished(TurnOutcome.Failed(failure)) =>
         Chunk(Notice(MilestoneKind.Error, clip(label(failure)), "error"))
+      case Event.SteerQueued(_, _, _, _)                  => Chunk.empty
+      case Event.SteerSent(_, _, _)                       => Chunk.empty
+      case Event.TurnCancelled(_, _)                      => Chunk.empty
+      case Event.SessionResumed(_, _)                     => Chunk.empty
+      case Event.SessionOpened(_, _, _, _)                => Chunk.empty
 
   def turnStarted: Notice = Notice(MilestoneKind.TurnStarted, "started", "turn-started")
 
