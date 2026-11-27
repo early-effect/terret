@@ -71,12 +71,20 @@ object ProcessConfig:
   private val accessAudience: Config[Option[String]] =
     Config.string("audience").optional.nested("access")
 
-  private final case class BoundRaw(journal: Int, team: Option[String], audience: Option[String])
+  private val accessPort: Config[Option[Int]] =
+    Config.int("port").optional.nested("access")
+
+  private final case class BoundRaw(
+      journal: Int,
+      team: Option[String],
+      audience: Option[String],
+      port: Option[Int],
+  )
 
   /** One value so the process config product stays inside what `Config.++` flattens. */
   private val boundRaw: Config[BoundRaw] =
-    (journalLimit ++ accessTeam ++ accessAudience).map { (journal, team, audience) =>
-      BoundRaw(journal, team, audience)
+    (journalLimit ++ accessTeam ++ accessAudience ++ accessPort).map { (journal, team, audience, port) =>
+      BoundRaw(journal, team, audience, port)
     }
 
   private val eventRaw: Config[EventRaw] =
@@ -164,6 +172,7 @@ object ProcessConfig:
           bound.journal,
           bound.team,
           bound.audience,
+          bound.port,
           grokConfig,
         )
     }
@@ -181,7 +190,7 @@ object ProcessConfig:
       events     <- eventsOf(raw)
       grokConfig <- grokConfigOf(raw.grokConfig)
       journal    <- journalOf(raw.journalLimit)
-      access     <- accessOf(raw.accessTeam, raw.accessAudience)
+      access     <- accessOf(raw.accessTeam, raw.accessAudience, raw.accessPort, listen)
       eventsKey = raw.eventKey.flatMap(EventsKey.from)
     yield ProcessConfig(
       listen,
@@ -355,6 +364,7 @@ object ProcessConfig:
       journalLimit: Int = JournalBound.DefaultSize,
       accessTeam: Option[String] = None,
       accessAudience: Option[String] = None,
+      accessPort: Option[Int] = None,
       grokConfig: Option[String] = None,
   )
 
@@ -382,15 +392,29 @@ object ProcessConfig:
   private def journalOf(limit: Int): Either[ProcessError, JournalBound] =
     JournalBound.from(limit).left.map(ProcessError.Journal(_))
 
-  private def accessOf(team: Option[String], audience: Option[String]): Either[ProcessError, Option[AccessConfig]] =
-    (present(team), present(audience)) match
-      case (None, None)            => Right(None)
-      case (Some(host), Some(tag)) =>
+  private def accessOf(
+      team: Option[String],
+      audience: Option[String],
+      port: Option[Int],
+      listen: Listen,
+  ): Either[ProcessError, Option[AccessConfig]] =
+    (present(team), present(audience), port) match
+      case (None, None, None)              => Right(None)
+      case (Some(host), Some(tag), chosen) =>
         for
           parsedHost <- TeamHost.from(host).left.map(ProcessError.Access(_))
           parsedTag  <- Audience.from(tag).left.map(ProcessError.Access(_))
-        yield Some(AccessConfig(parsedHost, parsedTag))
+          tunnel     <- tunnelPort(chosen, listen)
+        yield Some(AccessConfig(parsedHost, parsedTag, tunnel))
       case _ => Left(ProcessError.Access(AccessConfigError.Incomplete))
+
+  private def tunnelPort(chosen: Option[Int], listen: Listen): Either[ProcessError, Int] =
+    val port = chosen.getOrElse(AccessConfig.TunnelPort)
+    if port < 1 || port > 65535 then Left(ProcessError.Access(AccessConfigError.Port(port)))
+    else
+      listen match
+        case Listen.Http(_, local) if local == port => Left(ProcessError.Access(AccessConfigError.SamePort(port)))
+        case _                                      => Right(port)
 
   private def present(raw: Option[String]): Option[String] =
     raw.map(_.trim).filter(_.nonEmpty)
@@ -462,9 +486,12 @@ enum ProcessError:
 
   private def accessMessage(error: AccessConfigError): String =
     error match
-      case AccessConfigError.Incomplete => "access needs terret.access.team and terret.access.audience"
-      case AccessConfigError.Team       => "access team is a hostname with no scheme or path"
-      case AccessConfigError.Audience   => "access audience is a tag with no whitespace"
+      case AccessConfigError.Incomplete      => "access needs terret.access.team and terret.access.audience"
+      case AccessConfigError.Team            => "access team is a hostname with no scheme or path"
+      case AccessConfigError.Audience        => "access audience is a tag with no whitespace"
+      case AccessConfigError.Port(value)     => s"access.port is 1 to 65535, got $value"
+      case AccessConfigError.SamePort(value) =>
+        s"access.port $value is the local listener, and the tunnel needs its own port"
 
   private def subscriptionMessage(error: StoreError): String =
     error match

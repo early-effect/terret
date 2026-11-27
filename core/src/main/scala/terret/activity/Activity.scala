@@ -4,6 +4,8 @@ import terret.event.{Event, PlanStep, ToolCall}
 import zio.json.ast.Json
 import zio.Chunk
 
+import java.time.Instant
+
 /** One fact on the live view. A repeated tool frame that adds no output is absent. */
 enum ActivityKind:
   case ToolStarted
@@ -19,6 +21,18 @@ final case class ActivityNote(
     name: Option[String],
     status: Option[String],
     text: String,
+)
+
+/** One activity fact the watch page can place in a tree. `parent` is `turn:<epoch>` or the tool call id. */
+final case class ActivityEvent(
+    id: String,
+    parent: String,
+    kind: ActivityKind,
+    call: Option[String],
+    name: Option[String],
+    status: Option[String],
+    text: String,
+    at: Instant,
 )
 
 /** Output already emitted for each tool call, so the next frame can be a suffix. */
@@ -41,6 +55,29 @@ object Activity:
         (next, acc ++ notes)
       }
       ._2
+
+  /** `id` is the call id for a tool start, and `<index>:<nth>` otherwise. A tool start hangs under the turn. Output, a
+    * test line, and a finish hang under the call.
+    */
+  def place(index: Long, turn: Long, at: Instant, notes: Chunk[ActivityNote]): Chunk[ActivityEvent] =
+    notes.zipWithIndex.map { (note, nth) =>
+      val underCall = note.kind match
+        case ActivityKind.Output | ActivityKind.TestLine | ActivityKind.ToolFinished => true
+        case ActivityKind.ToolStarted | ActivityKind.Plan | ActivityKind.Message     => false
+      val parent = if underCall then note.call.getOrElse(turnId(turn)) else turnId(turn)
+      val id     = if note.kind == ActivityKind.ToolStarted then note.call.getOrElse(s"$index:$nth") else s"$index:$nth"
+      ActivityEvent(id, parent, note.kind, note.call, note.name, note.status, note.text, at)
+    }
+
+  def turnId(turn: Long): String = s"turn:$turn"
+
+  /** The journal keeps the cumulative frame, because the next suffix is computed from it. The frame on the wire is the
+    * new output only. A frame that adds none is absent.
+    */
+  def wireUpdate(event: Event.ToolUpdated, notes: Chunk[ActivityNote]): Option[Event.ToolUpdated] =
+    notes.collectFirst { case note if note.kind == ActivityKind.Output => note.text }.map { delta =>
+      event.copy(call = event.call.copy(input = replaceOutput(event.call.input, delta)))
+    }
 
   def step(memory: ActivityMemory, event: Event): (ActivityMemory, Chunk[ActivityNote]) =
     event match
@@ -165,6 +202,28 @@ object Activity:
         }
       case Json.Arr(values) => values.exists(finishedOf)
       case _                => false
+
+  private def replaceOutput(json: Json, delta: String): Json =
+    json match
+      case Json.Str(_)                        => Json.Str(delta)
+      case obj: Json.Obj if outputFields(obj) =>
+        Json.Obj(obj.fields.map { (key, value) =>
+          value match
+            case Json.Str(_) if streamField(key) => (key, Json.Str(delta))
+            case _                               => (key, value)
+        })
+      case obj: Json.Obj =>
+        Json.Obj(obj.fields.map((key, value) => (key, replaceOutput(value, delta))))
+      case Json.Arr(values) => Json.Arr(values.map(value => replaceOutput(value, delta)))
+      case other            => other
+
+  private def outputFields(obj: Json.Obj): Boolean =
+    obj.fields.exists((key, _) => streamField(key))
+
+  private def streamField(name: String): Boolean =
+    name match
+      case "output" | "stdout" | "stderr" | "output_for_prompt" => true
+      case _                                                    => false
 
   private def terminal(status: String): Boolean =
     status.equalsIgnoreCase("completed") ||

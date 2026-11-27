@@ -2,7 +2,7 @@ package terret.mcp
 
 import heddle.*
 import terret.Terret
-import terret.activity.{Activity, ActivityKind, ActivityMemory, ActivityNote}
+import terret.activity.{Activity, ActivityEvent, ActivityMemory, ActivityNote}
 import terret.find.{Enable, FindHint, FindResult, ToolRef}
 import terret.milestone.Milestones
 import terret.permission.{Ceiling, Permission}
@@ -109,11 +109,17 @@ private[mcp] object Jobs:
       .mcp("export")
 
   private val followSummary =
-    "Stream the retained log from the start, or strictly after an index. The event id is that index. " +
+    "Stream the retained log from the start, or strictly after an index. The SSE id is that index. " +
+      "Last-Event-ID and after are exclusive, and Last-Event-ID wins when both are set. " +
       "Dropping the stream does not stop the turn."
 
   private val follow =
-    fallible(Endpoint.get("sessions" / string("session") / "events").query[Option[Long]]("after"))
+    fallible(
+      Endpoint
+        .get("sessions" / string("session") / "events")
+        .query[Option[Long]]("after")
+        .header[Option[Long]]("Last-Event-ID")
+    )
       .name("follow")
       .summary(followSummary)
       .stream[WireEvent]
@@ -228,19 +234,21 @@ private[mcp] object Jobs:
 
   private def followed(
       terret: Terret,
-      in: (String, Option[Long]),
+      in: (String, Option[Long], Option[Long]),
   ): IO[JobFailure, ZStream[Any, JobFailure, Observed[WireEvent]]] =
-    val (raw, after) = in
+    val (raw, after, last) = in
+    val cursor             = last.orElse(after)
     for
-      _  <- bounded(after)
+      _  <- bounded(cursor)
       id <- sessionOf(raw)
       _  <- terret.status(id).mapError(JobFailure.from)
     yield terret
-      .follow(id, after)
+      .follow(id, cursor)
       .mapError(JobFailure.from)
       .mapAccum(ActivityMemory.empty) { (memory, entry) =>
         val (next, notes) = Activity.step(memory, entry.event)
-        val frames        = liveFrames(entry, notes).map(wire => Observed(SseField.of(entry.index), wire))
+        val placed        = Activity.place(entry.index, entry.turn, entry.at, notes)
+        val frames        = liveFrames(entry, notes, placed).map(wire => Observed(SseField.of(entry.index), wire))
         (next, frames)
       }
       .flatMap(ZStream.fromChunk)
@@ -272,39 +280,16 @@ private[mcp] object Jobs:
       else ZIO.succeed(entries)
     chosen.map(rows => Milestones.latest(rows, latest))
 
-  private def liveFrames(entry: Entry, notes: Chunk[ActivityNote]): Chunk[WireEvent] =
+  private def liveFrames(
+      entry: Entry,
+      notes: Chunk[ActivityNote],
+      placed: Chunk[ActivityEvent],
+  ): Chunk[WireEvent] =
     val log = entry.event match
       case updated: Event.ToolUpdated =>
-        if notes.isEmpty then Chunk.empty
-        else
-          val rewritten = notes.collectFirst { case note if note.kind == ActivityKind.Output => note.text } match
-            case Some(delta) => updated.copy(call = updated.call.copy(input = replaceOutput(updated.call.input, delta)))
-            case None        => updated
-          Chunk(WireEvent.from(rewritten))
+        Activity.wireUpdate(updated, notes).fold(Chunk.empty[WireEvent])(event => Chunk(WireEvent.from(event)))
       case other => Chunk(WireEvent.from(other))
-    log ++ notes.map(WireEvent.activity)
-
-  private def replaceOutput(json: Json, delta: String): Json =
-    json match
-      case Json.Str(_)                        => Json.Str(delta)
-      case obj: Json.Obj if outputFields(obj) =>
-        Json.Obj(obj.fields.map { (key, value) =>
-          value match
-            case Json.Str(_) if streamField(key) => (key, Json.Str(delta))
-            case _                               => (key, value)
-        })
-      case obj: Json.Obj =>
-        Json.Obj(obj.fields.map((key, value) => (key, replaceOutput(value, delta))))
-      case Json.Arr(values) => Json.Arr(values.map(replaceOutput(_, delta)))
-      case other            => other
-
-  private def outputFields(obj: Json.Obj): Boolean =
-    obj.fields.exists((key, _) => streamField(key))
-
-  private def streamField(name: String): Boolean =
-    name match
-      case "output" | "stdout" | "stderr" | "output_for_prompt" => true
-      case _                                                    => false
+    log ++ placed.map(WireEvent.activity)
 
   private def cursor(length: Int): Option[Long] =
     if length == 0 then None else Some(length.toLong - 1)

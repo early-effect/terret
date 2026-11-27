@@ -12,6 +12,8 @@ given JsonCodec[ActivityKind] = JsonCodec.derived
 final case class ActivityFilter(session: Option[String], kinds: Chunk[ActivityKind]) derives Schema, JsonCodec
 
 final case class ActivityData(
+    id: String,
+    parent: String,
     session: String,
     kind: ActivityKind,
     call: Option[String],

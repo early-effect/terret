@@ -185,7 +185,10 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
             (MilestoneKind.Commit, "pin [redacted]"),
           ),
           !found.exists(_.summary.contains("ghp_")),
-          notes.collect { case note if note.kind == ActivityKind.Output => note.text } == Chunk("pin [redacted]\n"),
+          notes.collect {
+            case note if note.kind == ActivityKind.Output => (note.id, note.parent, note.text, note.at)
+          } ==
+            Chunk(("0:0", "commit", "pin [redacted]\n", when.toString)),
           !notes.exists(note => note.text.contains("ghp_") || note.name.exists(_.contains("ghp_"))),
         )
       }

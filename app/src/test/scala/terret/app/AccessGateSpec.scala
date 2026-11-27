@@ -43,13 +43,13 @@ object AccessGateSpec extends ZIOSpecDefault:
         )
       }
     },
-    test("a direct request is allowed, and a cloudflare header without a token is not") {
+    test("a missing token is rejected, with or without a cloudflare header") {
       for
         _      <- TestClock.setTime(when)
         keys   <- material
         hits   <- Ref.make(0)
         gate   <- gate(keys, hits)
-        _      <- gate.allow(Headers.empty)
+        bare   <- gate.allow(Headers.empty).either
         denied <- gate.allow(Headers.empty.add("CF-Connecting-IP", "203.0.113.4")).either
         exp = when.plusSeconds(60).getEpochSecond
         raw     <- ZIO.fromEither(jwt(keys.signing, Some(Kid), Json.Str(Aud), exp))
@@ -63,6 +63,7 @@ object AccessGateSpec extends ZIOSpecDefault:
         open    <- ZIO.scoped(AccessGate.open.build.map(_.get[AccessGate]))
         passed  <- open.allow(Headers.empty.add("CF-Ray", "ray"))
       yield assertTrue(
+        bare == Left(AccessError.Rejected),
         denied == Left(AccessError.Rejected),
         allowed == (),
         first == Left(AccessError.UnknownKid),

@@ -3,6 +3,7 @@ package terret.mcp
 import heddle.Schema
 import terret.activity.ActivityKind
 import terret.event.{Event, TurnOutcome}
+import terret.mcp.given
 import terret.redact.Redact
 import terret.error.TerretError
 import terret.find.{CallError, EmbeddingProblem, FetchProblem, FindError}
@@ -93,11 +94,14 @@ enum WireEvent derives Schema, JsonCodec:
   case Plan(steps: Chunk[String])
   case TurnFinished(outcome: WireOutcome)
   case Activity(
+      id: String,
+      parent: String,
       kind: ActivityKind,
       call: Option[String],
       name: Option[String],
       status: Option[String],
       text: String,
+      at: String,
   )
 
 object WireEvent:
@@ -112,13 +116,16 @@ object WireEvent:
       case Event.Plan(steps)           => Plan(steps.map(step => Redact.text(step.text)))
       case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
 
-  def activity(note: terret.activity.ActivityNote): WireEvent =
+  def activity(event: terret.activity.ActivityEvent): WireEvent =
     Activity(
-      note.kind,
-      note.call,
-      note.name.map(Redact.text),
-      note.status,
-      Redact.text(note.text),
+      event.id,
+      event.parent,
+      event.kind,
+      event.call,
+      event.name.map(Redact.text),
+      event.status,
+      Redact.text(event.text),
+      event.at.toString,
     )
 end WireEvent
 

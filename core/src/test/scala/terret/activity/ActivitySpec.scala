@@ -5,6 +5,8 @@ import zio.json.ast.Json
 import zio.test.*
 import zio.Chunk
 
+import java.time.Instant
+
 object ActivitySpec extends ZIOSpecDefault:
   private val id   = CallId("c1")
   private val name = ToolName("bash")
@@ -51,6 +53,25 @@ object ActivitySpec extends ZIOSpecDefault:
         nextPlan.map(_.text) == Chunk("\ntwo"),
         first.map(_.text) == Chunk("hello"),
         more.map(_.text) == Chunk("world"),
+      )
+    },
+    test("a tool start hangs under the turn, and a later update sends only the suffix") {
+      val when                      = Instant.parse("2026-11-21T15:04:05Z")
+      val started                   = Event.ToolStarted(ToolCall(id, name, Json.Str("body")))
+      val (afterStart, startNotes)  = Activity.step(ActivityMemory.empty, started)
+      val placedStart               = Activity.place(0L, 3L, when, startNotes)
+      val grown                     = Event.ToolUpdated(ToolCall(id, name, Json.Obj("stdout" -> Json.Str("abcd"))))
+      val (afterGrown, _)           = Activity.step(afterStart, grown)
+      val longer: Event.ToolUpdated =
+        Event.ToolUpdated(ToolCall(id, name, Json.Obj("stdout" -> Json.Str("abcdefgh"))))
+      val (_, longerNotes) = Activity.step(afterGrown, longer)
+      val sent             = Activity.wireUpdate(longer, longerNotes)
+      assertTrue(
+        placedStart.map(event => (event.id, event.parent, event.kind, event.at)) ==
+          Chunk((id.value, Activity.turnId(3L), ActivityKind.ToolStarted, when)),
+        sent.map(_.call.input) == Some(Json.Obj("stdout" -> Json.Str("efgh"))),
+        Activity.place(2L, 3L, when, longerNotes).map(event => (event.id, event.parent)) ==
+          Chunk(("2:0", id.value)),
       )
     },
   )

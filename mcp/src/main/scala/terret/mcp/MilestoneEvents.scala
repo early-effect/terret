@@ -3,7 +3,7 @@ package terret.mcp
 import heddle.Schema
 import heddle.mcp.events.{EmitError, EventId, Events}
 import heddle.mcp.protocol.EventName
-import terret.activity.{Activity, ActivityMemory, ActivityNote}
+import terret.activity.{Activity, ActivityEvent, ActivityMemory}
 import terret.harness.HarnessFailure
 import terret.milestone.{MilestoneGate, MilestoneKind, MilestoneSink, Milestones, Notice}
 import terret.redact.Redact
@@ -114,8 +114,9 @@ object MilestoneEvents:
           (notes, rows.updated(id, next))
         }
         .flatMap { notes =>
-          ZIO.foreachDiscard(notes.zipWithIndex) { (note, nth) =>
-            emitActivity(id, s"${id.value}:act:${entry.index}:$nth", note, Some(entry.index))
+          val placed = Activity.place(entry.index, entry.turn, entry.at, notes)
+          ZIO.foreachDiscard(placed.zipWithIndex) { (event, nth) =>
+            emitActivity(id, s"${id.value}:act:${entry.index}:$nth", event, Some(entry.index))
           }
         }
 
@@ -150,7 +151,7 @@ object MilestoneEvents:
     private def emitActivity(
         id: SessionId,
         raw: String,
-        note: ActivityNote,
+        event: ActivityEvent,
         cursor: Option[Long],
     ): ZIO[Events.Env, Nothing, Unit] =
       ZIO
@@ -158,19 +159,19 @@ object MilestoneEvents:
         .foldZIO(
           _ => ZIO.unit,
           eventId =>
-            Clock.instant.flatMap { at =>
-              val data = ActivityData(
-                id.value,
-                note.kind,
-                note.call,
-                note.name.map(Redact.text),
-                note.status,
-                Redact.text(note.text),
-                cursor,
-                at.toString,
-              )
-              Events.publish(ActivityEvents.name, eventId, data, at).catchAll(defect)
-            },
+            val data = ActivityData(
+              event.id,
+              event.parent,
+              id.value,
+              event.kind,
+              event.call,
+              event.name.map(Redact.text),
+              event.status,
+              Redact.text(event.text),
+              cursor,
+              event.at.toString,
+            )
+            Events.publish(ActivityEvents.name, eventId, data, event.at).catchAll(defect),
         )
 
     private def fact(id: SessionId, notice: Notice, scope: String): String =

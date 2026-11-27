@@ -22,6 +22,9 @@ trait Harness:
   def transcript(id: SessionId): IO[HarnessFailure, Transcript]
   def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry]
   def page(id: SessionId, after: Option[Long]): IO[HarnessFailure, Page]
+
+  /** Entries appended after this belong to `turn`. The id is the session epoch. */
+  def markTurn(id: SessionId, turn: Long): UIO[Unit]
   def cancel(id: SessionId): IO[HarnessFailure, Unit]
 
   /** Release every child this harness still owns. Idempotent. */

@@ -32,12 +32,19 @@ object Audience:
   extension (audience: Audience) def value: String = audience
 end Audience
 
-final case class AccessConfig(team: TeamHost, audience: Audience)
+/** `port` is the tunnel listener. It is not the local MCP port. */
+final case class AccessConfig(team: TeamHost, audience: Audience, port: Int)
+
+object AccessConfig:
+  val TunnelHost: String = "127.0.0.1"
+  val TunnelPort: Int    = 8081
 
 enum AccessConfigError:
   case Incomplete
   case Team
   case Audience
+  case Port(value: Int)
+  case SamePort(value: Int)
 
 /** Loads the team JWKS. The live load is the only network call, and tests supply the keys. */
 trait AccessCerts:
@@ -63,7 +70,6 @@ trait AccessGate:
 
 object AccessGate:
   private val Assertion = "cf-access-jwt-assertion"
-  private val Proxied   = List("cf-connecting-ip", "cf-ray", "cf-access-authenticated-user-email")
 
   val open: ULayer[AccessGate] =
     ZLayer.succeed(new:
@@ -77,7 +83,9 @@ object AccessGate:
       yield Live(certs, audience, cache)
     }
 
-  /** HTTP routes only. A direct client with no Cloudflare headers is allowed. A presented token is always checked. */
+  /** The tunnel listener. A missing token is rejected. There is no localhost exemption: cloudflared connects from
+    * 127.0.0.1, so an exemption would let every tunnel request through. The local listener does not install this.
+    */
   def http: Middleware[AccessGate] =
     Middleware.interceptZIO { request =>
       ZIO.serviceWithZIO[AccessGate](_.allow(request.headers)).mapError(_ => denied).as(request)
@@ -93,8 +101,7 @@ object AccessGate:
   ) extends AccessGate:
     def allow(headers: Headers): IO[AccessError, Unit] =
       token(headers) match
-        case None =>
-          if proxied(headers) then ZIO.fail(AccessError.Rejected) else ZIO.unit
+        case None      => ZIO.fail(AccessError.Rejected)
         case Some(jwt) =>
           Clock.instant.flatMap { now =>
             load(force = false).flatMap { keys =>
@@ -120,7 +127,4 @@ object AccessGate:
 
   private def token(headers: Headers): Option[String] =
     headers.get(Assertion).filter(_.nonEmpty)
-
-  private def proxied(headers: Headers): Boolean =
-    Proxied.exists(name => headers.get(name).exists(_.nonEmpty))
 end AccessGate

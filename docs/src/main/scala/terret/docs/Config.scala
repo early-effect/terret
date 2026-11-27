@@ -3,6 +3,7 @@ package terret.docs
 import heddle.mcp.events.VerificationPolicy
 import specular.*
 import terret.app.{
+  AccessConfig,
   AccessConfigError,
   Listen,
   ProcessConfig,
@@ -61,13 +62,14 @@ is raised, an omitted ttl uses the default, and a longer one, including an unbou
 `journal.limit` (`TERRET_JOURNAL_LIMIT`) is how many events one session log keeps. The default is 4096.
 Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit
 is rejected. `access.team` and `access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`) turn
-on Cloudflare Access. Set both or neither. The team value is a hostname such as
-`example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
-When both are set, a request that carries `Cf-Access-Jwt-Assertion` must verify as RS256 against
-`https://<team>/cdn-cgi/access/certs`, for that audience, and not be expired. A request that already
-looks proxied (`CF-Connecting-IP`, `CF-Ray`, or `Cf-Access-Authenticated-User-Email`) and has no
-token is rejected. A direct client that sends none of those headers is allowed, because the HTTP
-request does not carry the peer address. Nothing in this config is a secret.
+on Cloudflare Access. Set both or neither. A port without both is rejected. The team value is a hostname
+such as `example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
+When both are set, the configured HTTP listener (default `127.0.0.1:8080`) has no Access check. A second
+listener on `127.0.0.1` and `access.port` (default 8081, `TERRET_ACCESS_PORT`) always requires
+`Cf-Access-Jwt-Assertion`. The token must verify as RS256 against `https://<team>/cdn-cgi/access/certs`,
+for that audience, and not be expired. A missing token is rejected. There is no exemption for a direct
+client or for loopback: cloudflared connects from 127.0.0.1, so point it at the tunnel port. The same
+port as the local listener is rejected. Nothing in this config is a secret.
 
 `grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models
 `open` may request. Absent, that file is `~/.grok/config.toml`. An empty path is rejected. Nested
@@ -237,12 +239,29 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
     exampleValue(ProcessConfig.load(base.copy(accessTeam = Some("example.cloudflareaccess.com")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Incomplete)))
     },
+    exampleValue(ProcessConfig.load(base.copy(accessPort = Some(8081)))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Incomplete)))
+    },
     exampleValue(
       ProcessConfig.load(
         base.copy(accessTeam = Some("example.cloudflareaccess.com"), accessAudience = Some("aud"))
       )
     ).assert { loaded =>
-      assertTrue(loaded.map(_.access.map(_.audience.value)) == Right(Some("aud")))
+      assertTrue(
+        loaded.map(_.access.map(_.audience.value)) == Right(Some("aud")),
+        loaded.map(_.access.map(_.port)) == Right(Some(AccessConfig.TunnelPort)),
+      )
+    },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+          accessPort = Some(8080),
+        )
+      )
+    ).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.SamePort(8080))))
     },
     exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
       assertTrue(supervisor == Right(SupervisorChoice.None))

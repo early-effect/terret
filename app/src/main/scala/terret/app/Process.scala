@@ -1,7 +1,9 @@
 package terret.app
 
 import heddle.Server
+import heddle.http.Response
 import heddle.mcp.events.{Events, SubscriptionStore, WebhookTransport}
+import heddle.route.Routes
 import heddle.server.Port
 import terret.Terret
 import terret.config.TerretConfig
@@ -27,7 +29,7 @@ object Process:
     assemble(config, harness, gate).flatMap { prepared =>
       val body = config.listen match
         case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
-        case Listen.Http(host, port) => bind(prepared.served, host, port) *> ZIO.never
+        case Listen.Http(host, port) => http(prepared.served, host, port, config.access) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
       armed(prepared.served, gate, config)(body).ensuring(prepared.shutdown)
@@ -41,18 +43,43 @@ object Process:
         for
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
-          server   <- armed(prepared.served, gate, config)(bind(prepared.served, host, port))
+          server   <- armed(prepared.served, gate, config)(http(prepared.served, host, port, config.access))
         yield server
 
-  private def bind(
+  /** The local listener has no Access check. The tunnel listener, when configured, always requires a JWT. */
+  private def http(
       served: Served,
       host: String,
       port: Int,
+      access: Option[AccessConfig],
   ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
+    for
+      local <- openListener(served, host, port)
+      _     <- ZIO.foreachDiscard(access)(cfg => tunnelListener(served, cfg.port))
+    yield local
+
+  private def openListener(
+      served: Served,
+      host: String,
+      port: Int,
+  ): ZIO[Milestones & Events.Env & Scope, ProcessError, Server] =
+    bind(served.routes, host, port)
+
+  private def tunnelListener(
+      served: Served,
+      port: Int,
+  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
+    bind(served.routes @@ AccessGate.http, AccessConfig.TunnelHost, port)
+
+  private def bind[R](
+      routes: Routes[R, Response],
+      host: String,
+      port: Int,
+  ): ZIO[R & Scope, ProcessError, Server] =
     for
       bound  <- ZIO.fromEither(Port.make(port).left.map(_ => ProcessError.Port(port)))
       server <- Server
-        .install(served.routes @@ AccessGate.http, Server.Config.default.copy(host = host, port = bound))
+        .install(routes, Server.Config.default.copy(host = host, port = bound))
         .mapError(ProcessError.Server(_))
     yield server
 

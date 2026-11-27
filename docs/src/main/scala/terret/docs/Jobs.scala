@@ -39,11 +39,14 @@ tool with no server is `NotCallable`. A missing grant is `NotGranted`. A granted
 `.mcp.json` does not define is `UnknownServer`.
 
 `follow` is a subscription, not a job. A host listens with MCP `subscriptions/listen`, or
-opens `GET /sessions/{session}/events` as server-sent events. The event id is the log index. Send
-that id back as `after` to continue strictly after it. Closing the stream does not cancel the turn.
-Each tool update on that stream is the new output, not the whole output again. The same facts are
-the MCP event `session.activity`. `session.milestone` stays the short list: a turn, a commit, a
-push, a pull-request state, an error, or a wait. A tool call and a test line are activity.
+opens `GET /sessions/{session}/events` as server-sent events. The SSE id is the journal index.
+`after` and `Last-Event-ID` continue strictly after that index, and `Last-Event-ID` wins when both
+are set. Closing the stream does not cancel the turn. Each activity frame has a stable id, a parent
+(the turn id `turn:<epoch>` or the tool call id), a kind, and the journal time. A tool update on
+that stream is the new output, not the whole output again. The journal keeps the cumulative frame.
+The same facts are the MCP event `session.activity`. `session.milestone` stays the short list: a
+turn, a commit, a push, a pull-request state, an error, or a wait. A tool call and a test line are
+activity.
 
 An empty server version is rejected before the catalog is built.
 """,

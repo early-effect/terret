@@ -119,6 +119,7 @@ final class Terret private (
   ): ZIO[Scope, TerretError, (Session, ZStream[Any, TerretError, Event])] =
     for
       (session, previous, epoch) <- begin(id)
+      _                          <- harness.markTurn(id, epoch)
       started                    <- Ref.make(false)
       _                          <- ZIO.addFinalizer(release(id, previous, started, epoch))
       revised                    <- hooks.beforePrompt(session, prompt)

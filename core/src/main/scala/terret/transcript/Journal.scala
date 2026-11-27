@@ -4,10 +4,14 @@ import terret.event.Event
 import terret.milestone.MilestoneSink
 import terret.session.SessionId
 import zio.stream.ZStream
-import zio.{Chunk, Hub, Ref, Semaphore, UIO, ZIO}
+import zio.{Chunk, Clock, Hub, Ref, Semaphore, UIO, ZIO}
 
-/** One retained event. `index` is stable: the next listen passes it back as `after`. */
-final case class Entry(index: Long, event: Event)
+import java.time.Instant
+
+/** One retained event. `index` is the listen cursor. `turn` is the epoch last marked for the session. `at` is when the
+  * entry was appended.
+  */
+final case class Entry(index: Long, event: Event, turn: Long = 0L, at: Instant = Instant.EPOCH)
 
 /** A page of the log. `cursor` is the last retained index, or nothing when the log is empty. */
 final case class Page(events: Chunk[Entry], cursor: Option[Long])
@@ -26,7 +30,7 @@ final class Journal private (
       lock <- Semaphore.make(1)
       won  <- slots.modify { rows =>
         if rows.contains(id) then (false, rows)
-        else (true, rows.updated(id, Journal.Slot(Chunk.empty, 0L, hub, lock)))
+        else (true, rows.updated(id, Journal.Slot(Chunk.empty, 0L, 0L, hub, lock)))
       }
       _ <- if won then ZIO.unit else hub.shutdown.unit
     yield ()
@@ -37,22 +41,32 @@ final class Journal private (
         case None       => ZIO.unit
         case Some(slot) =>
           slot.lock.withPermit {
-            slots
-              .modify { current =>
-                current.get(id) match
-                  case None        => (None, current)
-                  case Some(found) =>
-                    val entry = Entry(found.next, event)
-                    val kept  = Journal.keep(found.events :+ entry, bound.limit)
-                    val next  = found.copy(events = kept, next = found.next + 1L)
-                    (Some(found.hub -> entry), current.updated(id, next))
-              }
-              .flatMap {
-                case None => ZIO.unit
-                // The offer stays inside the permit so it cannot pass the index. Publish runs later, outside it.
-                case Some(hub -> item) => hub.publish(item) *> sink.appended(id, item)
-              }
+            Clock.instant.flatMap { at =>
+              slots
+                .modify { current =>
+                  current.get(id) match
+                    case None        => (None, current)
+                    case Some(found) =>
+                      val entry = Entry(found.next, event, found.turn, at)
+                      val kept  = Journal.keep(found.events :+ entry, bound.limit)
+                      val next  = found.copy(events = kept, next = found.next + 1L)
+                      (Some(found.hub -> entry), current.updated(id, next))
+                }
+                .flatMap {
+                  case None => ZIO.unit
+                  // The offer stays inside the permit so it cannot pass the index. Publish runs later, outside it.
+                  case Some(hub -> item) => hub.publish(item) *> sink.appended(id, item)
+                }
+            }
           }
+    }
+
+  /** Later appends carry `turn` until the next mark. A session that is not open is left alone. */
+  def mark(id: SessionId, turn: Long): UIO[Unit] =
+    slots.update { rows =>
+      rows.get(id) match
+        case None       => rows
+        case Some(slot) => rows.updated(id, slot.copy(turn = turn))
     }
 
   def events(id: SessionId): UIO[Chunk[Event]] =
@@ -94,7 +108,7 @@ final class Journal private (
 end Journal
 
 object Journal:
-  private final case class Slot(events: Chunk[Entry], next: Long, hub: Hub[Entry], lock: Semaphore)
+  private final case class Slot(events: Chunk[Entry], next: Long, turn: Long, hub: Hub[Entry], lock: Semaphore)
 
   def make: UIO[Journal] = make(MilestoneSink.discard)
 

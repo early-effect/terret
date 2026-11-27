@@ -65,6 +65,9 @@ final class GrokHarness private (
   def transcript(id: SessionId): IO[HarnessFailure, Transcript] =
     require(id) *> journal.events(id).map(Transcript(id, _))
 
+  def markTurn(id: SessionId, turn: Long): UIO[Unit] =
+    journal.mark(id, turn)
+
   def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry] =
     ZStream.unwrap(require(id).as(journal.follow(id, after)))
 
