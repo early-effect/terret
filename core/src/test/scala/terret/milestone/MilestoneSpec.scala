@@ -21,25 +21,23 @@ object MilestoneSpec extends ZIOSpecDefault:
   private val id = SessionId("session")
 
   def spec = suite("milestones")(
-    test("streamed updates are not milestones, and a tool call keeps only its name") {
+    test("streamed updates and an ordinary tool start are not milestones") {
       val started = tool("Edit")
       val renamed = tool("n" * (Milestones.SummaryLimit + 40))
       assertTrue(
         Milestones.classify(Event.Assistant("hello")).isEmpty,
         Milestones.classify(Event.Thought("hmm")).isEmpty,
         Milestones.classify(Event.Plan(Chunk(PlanStep("step")))).isEmpty,
-        started.map(Milestones.classify) ==
-          Right(Some(Notice(MilestoneKind.ToolCall, "Edit"))),
-        renamed.map(Milestones.classify) ==
-          Right(Some(Notice(MilestoneKind.ToolCall, "n" * Milestones.SummaryLimit))),
+        started.map(Milestones.classify) == Right(Chunk.empty),
+        renamed.map(Milestones.classify) == Right(Chunk.empty),
         Milestones.classify(Event.TurnFinished(TurnOutcome.Completed)) ==
-          Some(Notice(MilestoneKind.TurnFinished, "completed")),
+          Chunk(Notice(MilestoneKind.TurnFinished, "completed", "turn-finished:completed")),
         Milestones.classify(Event.TurnFinished(TurnOutcome.Cancelled)) ==
-          Some(Notice(MilestoneKind.TurnFinished, "cancelled")),
+          Chunk(Notice(MilestoneKind.TurnFinished, "cancelled", "turn-finished:cancelled")),
         Milestones.classify(Event.TurnFinished(TurnOutcome.Failed(HarnessFailure.Exited(7)))) ==
-          Some(Notice(MilestoneKind.Error, "exited 7")),
-        Milestones.turnStarted == Notice(MilestoneKind.TurnStarted, "started"),
-        marked(ToolName("Edit"), """{"secret":"no"}""", started = false) == Right(None),
+          Chunk(Notice(MilestoneKind.Error, "exited 7", "error")),
+        Milestones.turnStarted == Notice(MilestoneKind.TurnStarted, "started", "turn-started"),
+        marked(ToolName("Edit"), """{"secret":"no"}""", started = false) == Right(Chunk.empty),
       )
     },
     test("a finished git commit is a commit, and a dry run or a failed exit is not") {
@@ -48,26 +46,27 @@ object MilestoneSpec extends ZIOSpecDefault:
         "git add histos && git commit -F target/commit-msg.txt && git status -sb && git log -1 --format='author:%an <%ae>'"
       assertTrue(
         marked(ToolName("run_terminal_command"), command(recorded, s"$subject\n 7 files changed\n", Some("0"))) ==
-          Right(Some(Notice(MilestoneKind.Commit, subject))),
+          Right(Chunk(Notice(MilestoneKind.Commit, subject, s"commit:$subject"))),
         marked(
           ToolName("run_terminal_command"),
           command("/usr/bin/git -C repo commit -m pin", "[main abc] Pin\n", Some("0")),
-        ) == Right(Some(Notice(MilestoneKind.Commit, "[main abc] Pin"))),
+        ) == Right(Chunk(Notice(MilestoneKind.Commit, "[main abc] Pin", "commit:[main abc] Pin"))),
         marked(ToolName("run_terminal_command"), command("git commit -m pin", "[main abc] Pin\n", None)) ==
-          Right(Some(Notice(MilestoneKind.Commit, "[main abc] Pin"))),
+          Right(Chunk(Notice(MilestoneKind.Commit, "[main abc] Pin", "commit:[main abc] Pin"))),
         marked(ToolName("run_terminal_command"), command("git commit --dry-run -m x", "dry\n", Some("0"))) ==
-          Right(None),
+          Right(Chunk.empty),
         marked(ToolName("run_terminal_command"), command("git commit -m x", "[main abc] Pin\n", Some("1"))) ==
-          Right(None),
+          Right(Chunk.empty),
         marked(ToolName("run_terminal_command"), command("git commit -m x", "[main abc] Pin\n", Some("1.5"))) ==
-          Right(None),
-        marked(ToolName("run_terminal_command"), command("git commit -m x", "", Some("0"))) == Right(None),
-        marked(ToolName("run_terminal_command"), command("echo git commit", "git commit\n", Some("0"))) == Right(None),
+          Right(Chunk.empty),
+        marked(ToolName("run_terminal_command"), command("git commit -m x", "", Some("0"))) == Right(Chunk.empty),
+        marked(ToolName("run_terminal_command"), command("echo git commit", "git commit\n", Some("0"))) ==
+          Right(Chunk.empty),
         marked(ToolName("run_terminal_command"), command("rg 'git commit'", "src: git commit -m hello\n", Some("0"))) ==
-          Right(None),
+          Right(Chunk.empty),
       )
     },
-    test("a test command reports the last passed or failed line, including a nested result") {
+    test("a test line is not a milestone, and a commit beside it stays a commit") {
       val rollup = "tests passed: 7 failed: 0 cached: 10 modules: 7"
       val nested =
         s"""{"type":"TaskOutput","Result":{"command":"./histos test --quick","exit_code":0,"status":"completed","output":"grok 62 tests passed. 0 tests failed.\\n$rollup"}}"""
@@ -75,32 +74,56 @@ object MilestoneSpec extends ZIOSpecDefault:
       assertTrue(
         runners.forall { runner =>
           marked(ToolName("run_terminal_command"), command(s"./$runner test", "tests passed: 1\n", Some("0"))) ==
-            Right(Some(Notice(MilestoneKind.TestResult, "tests passed: 1")))
+            Right(Chunk.empty)
         },
         marked(ToolName("run_terminal_command"), command("pytest -q", "tests failed: 1\n", Some("1"))) ==
-          Right(Some(Notice(MilestoneKind.TestResult, "tests failed: 1"))),
-        marked(ToolName("get_command_or_subagent_output"), nested) ==
-          Right(Some(Notice(MilestoneKind.TestResult, rollup))),
+          Right(Chunk.empty),
+        marked(ToolName("get_command_or_subagent_output"), nested) == Right(Chunk.empty),
         marked(ToolName("run_terminal_command"), command("./histos test", "tests failed: 2\n", Some("1"))) ==
-          Right(Some(Notice(MilestoneKind.TestResult, "tests failed: 2"))),
+          Right(Chunk.empty),
         marked(ToolName("run_terminal_command"), command("./histos compile", "tests passed: 1\n", Some("0"))) ==
-          Right(None),
+          Right(Chunk.empty),
         marked(
           ToolName("run_terminal_command"),
           """{"type":"BackgroundTaskStarted","command":"./histos test --quick","status":"running","task_id":"c0"}""",
-        ) == Right(None),
+        ) == Right(Chunk.empty),
         marked(
           ToolName("read_file"),
           """{"type":"ReadFile","path":"notes.md","content":"./histos test --quick\ntests passed: 1 failed: 0"}""",
-        ) == Right(None),
+        ) == Right(Chunk.empty),
         marked(
           ToolName("run_terminal_command"),
           command("git commit -m pin && ./histos test", "[main abc] Pin\ntests passed: 1 failed: 0\n", Some("0")),
-        ) == Right(Some(Notice(MilestoneKind.Commit, "[main abc] Pin"))),
+        ) == Right(Chunk(Notice(MilestoneKind.Commit, "[main abc] Pin", "commit:[main abc] Pin"))),
         marked(
           ToolName("run_terminal_command"),
           command("git commit -m pin && ./histos test", "error\ntests failed: 2\n", Some("1")),
-        ) == Right(Some(Notice(MilestoneKind.TestResult, "tests failed: 2"))),
+        ) == Right(Chunk.empty),
+      )
+    },
+    test("a push and a pull request are milestones, and a dry run is not") {
+      val url  = "https://github.com/early-effect/terret/pull/28"
+      val both =
+        "git commit -m pin && git push origin main && gh pr create --fill"
+      assertTrue(
+        marked(ToolName("run_terminal_command"), command("git push origin main", "main -> main\n", Some("0"))) ==
+          Right(Chunk(Notice(MilestoneKind.Push, "main -> main", "push:main -> main"))),
+        marked(ToolName("run_terminal_command"), command("git push --dry-run", "dry\n", Some("0"))) ==
+          Right(Chunk.empty),
+        marked(ToolName("run_terminal_command"), command("git push -n origin main", "dry\n", Some("0"))) ==
+          Right(Chunk.empty),
+        marked(ToolName("run_terminal_command"), command("gh pr merge 28", s"$url\n", Some("0"))) ==
+          Right(Chunk(Notice(MilestoneKind.PrState, s"merged $url", s"pr:$url:merged"))),
+        marked(ToolName("run_terminal_command"), command("gh pr view 28", "\"OPEN\"\n", Some("0"))) ==
+          Right(Chunk(Notice(MilestoneKind.PrState, "open \"OPEN\"", "pr:\"OPEN\":open"))),
+        marked(ToolName("run_terminal_command"), command(both, s"[main abc] Pin\n$url\n", Some("0"))) ==
+          Right(
+            Chunk(
+              Notice(MilestoneKind.Commit, "[main abc] Pin", "commit:[main abc] Pin"),
+              Notice(MilestoneKind.Push, "[main abc] Pin", "push:[main abc] Pin"),
+              Notice(MilestoneKind.PrState, s"open $url", s"pr:$url:open"),
+            )
+          ),
       )
     },
     test("ask_user_question waits on permission when the call starts") {
@@ -109,34 +132,37 @@ object MilestoneSpec extends ZIOSpecDefault:
       val long     = "q" * (Milestones.SummaryLimit + 20)
       assertTrue(
         marked(ToolName("ask_user_question"), asked, started = true) ==
-          Right(Some(Notice(MilestoneKind.WaitingOnPermission, question))),
+          Right(Chunk(Notice(MilestoneKind.WaitingOnPermission, question, "wait:c1"))),
         marked(ToolName("ask_user_question"), """{"questions":[]}""", started = true) ==
-          Right(Some(Notice(MilestoneKind.WaitingOnPermission, "ask_user_question"))),
+          Right(Chunk(Notice(MilestoneKind.WaitingOnPermission, "ask_user_question", "wait:c1"))),
         marked(ToolName("ask_user_question"), s"""{"questions":[{"question":"$long"}]}""", started = true) ==
-          Right(Some(Notice(MilestoneKind.WaitingOnPermission, "q" * Milestones.SummaryLimit))),
-        marked(ToolName("ask_user_question"), asked, started = false) == Right(None),
+          Right(Chunk(Notice(MilestoneKind.WaitingOnPermission, "q" * Milestones.SummaryLimit, "wait:c1"))),
+        marked(ToolName("ask_user_question"), asked, started = false) == Right(Chunk.empty),
         marked(
           ToolName("Ask: How should a restart keep webhook subscriptions?"),
           s"""{"variant":"AskUserQuestion","questions":[{"question":"$question"}]}""",
           started = false,
-        ) == Right(None),
+        ) == Right(Chunk.empty),
       )
     },
     test("a failure summary is the enum label") {
       assertTrue(
-        Milestones.failed(HarnessFailure.UnknownSession(id)) == Notice(MilestoneKind.Error, "unknown session"),
-        Milestones.failed(HarnessFailure.Cancelled) == Notice(MilestoneKind.Error, "cancelled"),
-        Milestones.failed(HarnessFailure.Exited(3)) == Notice(MilestoneKind.Error, "exited 3"),
-        Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Malformed)) == Notice(MilestoneKind.Error, "malformed"),
+        Milestones.failed(HarnessFailure.UnknownSession(id)) ==
+          Notice(MilestoneKind.Error, "unknown session", "error"),
+        Milestones.failed(HarnessFailure.Cancelled) == Notice(MilestoneKind.Error, "cancelled", "error"),
+        Milestones.failed(HarnessFailure.Exited(3)) == Notice(MilestoneKind.Error, "exited 3", "error"),
+        Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Malformed)) ==
+          Notice(MilestoneKind.Error, "malformed", "error"),
         Milestones.failed(HarnessFailure.Protocol(ProtocolFault.BindMissing)) ==
-          Notice(MilestoneKind.Error, "bind missing"),
+          Notice(MilestoneKind.Error, "bind missing", "error"),
         Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Rejected(9))) ==
-          Notice(MilestoneKind.Error, "rejected 9"),
+          Notice(MilestoneKind.Error, "rejected 9", "error"),
         Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Incomplete)) ==
-          Notice(MilestoneKind.Error, "incomplete"),
-        Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Refused)) == Notice(MilestoneKind.Error, "refused"),
+          Notice(MilestoneKind.Error, "incomplete", "error"),
+        Milestones.failed(HarnessFailure.Protocol(ProtocolFault.Refused)) ==
+          Notice(MilestoneKind.Error, "refused", "error"),
         Milestones.failed(HarnessFailure.Protocol(ProtocolFault.PermissionDenied)) ==
-          Notice(MilestoneKind.Error, "permission denied"),
+          Notice(MilestoneKind.Error, "permission denied", "error"),
       )
     },
     test("latest keeps the newest N and a missing bound keeps the selection") {
@@ -192,7 +218,7 @@ object MilestoneSpec extends ZIOSpecDefault:
     },
   )
 
-  private def marked(name: ToolName, json: String, started: Boolean = false): Either[String, Option[Notice]] =
+  private def marked(name: ToolName, json: String, started: Boolean = false): Either[String, Chunk[Notice]] =
     json.fromJson[Json].map { parsed =>
       val call  = ToolCall(CallId("c1"), name, parsed)
       val event = if started then Event.ToolStarted(call) else Event.ToolUpdated(call)

@@ -35,8 +35,9 @@ object EventsKey:
     presented.filter(_.nonEmpty) match
       case None      => None
       case Some(got) =>
-        val named = id(got)
-        if configured.forall(key => same(key.raw, got)) then Some(named) else None
+        configured match
+          case Some(key) if same(key.raw, got) => Some(id(got))
+          case _                               => None
 
   private def id(material: String): Principal =
     Principal(s"key:${hexPrefix(sha256(material))}")

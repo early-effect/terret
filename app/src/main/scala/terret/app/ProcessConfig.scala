@@ -17,6 +17,7 @@ import terret.grok.{
 }
 import terret.mcp.{EventPolicy, EventPolicyError, EventsKey}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
+import terret.transcript.{JournalBound, JournalBoundError}
 import terret.workspace.{Workspace, WorkspaceError}
 import zio.{Chunk, Config, Duration}
 
@@ -39,6 +40,8 @@ final case class ProcessConfig(
     eventsKey: Option[EventsKey] = None,
     grokConfig: Path,
     subscriptions: Path = Subscriptions.file,
+    journal: JournalBound = JournalBound.default,
+    access: Option[AccessConfig] = None,
 )
 
 object ProcessConfig:
@@ -58,6 +61,23 @@ object ProcessConfig:
       cap: Duration,
       key: Option[String],
   )
+
+  private val journalLimit: Config[Int] =
+    Config.int("limit").withDefault(JournalBound.DefaultSize).nested("journal")
+
+  private val accessTeam: Config[Option[String]] =
+    Config.string("team").optional.nested("access")
+
+  private val accessAudience: Config[Option[String]] =
+    Config.string("audience").optional.nested("access")
+
+  private final case class BoundRaw(journal: Int, team: Option[String], audience: Option[String])
+
+  /** One value so the process config product stays inside what `Config.++` flattens. */
+  private val boundRaw: Config[BoundRaw] =
+    (journalLimit ++ accessTeam ++ accessAudience).map { (journal, team, audience) =>
+      BoundRaw(journal, team, audience)
+    }
 
   private val eventRaw: Config[EventRaw] =
     (
@@ -91,6 +111,7 @@ object ProcessConfig:
         Config.string("mcp").optional ++
         Config.string("network").optional ++
         eventRaw ++
+        boundRaw ++
         GrokModels.config
     ).nested("terret").map {
       (
@@ -113,6 +134,7 @@ object ProcessConfig:
           mcp,
           network,
           events,
+          bound,
           grokConfig,
       ) =>
         Raw(
@@ -139,6 +161,9 @@ object ProcessConfig:
           events.default,
           events.cap,
           events.key,
+          bound.journal,
+          bound.team,
+          bound.audience,
           grokConfig,
         )
     }
@@ -155,6 +180,8 @@ object ProcessConfig:
       network    <- hostsOf(raw.network)
       events     <- eventsOf(raw)
       grokConfig <- grokConfigOf(raw.grokConfig)
+      journal    <- journalOf(raw.journalLimit)
+      access     <- accessOf(raw.accessTeam, raw.accessAudience)
       eventsKey = raw.eventKey.flatMap(EventsKey.from)
     yield ProcessConfig(
       listen,
@@ -168,6 +195,8 @@ object ProcessConfig:
       events,
       eventsKey,
       grokConfig,
+      journal = journal,
+      access = access,
     )
 
   private def listenOf(raw: Raw): Either[ProcessError, Listen] =
@@ -323,6 +352,9 @@ object ProcessConfig:
       eventDefault: Duration = EventPolicy.terret.default,
       eventCap: Duration = EventPolicy.terret.cap,
       eventKey: Option[String] = None,
+      journalLimit: Int = JournalBound.DefaultSize,
+      accessTeam: Option[String] = None,
+      accessAudience: Option[String] = None,
       grokConfig: Option[String] = None,
   )
 
@@ -346,6 +378,22 @@ object ProcessConfig:
       .from(raw.eventVerification, raw.eventFloor, raw.eventDefault, raw.eventCap)
       .left
       .map(ProcessError.Events(_))
+
+  private def journalOf(limit: Int): Either[ProcessError, JournalBound] =
+    JournalBound.from(limit).left.map(ProcessError.Journal(_))
+
+  private def accessOf(team: Option[String], audience: Option[String]): Either[ProcessError, Option[AccessConfig]] =
+    (present(team), present(audience)) match
+      case (None, None)            => Right(None)
+      case (Some(host), Some(tag)) =>
+        for
+          parsedHost <- TeamHost.from(host).left.map(ProcessError.Access(_))
+          parsedTag  <- Audience.from(tag).left.map(ProcessError.Access(_))
+        yield Some(AccessConfig(parsedHost, parsedTag))
+      case _ => Left(ProcessError.Access(AccessConfigError.Incomplete))
+
+  private def present(raw: Option[String]): Option[String] =
+    raw.map(_.trim).filter(_.nonEmpty)
 end ProcessConfig
 
 enum ProcessError:
@@ -371,6 +419,8 @@ enum ProcessError:
   case Mcp(error: terret.mcp.TerretMcpError)
   case McpGrant(error: McpGrantError)
   case Events(error: EventPolicyError)
+  case Journal(error: JournalBoundError)
+  case Access(error: AccessConfigError)
   case Subscriptions(error: StoreError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
@@ -399,10 +449,22 @@ enum ProcessError:
     case Mcp(error)           => s"mcp ${error.toString}"
     case McpGrant(error)      => error.render
     case Events(error)        => error.render
+    case Journal(error)       => journalMessage(error)
+    case Access(error)        => accessMessage(error)
     case Subscriptions(error) => subscriptionMessage(error)
     case Server(error)        => error.message
     case Stdio(cause)         => s"stdio ${cause.toString}"
     case Config(error)        => error.toString
+
+  private def journalMessage(error: JournalBoundError): String =
+    error match
+      case JournalBoundError.NonPositive(value) => s"journal.limit must be positive, got $value"
+
+  private def accessMessage(error: AccessConfigError): String =
+    error match
+      case AccessConfigError.Incomplete => "access needs terret.access.team and terret.access.audience"
+      case AccessConfigError.Team       => "access team is a hostname with no scheme or path"
+      case AccessConfigError.Audience   => "access audience is a tag with no whitespace"
 
   private def subscriptionMessage(error: StoreError): String =
     error match

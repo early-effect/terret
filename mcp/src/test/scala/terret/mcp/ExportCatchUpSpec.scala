@@ -55,7 +55,7 @@ object ExportCatchUpSpec extends ZIOSpecDefault:
           negative <- call(mcp, "export", ExportJob(id, after = Some(-1)), 6)
         yield assertTrue(
           log(whole) == Right(Log(id, full, Some(5), ended)),
-          log(marked) == Right(Log(id, Chunk(toolEvent, finished), Some(5), ended)),
+          log(marked) == Right(Log(id, Chunk(finished), Some(5), ended)),
           log(newest) == Right(Log(id, Chunk(finished), Some(5), ended)),
           log(after) == Right(Log(id, Chunk(finished), Some(5), ended)),
           failure(refused) == Right(JobFailure.BadLatest),
@@ -68,7 +68,7 @@ object ExportCatchUpSpec extends ZIOSpecDefault:
         for
           id     <- run(terret)
           plain  <- call(mcp, "export", ExportJob(id, milestones = Some(false)), 1)
-          _      <- stub[Milestones](_.classify(any[Event]))(ZIO.succeed(None: Option[Notice]))
+          _      <- stub[Milestones](_.classify(any[Event]))(ZIO.succeed(Chunk.empty[Notice]))
           caught <- call(mcp, "export", ExportJob(id, milestones = Some(true)), 2)
         yield assertTrue(
           log(plain) == Right(Log(id, full, Some(5), ended)),

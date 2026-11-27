@@ -1,6 +1,7 @@
 package terret.grok
 
-import terret.event.ToolName
+import terret.activity.{Activity, ActivityKind}
+import terret.event.{Event, ToolName}
 import terret.harness.ProtocolFault
 import terret.milestone.{MilestoneKind, Milestones, Notice}
 import zio.json.*
@@ -21,36 +22,34 @@ object MilestoneStreamSpec extends ZIOSpecDefault:
         assertTrue(
           notices(updates) == Right(
             Chunk(
-              Some(Notice(MilestoneKind.ToolCall, "run_terminal_command")),
               None,
-              Some(Notice(MilestoneKind.Commit, subject)),
+              None,
+              Some(Notice(MilestoneKind.Commit, subject, s"commit:$subject")),
             )
           )
         )
       }
     },
-    test("a recorded test stream reports the last tests passed line") {
+    test("a recorded test stream is activity, not a milestone") {
       load("test.json").map { updates =>
+        val ran   = events(updates)
+        val lines = ran.map(found =>
+          Activity.observe(found).collect { case note if note.kind == ActivityKind.TestLine => note.text }
+        )
+        val marked = notices(updates)
         assertTrue(
-          notices(updates) == Right(
-            Chunk(
-              Some(Notice(MilestoneKind.ToolCall, "run_terminal_command")),
-              None,
-              None,
-              Some(Notice(MilestoneKind.ToolCall, "get_command_or_subagent_output")),
-              None,
-              Some(Notice(MilestoneKind.TestResult, rollup)),
-            )
-          )
+          marked.map(_.flatten).forall(_.isEmpty),
+          lines.map(_.count(_ == rollup)) == Right(1),
         )
       }
     },
     test("a recorded question waits once, when the call starts") {
+      val call = "call-503da2a7-1e9f-4d9c-94c6-714c8f23cce4-89"
       load("ask.json").map { updates =>
         assertTrue(
           notices(updates) == Right(
             Chunk(
-              Some(Notice(MilestoneKind.WaitingOnPermission, question)),
+              Some(Notice(MilestoneKind.WaitingOnPermission, question, s"wait:$call")),
               None,
               None,
             )
@@ -67,8 +66,25 @@ object MilestoneStreamSpec extends ZIOSpecDefault:
       ) {
         case (Right((seen, acc)), update) =>
           AcpEvents.fromUpdate(update, seen).map { (next, events) =>
-            val marks = if events.isEmpty then Chunk(None) else events.map(Milestones.classify)
+            val marks =
+              if events.isEmpty then Chunk(None)
+              else
+                events.flatMap { event =>
+                  val found = Milestones.classify(event)
+                  if found.isEmpty then Chunk(None) else found.map(Some(_))
+                }
             (next, acc ++ marks)
+          }
+        case (failed, _) => failed
+      }
+      .map(_._2)
+
+  private def events(updates: Json.Arr): Either[ProtocolFault, Chunk[Event]] =
+    updates.elements
+      .foldLeft[Either[ProtocolFault, (Map[String, ToolName], Chunk[Event])]](Right((Map.empty, Chunk.empty))) {
+        case (Right((seen, acc)), update) =>
+          AcpEvents.fromUpdate(update, seen).map { (next, found) =>
+            (next, acc ++ found)
           }
         case (failed, _) => failed
       }

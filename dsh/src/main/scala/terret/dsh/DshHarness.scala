@@ -4,6 +4,7 @@ import heddle.LinePipe
 import terret.event.Event
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
+import terret.transcript.JournalBound
 import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
@@ -132,13 +133,18 @@ object DshHarness:
       config: DshConfig,
       spawner: Spawner,
       milestones: MilestoneSink = MilestoneSink.discard,
+      journalBound: JournalBound = JournalBound.default,
   ): ZIO[Scope, Nothing, DshHarness] =
     for
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-      journal  <- Journal.make(milestones)
+      journal  <- Journal.make(milestones, journalBound)
     yield DshHarness(config, spawner, sessions, gates, journal)
 
-  def layer(config: DshConfig, milestones: MilestoneSink = MilestoneSink.discard): ZLayer[Scope, Nothing, Harness] =
-    ZLayer.scoped(make(config, Spawner.jdk, milestones).map(harness => harness: Harness))
+  def layer(
+      config: DshConfig,
+      milestones: MilestoneSink = MilestoneSink.discard,
+      journal: JournalBound = JournalBound.default,
+  ): ZLayer[Scope, Nothing, Harness] =
+    ZLayer.scoped(make(config, Spawner.jdk, milestones, journal).map(harness => harness: Harness))
 end DshHarness

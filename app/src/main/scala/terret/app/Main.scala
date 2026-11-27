@@ -65,8 +65,9 @@ object Main extends ZIOAppDefault:
           config.mcp,
           network = config.network,
           milestones = milestones,
+          journal = config.journal,
         )
-      case ProcessHarness.Dsh(dsh) => DshHarness.layer(dsh, milestones)
+      case ProcessHarness.Dsh(dsh) => DshHarness.layer(dsh, milestones, config.journal)
 end Main
 
 enum AppFailure:

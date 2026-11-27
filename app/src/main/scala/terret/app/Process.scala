@@ -10,10 +10,13 @@ import terret.hooks.Hooks
 import terret.model.ModelCatalog
 import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
-import zio.{Scope, UIO, ZIO}
+import zio.{Scope, UIO, ULayer, ZIO, ZLayer}
 
 object Process:
-  def listen(config: ProcessConfig, gate: MilestoneGate): ZIO[Harness & ModelCatalog & Scope, ProcessError, Unit] =
+  def listen(
+      config: ProcessConfig,
+      gate: MilestoneGate,
+  ): ZIO[Harness & ModelCatalog & Scope, ProcessError, Unit] =
     ZIO.serviceWithZIO[Harness](listen(config, _, gate))
 
   def listen(
@@ -45,11 +48,11 @@ object Process:
       served: Served,
       host: String,
       port: Int,
-  ): ZIO[Milestones & Events.Env & Scope, ProcessError, Server] =
+  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
     for
       bound  <- ZIO.fromEither(Port.make(port).left.map(_ => ProcessError.Port(port)))
       server <- Server
-        .install(served.routes, Server.Config.default.copy(host = host, port = bound))
+        .install(served.routes @@ AccessGate.http, Server.Config.default.copy(host = host, port = bound))
         .mapError(ProcessError.Server(_))
     yield server
 
@@ -71,14 +74,15 @@ object Process:
 
   /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
   private def armed[A](served: Served, gate: MilestoneGate, config: ProcessConfig)(
-      body: ZIO[Milestones & Events.Env & Scope, ProcessError, A]
+      body: ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, A]
   ): ZIO[Scope, ProcessError, A] =
     val layers =
       served.mcp.eventsLayer(
         SubscriptionStore.file(config.subscriptions.toString, config.events.ttl.maxSubscriptions)
       ) ++
         WebhookTransport.live ++
-        Milestones.live
+        Milestones.live ++
+        access(config)
     for
       env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
@@ -92,6 +96,11 @@ object Process:
           yield a
         open.provideEnvironment(env ++ scope)
     yield value
+
+  private def access(config: ProcessConfig): ULayer[AccessGate] =
+    config.access match
+      case None      => AccessGate.open
+      case Some(cfg) => ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.audience)
 
   private final case class Prepared(served: Served, shutdown: UIO[Unit])
 end Process

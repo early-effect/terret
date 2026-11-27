@@ -566,6 +566,7 @@ object McpJobsSpec extends ZIOSpecDefault:
       case _: WireEvent.ToolUpdated  => "ToolUpdated"
       case _: WireEvent.Plan         => "Plan"
       case _: WireEvent.TurnFinished => "TurnFinished"
+      case _: WireEvent.Activity     => "Activity"
 
   private def awaitEvent(queue: Queue[Message], id: String, kind: String): UIO[Unit] =
     queue.poll.flatMap {

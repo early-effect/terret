@@ -136,6 +136,47 @@ object ProcessSpec extends ZIOSpecDefault:
         chosen.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"),
       )
     },
+    test("journal limit must be positive, and access is both fields or neither") {
+      val open = ProcessConfig.load(defaults.copy(transport = None))
+      val zero = ProcessConfig.load(defaults.copy(transport = None, journalLimit = 0))
+      val half = ProcessConfig.load(
+        defaults.copy(transport = None, accessTeam = Some("example.cloudflareaccess.com"))
+      )
+      val bad = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("https://example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
+      )
+      val both = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          journalLimit = 128,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
+      )
+      val spaced = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("two words"),
+        )
+      )
+      assertTrue(
+        open.map(_.journal.limit) == Right(4096),
+        open.map(_.access) == Right(None),
+        zero == Left(ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(0))),
+        half == Left(ProcessError.Access(AccessConfigError.Incomplete)),
+        bad == Left(ProcessError.Access(AccessConfigError.Team)),
+        spaced == Left(ProcessError.Access(AccessConfigError.Audience)),
+        both.map(_.journal.limit) == Right(128),
+        both.map(_.access.map(_.team.value)) == Right(Some("example.cloudflareaccess.com")),
+        both.map(_.access.map(_.audience.value)) == Right(Some("aud")),
+        !ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(-3)).render.contains("secret"),
+      )
+    },
     test("subscriptions sit beside the pid file") {
       assertTrue(
         Subscriptions.file == Subscriptions.beside(PidFile.defaultPath),

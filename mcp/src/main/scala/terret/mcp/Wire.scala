@@ -1,7 +1,9 @@
 package terret.mcp
 
 import heddle.Schema
+import terret.activity.ActivityKind
 import terret.event.{Event, TurnOutcome}
+import terret.redact.Redact
 import terret.error.TerretError
 import terret.find.{CallError, EmbeddingProblem, FetchProblem, FindError}
 import terret.harness.{HarnessFailure, ProtocolFault}
@@ -90,16 +92,35 @@ enum WireEvent derives Schema, JsonCodec:
   case ToolUpdated(id: String, name: String, input: String)
   case Plan(steps: Chunk[String])
   case TurnFinished(outcome: WireOutcome)
+  case Activity(
+      kind: ActivityKind,
+      call: Option[String],
+      name: Option[String],
+      status: Option[String],
+      text: String,
+  )
 
 object WireEvent:
   def from(event: Event): WireEvent =
     event match
-      case Event.Assistant(text)       => Assistant(text)
-      case Event.Thought(text)         => Thought(text)
-      case Event.ToolStarted(call)     => ToolStarted(call.id.value, call.name.value, call.input.toJson)
-      case Event.ToolUpdated(call)     => ToolUpdated(call.id.value, call.name.value, call.input.toJson)
-      case Event.Plan(steps)           => Plan(steps.map(_.text))
+      case Event.Assistant(text)   => Assistant(Redact.text(text))
+      case Event.Thought(text)     => Thought(Redact.text(text))
+      case Event.ToolStarted(call) =>
+        ToolStarted(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
+      case Event.ToolUpdated(call) =>
+        ToolUpdated(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
+      case Event.Plan(steps)           => Plan(steps.map(step => Redact.text(step.text)))
       case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
+
+  def activity(note: terret.activity.ActivityNote): WireEvent =
+    Activity(
+      note.kind,
+      note.call,
+      note.name.map(Redact.text),
+      note.status,
+      Redact.text(note.text),
+    )
+end WireEvent
 
 enum JobFailure derives Schema, JsonCodec:
   case WorkspaceDenied(workspace: String, root: String)
@@ -197,6 +218,8 @@ final case class ExportJob(
     latest: Option[Int] = None,
 ) derives Schema,
       JsonCodec
+
+final case class ListedSession(session: String, state: WireState, workspace: String) derives Schema, JsonCodec
 
 final case class Opened(
     session: String,

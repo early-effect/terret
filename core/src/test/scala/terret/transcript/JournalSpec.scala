@@ -1,6 +1,7 @@
 package terret.transcript
 
 import terret.event.Event
+import terret.milestone.MilestoneSink
 import terret.session.SessionId
 import zio.test.*
 import zio.{Chunk, Queue, ZIO}
@@ -70,6 +71,25 @@ object JournalSpec extends ZIOSpecDefault:
         missing.isEmpty,
         quiet.isEmpty,
       )
+    },
+    test("past the bound the oldest entries drop and the indexes that remain do not move") {
+      JournalBound.from(2) match
+        case Left(error)  => ZIO.succeed(assertTrue(false) ?? error.toString)
+        case Right(bound) =>
+          for
+            journal <- Journal.make(MilestoneSink.discard, bound)
+            _       <- journal.open(id)
+            _       <- ZIO.foreachDiscard(0 until 4)(n => journal.append(id, say(n)))
+            page    <- journal.page(id, None)
+            tail    <- journal.page(id, Some(1))
+            dropped <- journal.page(id, Some(0))
+          yield assertTrue(
+            JournalBound.default.limit == 4096,
+            JournalBound.from(0) == Left(JournalBoundError.NonPositive(0)),
+            page == Some(Page(Chunk(Entry(2, say(2)), Entry(3, say(3))), Some(3))),
+            tail == Some(Page(Chunk(Entry(2, say(2)), Entry(3, say(3))), Some(3))),
+            dropped == tail,
+          )
     },
     test("follow after an index replays only the tail") {
       for

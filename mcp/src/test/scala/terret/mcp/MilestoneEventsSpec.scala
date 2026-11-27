@@ -4,6 +4,7 @@ import heddle.mcp.events.{Events, WebhookTransport}
 import heddle.mcp.protocol.{ClientRequest, EventName}
 import slayer.*
 import terret.Terret
+import terret.activity.ActivityKind
 import terret.config.TerretConfig
 import terret.error.TerretError
 import terret.event.{CallId, Event, ToolCall, ToolName, TurnOutcome}
@@ -55,7 +56,7 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
           session <- turn(terret)
           _       <- publisher.settled
           all     <- poll(MilestoneFilter(None, Chunk.empty), Some("0"))
-          tools   <- poll(MilestoneFilter(None, Chunk(MilestoneKind.ToolCall)), Some("0"))
+          tools   <- poll(MilestoneFilter(None, Chunk(MilestoneKind.TurnFinished)), Some("0"))
           other   <- poll(MilestoneFilter(Some("missing"), Chunk.empty), Some("0"))
           found   <- ZIO.fromEither(all)
           only    <- ZIO.fromEither(tools)
@@ -63,11 +64,10 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
         yield assertTrue(
           found.map(row => (row.kind, row.summary, row.cursor, row.at)) == Chunk(
             (MilestoneKind.TurnStarted, "started", None, when.toString),
-            (MilestoneKind.ToolCall, "Edit", Some(1), when.toString),
             (MilestoneKind.TurnFinished, "completed", Some(2), when.toString),
           ),
           found.forall(_.session == session.id.value),
-          only.map(_.summary) == Chunk("Edit"),
+          only.map(_.summary) == Chunk("completed"),
           missed.isEmpty,
         )
       }
@@ -77,9 +77,11 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
       drive(script, stubbed[Milestones]) { (terret, publisher) =>
         for
           _ <- TestClock.setTime(when)
-          _ <- stub[Milestones](_.turnStarted)(ZIO.succeed(Notice(MilestoneKind.TurnStarted, "started")))
+          _ <- stub[Milestones](_.turnStarted)(
+            ZIO.succeed(Notice(MilestoneKind.TurnStarted, "started", "turn-started"))
+          )
           _ <- stub[Milestones](_.classify(any[Event]))(
-            ZIO.succeed(Some(Notice(MilestoneKind.ToolCall, "stubbed")))
+            ZIO.succeed(Chunk(Notice(MilestoneKind.Commit, "stubbed", "stub")))
           )
           _ <- stub[Milestones](_.failed(any[HarnessFailure]))((failure: HarnessFailure) =>
             ZIO.succeed(Milestones.failed(failure))
@@ -91,15 +93,14 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
         yield assertTrue(
           found.map(row => (row.kind, row.summary)) == Chunk(
             (MilestoneKind.TurnStarted, "started"),
-            (MilestoneKind.ToolCall, "stubbed"),
-            (MilestoneKind.ToolCall, "stubbed"),
+            (MilestoneKind.Commit, "stubbed"),
           ),
           found.forall(_.session == session.id.value),
           found.forall(_.at == when.toString),
         )
       }
     },
-    test("finished output publishes a commit, a test result, and a question") {
+    test("finished output publishes a commit, a push, a pull request, and a question") {
       val question = "How should a restart keep webhook subscriptions?"
       val ask      = ToolCall(
         CallId("ask"),
@@ -115,20 +116,28 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
           "output"    -> Json.Str("[histos-0.7.1 7077bce] Pin Histos 0.7.1\n"),
         ),
       )
-      val tested = ToolCall(
-        CallId("test"),
-        ToolName("get_command_or_subagent_output"),
+      val pushed = ToolCall(
+        CallId("push"),
+        ToolName("run_terminal_command"),
         Json.Obj(
-          "type"   -> Json.Str("TaskOutput"),
-          "Result" -> Json.Obj(
-            "command"   -> Json.Str("./histos test --quick"),
-            "exit_code" -> Json.Num(0),
-            "output"    -> Json.Str("tests passed: 7 failed: 0 cached: 10 modules: 7"),
-          ),
+          "command"   -> Json.Str("git push origin main"),
+          "exit_code" -> Json.Num(0),
+          "output"    -> Json.Str("main -> main\n"),
         ),
       )
-      val script =
-        Script((_, _) => ZStream(Event.ToolStarted(ask), Event.ToolUpdated(commit), Event.ToolUpdated(tested)))
+      val url = "https://github.com/early-effect/terret/pull/28"
+      val pr  = ToolCall(
+        CallId("pr"),
+        ToolName("run_terminal_command"),
+        Json.Obj(
+          "command"   -> Json.Str("gh pr merge 28"),
+          "exit_code" -> Json.Num(0),
+          "output"    -> Json.Str(s"$url\n"),
+        ),
+      )
+      val script = Script((_, _) =>
+        ZStream(Event.ToolStarted(ask), Event.ToolUpdated(commit), Event.ToolUpdated(pushed), Event.ToolUpdated(pr))
+      )
       drive(script, Milestones.live) { (terret, publisher) =>
         for
           _       <- TestClock.setTime(when)
@@ -141,14 +150,43 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
             (MilestoneKind.TurnStarted, "started", None, when.toString),
             (MilestoneKind.WaitingOnPermission, question, Some(0), when.toString),
             (MilestoneKind.Commit, "[histos-0.7.1 7077bce] Pin Histos 0.7.1", Some(1), when.toString),
-            (
-              MilestoneKind.TestResult,
-              "tests passed: 7 failed: 0 cached: 10 modules: 7",
-              Some(2),
-              when.toString,
-            ),
+            (MilestoneKind.Push, "main -> main", Some(2), when.toString),
+            (MilestoneKind.PrState, s"merged $url", Some(3), when.toString),
           ),
           found.forall(_.session == session.id.value),
+        )
+      }
+    },
+    test("a repeated commit is one milestone, and a token in the output is redacted") {
+      val leaked = "ghp_AbcdefghijklmnopQRSTUV123456"
+      val line   = s"pin $leaked"
+      val commit = ToolCall(
+        CallId("commit"),
+        ToolName("run_terminal_command"),
+        Json.Obj(
+          "command"   -> Json.Str("git commit -m pin"),
+          "exit_code" -> Json.Num(0),
+          "output"    -> Json.Str(s"$line\n"),
+        ),
+      )
+      val script = Script((_, _) => ZStream(Event.ToolUpdated(commit), Event.ToolUpdated(commit)))
+      drive(script, Milestones.live) { (terret, publisher) =>
+        for
+          _        <- TestClock.setTime(when)
+          _        <- turn(terret)
+          _        <- publisher.settled
+          polled   <- poll(MilestoneFilter(None, Chunk.empty), Some("0"))
+          activity <- pollActivity(ActivityFilter(None, Chunk.empty), Some("0"))
+          found    <- ZIO.fromEither(polled)
+          notes    <- ZIO.fromEither(activity)
+        yield assertTrue(
+          found.map(row => (row.kind, row.summary)) == Chunk(
+            (MilestoneKind.TurnStarted, "started"),
+            (MilestoneKind.Commit, "pin [redacted]"),
+          ),
+          !found.exists(_.summary.contains("ghp_")),
+          notes.collect { case note if note.kind == ActivityKind.Output => note.text } == Chunk("pin [redacted]\n"),
+          !notes.exists(note => note.text.contains("ghp_") || note.name.exists(_.contains("ghp_"))),
         )
       }
     },
@@ -184,6 +222,21 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
       status  <- terret.status(session.id)
     yield status
 
+  private def pollActivity(
+      filter: ActivityFilter,
+      cursor: Option[String],
+  ): ZIO[Events.Env, String, Either[String, Chunk[ActivityData]]] =
+    for
+      arguments <- ZIO.fromEither(asObj(filter))
+      polled    <- ZIO.serviceWithZIO[Events] { events =>
+        events.poll(
+          None,
+          ClientRequest.PollEvents(EventName("session.activity"), arguments, cursor, None, None),
+        )
+      }
+      result <- ZIO.fromEither(polled).mapError(_.toString)
+    yield activityOf(result)
+
   private def poll(
       filter: MilestoneFilter,
       cursor: Option[String],
@@ -214,6 +267,21 @@ object MilestoneEventsSpec extends ZIOSpecDefault:
               case item: Json.Obj =>
                 item.get("data") match
                   case Some(data) => data.as[MilestoneData].map(got :+ _)
+                  case None       => Left("missing data")
+              case _ => Left("event")
+          }
+        }
+      case _ => Left(body.toJson)
+
+  private def activityOf(body: Json.Obj): Either[String, Chunk[ActivityData]] =
+    body.get("events") match
+      case Some(Json.Arr(rows)) =>
+        rows.foldLeft[Either[String, Chunk[ActivityData]]](Right(Chunk.empty)) { (acc, row) =>
+          acc.flatMap { got =>
+            row match
+              case item: Json.Obj =>
+                item.get("data") match
+                  case Some(data) => data.as[ActivityData].map(got :+ _)
                   case None       => Left("missing data")
               case _ => Left("event")
           }

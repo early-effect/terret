@@ -3,6 +3,7 @@ package terret.docs
 import heddle.mcp.events.VerificationPolicy
 import specular.*
 import terret.app.{
+  AccessConfigError,
   Listen,
   ProcessConfig,
   ProcessError,
@@ -52,10 +53,21 @@ allowlist. Empty denies every host. `example.com` grants that host. dsh stores t
 not apply it. `events.verification` is `Skip` or `Required`. The default is `Skip`, because the
 edge already rejects a request with no `x-terret-key`. `events.key` (`TERRET_EVENTS_KEY`) is optional.
 When it is set, that header must match it or the caller is not a principal. When it is unset, or
-empty, any non-empty `x-terret-key` is a principal. The id is `key:` plus the first 8 hex characters
+empty, a presented non-empty `x-terret-key` is not a principal either. An absent or blank header stays
+unauthenticated, which is how local MCP keeps working. The id is `key:` plus the first 8 hex characters
 of the SHA-256 of the key. The key is not logged. `events.floor`, `events.default`, and `events.cap`
 are the webhook TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor
 is raised, an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
+`journal.limit` (`TERRET_JOURNAL_LIMIT`) is how many events one session log keeps. The default is 4096.
+Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit
+is rejected. `access.team` and `access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`) turn
+on Cloudflare Access. Set both or neither. The team value is a hostname such as
+`example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
+When both are set, a request that carries `Cf-Access-Jwt-Assertion` must verify as RS256 against
+`https://<team>/cdn-cgi/access/certs`, for that audience, and not be expired. A request that already
+looks proxied (`CF-Connecting-IP`, `CF-Ray`, or `Cf-Access-Authenticated-User-Email`) and has no
+token is rejected. A direct client that sends none of those headers is allowed, because the HTTP
+request does not carry the peer address. Nothing in this config is a secret.
 
 `grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models
 `open` may request. Absent, that file is `~/.grok/config.toml`. An empty path is rejected. Nested
@@ -215,6 +227,22 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
         .withConfigProvider(ConfigProvider.fromMap(Map("terret.events.key" -> "")))
     }.assert { config =>
       assertTrue(config.eventsKey.isEmpty)
+    },
+    exampleValue(ProcessConfig.load(base).map(_.journal.limit)).assert { limit =>
+      assertTrue(limit == Right(4096))
+    },
+    exampleValue(ProcessConfig.load(base.copy(journalLimit = 0))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(0))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(accessTeam = Some("example.cloudflareaccess.com")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Incomplete)))
+    },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(accessTeam = Some("example.cloudflareaccess.com"), accessAudience = Some("aud"))
+      )
+    ).assert { loaded =>
+      assertTrue(loaded.map(_.access.map(_.audience.value)) == Right(Some("aud")))
     },
     exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
       assertTrue(supervisor == Right(SupervisorChoice.None))

@@ -13,7 +13,7 @@ import terret.session.{Session, SessionId, SessionState}
 import terret.transcript.{Entry, Page, Transcript}
 import terret.workspace.Workspace
 import zio.stream.ZStream
-import zio.{Exit, Fiber, IO, Ref, Scope, UIO, URIO, ZIO, ZLayer}
+import zio.{Chunk, Exit, Fiber, IO, Ref, Scope, UIO, URIO, ZIO, ZLayer}
 
 final class Terret private (
     harness: Harness,
@@ -91,6 +91,12 @@ final class Terret private (
 
   def status(id: SessionId): IO[TerretError, Session] =
     require(id)
+
+  /** Sessions this process still holds, with the state of each one. */
+  def list: UIO[Chunk[Session]] =
+    sessions.get.map { rows =>
+      Chunk.fromIterable(rows.values.map(_.session)).sortBy(_.id.value)
+    }
 
   def cancel(id: SessionId): IO[TerretError, Unit] =
     require(id) *> halt(id).mapError(TerretError.Harness(_))

@@ -32,7 +32,9 @@ object TerretSpec extends ZIOSpecDefault:
           replayed                  <- terret.resume(session.id).runCollect
           seen                      <- calls.get
           cancelled                 <- memory.cancelled
+          held                      <- terret.list
         yield assertTrue(
+          held.map(_.id) == Chunk(session.id),
           streamed == Chunk(
             Event.Assistant("hello"),
             Event.ToolStarted(readCall),
