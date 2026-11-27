@@ -10,7 +10,6 @@ import terret.memory.{InMemory, Script}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.prompt.Prompt
 import terret.session.{Session, SessionId, SessionState}
-import terret.transcript.Entry
 import terret.workspace.Workspace
 import zio.json.ast.Json
 import zio.stream.ZStream
@@ -32,7 +31,9 @@ object TerretSpec extends ZIOSpecDefault:
           replayed                  <- terret.resume(session.id).runCollect
           seen                      <- calls.get
           cancelled                 <- memory.cancelled
+          held                      <- terret.list
         yield assertTrue(
+          held.map(_.id) == Chunk(session.id),
           streamed == Chunk(
             Event.Assistant("hello"),
             Event.ToolStarted(readCall),
@@ -310,7 +311,7 @@ object TerretSpec extends ZIOSpecDefault:
           page                      <- terret.page(session.id, None)
           cancelled                 <- memory.cancelled
         yield assertTrue(
-          got == Chunk(Entry(0, Event.Assistant("held"))),
+          got.map(entry => (entry.index, entry.turn, entry.event)) == Chunk((0L, 1L, Event.Assistant("held"))),
           page.events == got,
           page.cursor.contains(0L),
           cancelled.contains(session.id),

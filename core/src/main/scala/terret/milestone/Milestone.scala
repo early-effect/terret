@@ -10,21 +10,21 @@ import zio.{Chunk, Ref, UIO, ULayer, ZIO, ZLayer}
 import java.math.BigDecimal
 import java.time.Instant
 
-/** What a progress notification can name. A tool start is a tool call, except `ask_user_question`, which waits on
-  * permission. A commit or a test result comes from finished tool output: `git commit` that exited 0, or a test command
-  * whose output reports tests passed or failed. Streamed text is not a milestone.
+/** What Rex is told. A tool start is not a milestone, except `ask_user_question`, which waits on permission. A commit,
+  * a push, or a pull-request state comes from finished tool output. A test line is activity, not a milestone. Streamed
+  * text is not a milestone. `key` is stable for the same fact, so a repeated frame does not ping again.
   */
 enum MilestoneKind:
   case TurnStarted
   case TurnFinished
-  case ToolCall
   case Commit
-  case TestResult
+  case Push
+  case PrState
   case Error
   case WaitingOnPermission
 
-/** A classified journal event: the kind and the short text a notification carries. */
-final case class Notice(kind: MilestoneKind, summary: String)
+/** A classified journal event: the kind, the short text a notification carries, and the dedupe key. */
+final case class Notice(kind: MilestoneKind, summary: String, key: String)
 
 /** One published milestone. `cursor` is the journal index, or nothing when the log is empty. */
 final case class Milestone(
@@ -37,7 +37,7 @@ final case class Milestone(
 
 /** The classification export and the MCP event share. The match is pure. The service is the seam. */
 trait Milestones:
-  def classify(event: Event): UIO[Option[Notice]]
+  def classify(event: Event): UIO[Chunk[Notice]]
   def turnStarted: UIO[Notice]
   def failed(failure: HarnessFailure): UIO[Notice]
 
@@ -47,26 +47,30 @@ object Milestones:
   private val Ask = "ask_user_question"
 
   val live: ULayer[Milestones] = ZLayer.succeed(new:
-    def classify(event: Event): UIO[Option[Notice]]  = ZIO.succeed(Milestones.classify(event))
+    def classify(event: Event): UIO[Chunk[Notice]]   = ZIO.succeed(Milestones.classify(event))
     def turnStarted: UIO[Notice]                     = ZIO.succeed(Milestones.turnStarted)
     def failed(failure: HarnessFailure): UIO[Notice] = ZIO.succeed(Milestones.failed(failure)))
 
-  def classify(event: Event): Option[Notice] =
+  def classify(event: Event): Chunk[Notice] =
     event match
-      case Event.Assistant(_)                                => None
-      case Event.Thought(_)                                  => None
-      case Event.Plan(_)                                     => None
+      case Event.Assistant(_)                                => Chunk.empty
+      case Event.Thought(_)                                  => Chunk.empty
+      case Event.Plan(_)                                     => Chunk.empty
       case Event.ToolStarted(call) if call.name.value == Ask =>
-        Some(Notice(MilestoneKind.WaitingOnPermission, clip(Finished.question(call.input, call.name.value))))
-      case Event.ToolStarted(call)                   => Some(Notice(MilestoneKind.ToolCall, clip(call.name.value)))
-      case Event.ToolUpdated(call)                   => Finished.notice(call.input)
-      case Event.TurnFinished(TurnOutcome.Completed) => Some(Notice(MilestoneKind.TurnFinished, "completed"))
-      case Event.TurnFinished(TurnOutcome.Cancelled) => Some(Notice(MilestoneKind.TurnFinished, "cancelled"))
-      case Event.TurnFinished(TurnOutcome.Failed(failure)) => Some(Notice(MilestoneKind.Error, clip(label(failure))))
+        val summary = clip(Finished.question(call.input, call.name.value))
+        Chunk(Notice(MilestoneKind.WaitingOnPermission, summary, s"wait:${call.id.value}"))
+      case Event.ToolStarted(_)                      => Chunk.empty
+      case Event.ToolUpdated(call)                   => Chunk.fromIterable(Finished.notices(call.input))
+      case Event.TurnFinished(TurnOutcome.Completed) =>
+        Chunk(Notice(MilestoneKind.TurnFinished, "completed", "turn-finished:completed"))
+      case Event.TurnFinished(TurnOutcome.Cancelled) =>
+        Chunk(Notice(MilestoneKind.TurnFinished, "cancelled", "turn-finished:cancelled"))
+      case Event.TurnFinished(TurnOutcome.Failed(failure)) =>
+        Chunk(Notice(MilestoneKind.Error, clip(label(failure)), "error"))
 
-  def turnStarted: Notice = Notice(MilestoneKind.TurnStarted, "started")
+  def turnStarted: Notice = Notice(MilestoneKind.TurnStarted, "started", "turn-started")
 
-  def failed(failure: HarnessFailure): Notice = Notice(MilestoneKind.Error, clip(label(failure)))
+  def failed(failure: HarnessFailure): Notice = Notice(MilestoneKind.Error, clip(label(failure)), "error")
 
   def milestone(id: SessionId, notice: Notice, cursor: Option[Long], at: Instant): Milestone =
     Milestone(id.value, notice.kind, notice.summary, cursor, at)
@@ -92,9 +96,9 @@ object Milestones:
   def latest(entries: Chunk[Entry], n: Option[Int]): Chunk[Entry] =
     n.fold(entries)(entries.takeRight)
 
-  /** A finished shell result. Commit and test evidence have to sit on one object: a command and its output. */
+  /** A finished shell result. Commit, push, and pull-request evidence sit on one object: a command and its output. */
   private object Finished:
-    private val Runners = Set("histos", "sbt", "mill", "cargo", "npm", "pnpm", "yarn", "go")
+    private val Pull = """https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+""".r
 
     private enum Exit:
       case Missing
@@ -117,15 +121,33 @@ object Milestones:
             case _ => fallback
         case _ => fallback
 
-    def notice(json: Json): Option[Notice] =
+    def notices(json: Json): List[Notice] =
       val found = terminals(json)
-      found.find(committed) match
-        case Some(terminal) => Some(Notice(MilestoneKind.Commit, clip(firstLine(terminal.output))))
-        case None           =>
-          val reports = found.flatMap { terminal =>
-            if tested(terminal) then report(terminal.output) else None
-          }
-          reports.lastOption.map(line => Notice(MilestoneKind.TestResult, clip(line)))
+      found.filter(committed).map(commitOf) ++ found.filter(pushed).map(pushOf) ++ found.flatMap(prOf)
+
+    private def commitOf(terminal: Terminal): Notice =
+      val line = firstLine(terminal.output)
+      Notice(MilestoneKind.Commit, clip(line), s"commit:${clip(line)}")
+
+    private def pushOf(terminal: Terminal): Notice =
+      val line = firstLine(terminal.output)
+      Notice(MilestoneKind.Push, clip(line), s"push:${clip(line)}")
+
+    private def prOf(terminal: Terminal): List[Notice] =
+      if !succeeded(terminal.exit) || !segments(terminal.command).exists(isGhPr) then Nil
+      else
+        val state = prState(terminal.command, terminal.output)
+        val urls  = pullUrls(terminal.output)
+        if urls.nonEmpty then urls.map(url => prNote(state, url))
+        else
+          val line = firstLine(terminal.output)
+          if line.isEmpty then Nil else List(prNote(state, line))
+
+    private def prNote(state: String, body: String): Notice =
+      Notice(MilestoneKind.PrState, clip(s"$state $body"), s"pr:${clip(body)}:$state")
+
+    private def pullUrls(output: String): List[String] =
+      Pull.findAllMatchIn(output).map(_.matched).toList.distinct
 
     private def terminals(json: Json): List[Terminal] =
       json match
@@ -146,8 +168,8 @@ object Milestones:
     private def committed(terminal: Terminal): Boolean =
       succeeded(terminal.exit) && segments(terminal.command).exists(isCommit) && firstLine(terminal.output).nonEmpty
 
-    private def tested(terminal: Terminal): Boolean =
-      segments(terminal.command).exists(isTest)
+    private def pushed(terminal: Terminal): Boolean =
+      succeeded(terminal.exit) && segments(terminal.command).exists(isPush) && firstLine(terminal.output).nonEmpty
 
     private def succeeded(exit: Exit): Boolean =
       exit match
@@ -164,12 +186,37 @@ object Milestones:
             case _                => false
         case _ => false
 
-    private def isTest(words: List[String]): Boolean =
+    private def isPush(words: List[String]): Boolean =
       words.dropWhile(assignment) match
-        case program :: args =>
-          val base = basename(program)
-          base == "pytest" || (Runners.contains(base) && positional(args).contains("test"))
-        case Nil => false
+        case program :: args if basename(program) == "git" =>
+          after(args) match
+            case "push" :: tail => !tail.contains("--dry-run") && !tail.contains("-n")
+            case _              => false
+        case _ => false
+
+    private def isGhPr(words: List[String]): Boolean =
+      words.dropWhile(assignment) match
+        case program :: "pr" :: _ if basename(program) == "gh" => true
+        case _                                                 => false
+
+    private def prState(command: String, output: String): String =
+      val named = segments(command).collectFirst {
+        case words if isGhPr(words) =>
+          words.dropWhile(assignment) match
+            case _ :: "pr" :: "merge" :: _  => "merged"
+            case _ :: "pr" :: "close" :: _  => "closed"
+            case _ :: "pr" :: "reopen" :: _ => "open"
+            case _ :: "pr" :: "ready" :: _  => "open"
+            case _ :: "pr" :: "create" :: _ => "open"
+            case _                          => viewed(output)
+      }
+      named.getOrElse(viewed(output))
+
+    private def viewed(output: String): String =
+      if output.contains("\"MERGED\"") || output.contains(" MERGED") then "merged"
+      else if output.contains("\"CLOSED\"") || output.contains(" CLOSED") then "closed"
+      else if output.contains("\"OPEN\"") || output.contains(" OPEN") then "open"
+      else "seen"
 
     private def after(args: List[String]): List[String] =
       args match
@@ -178,13 +225,6 @@ object Milestones:
         case "-c" :: _ :: rest                    => after(rest)
         case flag :: rest if flag.startsWith("-") => after(rest)
         case other                                => other
-
-    private def positional(args: List[String]): Option[String] =
-      args match
-        case "--" :: name :: _                    => Some(name)
-        case flag :: rest if flag.startsWith("-") => positional(rest)
-        case name :: _                            => Some(name)
-        case Nil                                  => None
 
     private def assignment(token: String): Boolean =
       val split = token.indexOf('=')
@@ -270,9 +310,6 @@ object Milestones:
 
     private def firstLine(output: String): String =
       lines(output).headOption.getOrElse("")
-
-    private def report(output: String): Option[String] =
-      lines(output).filter(line => line.contains("tests passed") || line.contains("tests failed")).lastOption
 
     private def text(obj: Json.Obj, name: String): Option[String] =
       obj.fields.collectFirst { case (key, Json.Str(value)) if key == name => value }

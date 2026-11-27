@@ -287,6 +287,9 @@ object McpJobsSpec extends ZIOSpecDefault:
             _      <- caught.await
             bad    <- supply(served.mcp)(served.routes(Request.get(s"/sessions/$id/events?after=-1")))
               .mapError(Fail.Http(_))
+            badId <- supply(served.mcp)(
+              served.routes(Request.get(s"/sessions/$id/events").withHeader("Last-Event-ID", "-1"))
+            ).mapError(Fail.Http(_))
             denied <- bad.body.utf8
               .mapError(Fail.Failed(_))
               .timeoutFail(Fail.Decode("the bad-cursor body did not end"))(5.seconds)
@@ -295,8 +298,13 @@ object McpJobsSpec extends ZIOSpecDefault:
                 res   <- supply(served.mcp)(served.routes(Request.get(s"/sessions/$id/events"))).mapError(Fail.Http(_))
                 queue <- wireEvents(res)
                 _     <- awaitWire(queue, "0", "ToolStarted")
+                resumed <- supply(served.mcp)(
+                  served.routes(Request.get(s"/sessions/$id/events").withHeader("Last-Event-ID", "0"))
+                ).mapError(Fail.Http(_))
+                later <- wireEvents(resumed)
                 _     <- release.succeed(())
                 _     <- awaitWire(queue, "1", "ToolUpdated")
+                _     <- awaitFirst(later, "1", "ToolUpdated")
               yield res
             }
             mid   <- memory.cancelled
@@ -306,6 +314,7 @@ object McpJobsSpec extends ZIOSpecDefault:
             later <- memory.cancelled
           yield assertTrue(
             bad.status == Status.BadRequest,
+            badId.status == Status.BadRequest,
             !bad.headers.contentType.exists(_.isEventStream),
             denied.contains("BadCursor"),
             streamed.status == Status.Ok,
@@ -544,6 +553,21 @@ object McpJobsSpec extends ZIOSpecDefault:
         .forkScoped
     yield queue
 
+  private def awaitFirst(
+      queue: Queue[Either[String, (String, WireEvent)]],
+      id: String,
+      kind: String,
+  ): ZIO[Any, Fail, Unit] =
+    def go: ZIO[Any, Fail, Unit] =
+      queue.poll.flatMap {
+        case Some(Left(detail))                                                  => ZIO.fail(Fail.Decode(detail))
+        case Some(Right(found -> wire)) if found == id && wireKind(wire) == kind => ZIO.unit
+        case Some(Right(found -> wire))                                          =>
+          ZIO.fail(Fail.Decode(s"first event was ${wireKind(wire)} id $found"))
+        case None => ZIO.yieldNow *> go
+      }
+    go.timeoutFail(Fail.Decode(s"no first $kind event id $id"))(5.seconds)
+
   private def awaitWire(
       queue: Queue[Either[String, (String, WireEvent)]],
       id: String,
@@ -566,6 +590,7 @@ object McpJobsSpec extends ZIOSpecDefault:
       case _: WireEvent.ToolUpdated  => "ToolUpdated"
       case _: WireEvent.Plan         => "Plan"
       case _: WireEvent.TurnFinished => "TurnFinished"
+      case _: WireEvent.Activity     => "Activity"
 
   private def awaitEvent(queue: Queue[Message], id: String, kind: String): UIO[Unit] =
     queue.poll.flatMap {

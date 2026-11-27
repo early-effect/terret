@@ -136,6 +136,59 @@ object ProcessSpec extends ZIOSpecDefault:
         chosen.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"),
       )
     },
+    test("journal limit must be positive, and access is both fields or neither") {
+      val open = ProcessConfig.load(defaults.copy(transport = None))
+      val zero = ProcessConfig.load(defaults.copy(transport = None, journalLimit = 0))
+      val half = ProcessConfig.load(
+        defaults.copy(transport = None, accessTeam = Some("example.cloudflareaccess.com"))
+      )
+      val bad = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("https://example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
+      )
+      val both = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          journalLimit = 128,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
+      )
+      val spaced = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("two words"),
+        )
+      )
+      assertTrue(
+        open.map(_.journal.limit) == Right(4096),
+        open.map(_.access) == Right(None),
+        zero == Left(ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(0))),
+        half == Left(ProcessError.Access(AccessConfigError.Incomplete)),
+        bad == Left(ProcessError.Access(AccessConfigError.Team)),
+        spaced == Left(ProcessError.Access(AccessConfigError.Audience)),
+        both.map(_.journal.limit) == Right(128),
+        both.map(_.access.map(_.team.value)) == Right(Some("example.cloudflareaccess.com")),
+        both.map(_.access.map(_.audience.value)) == Right(Some("aud")),
+        both.map(_.access.map(_.port)) == Right(Some(AccessConfig.TunnelPort)),
+        ProcessConfig
+          .load(
+            defaults.copy(
+              transport = None,
+              accessTeam = Some("example.cloudflareaccess.com"),
+              accessAudience = Some("aud"),
+              accessPort = Some(8080),
+            )
+          )
+          .left
+          .exists(_.render.contains("8080")),
+        !ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(-3)).render.contains("secret"),
+      )
+    },
     test("subscriptions sit beside the pid file") {
       assertTrue(
         Subscriptions.file == Subscriptions.beside(PidFile.defaultPath),
@@ -173,6 +226,36 @@ object ProcessSpec extends ZIOSpecDefault:
         yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel", "find", "call")))
       }
     },
+    test("the local listener stays open and the tunnel listener requires a JWT") {
+      ZIO.scoped {
+        for
+          memory <- InMemory.make(Script.echo)
+          dir    <- ZIO.acquireRelease(
+            ZIO.attempt {
+              val root = Path.of("target")
+              Files.createDirectories(root)
+              Files.createTempDirectory(root, "process-subscriptions")
+            }
+          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          tunnel <- freePort
+          access <- ZIO.fromEither(tunnelAccess(tunnel))
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+            access = Some(access),
+          )
+          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          local  <- server.port
+          open   <- sessions(local)
+          denied <- sessions(tunnel)
+        yield assertTrue(
+          open.status == 200,
+          open.body.contains("["),
+          denied.status == 401,
+          denied.body.contains("access denied"),
+        )
+      }
+    },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
 
   private def endpoint(doc: Json): Option[Json] =
@@ -203,6 +286,40 @@ object ProcessSpec extends ZIOSpecDefault:
     bindPort = None,
     bindSecret = None,
   )
+
+  private def tunnelAccess(port: Int): Either[ProcessError, AccessConfig] =
+    for
+      team <- TeamHost.from("example.cloudflareaccess.com").left.map(ProcessError.Access(_))
+      tag  <- Audience.from("aud").left.map(ProcessError.Access(_))
+    yield AccessConfig(team, tag, port)
+
+  private def freePort: ZIO[Any, Throwable, Int] =
+    ZIO.attempt {
+      val socket = new java.net.ServerSocket(0)
+      val port   = socket.getLocalPort
+      socket.close()
+      port
+    }
+
+  private final case class HttpText(status: Int, body: String)
+
+  private def sessions(port: Int): ZIO[Any, Throwable, HttpText] =
+    ZIO.scoped {
+      ZIO
+        .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
+        .flatMap { client =>
+          ZIO.attemptBlocking {
+            val request = HttpRequest
+              .newBuilder(URI.create(s"http://127.0.0.1:$port/sessions"))
+              .header("Accept", "application/json")
+              .header("CF-Connecting-IP", "203.0.113.4")
+              .GET()
+              .build()
+            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+            HttpText(response.statusCode(), Option(response.body()).getOrElse(""))
+          }
+        }
+    }
 
   private def listed(port: Int): ZIO[Any, Throwable, Either[String, Set[String]]] =
     ZIO.scoped:

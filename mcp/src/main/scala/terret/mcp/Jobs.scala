@@ -2,22 +2,26 @@ package terret.mcp
 
 import heddle.*
 import terret.Terret
+import terret.activity.{Activity, ActivityEvent, ActivityMemory, ActivityNote}
 import terret.find.{Enable, FindHint, FindResult, ToolRef}
 import terret.milestone.Milestones
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
 import terret.session.{SessionId, SessionIdError}
+import terret.event.Event
 import terret.transcript.Entry
 import terret.workspace.Workspace
 import zio.json.*
 import zio.json.ast.Json
 import zio.stream.ZStream
-import zio.{Chunk, IO, ZIO}
+import zio.{Chunk, IO, UIO, ZIO}
 
 private[mcp] object Jobs:
   def api(terret: Terret, version: String, tools: ToolSurface): Api[Milestones] =
     Api(TerretMcp.name, version, Some(TerretMcp.summary))
       .job(open)(openSession(terret, _))
+      // job promotes. resource keeps GET /sessions on HTTP and off tools/list.
+      .resource(list)(_ => listed(terret))
       .job(run)(runTurn(terret, _))
       .job(status)(reported(terret, _))
       .job(resume)(replay(terret, _))
@@ -61,6 +65,12 @@ private[mcp] object Jobs:
       .summary(openSummary)
       .mcp("open")
 
+  private val list =
+    fallible(Endpoint.get("sessions").out[Chunk[ListedSession]])
+      .name("list")
+      .summary("List the sessions this process holds, with the state of each one.")
+      .hints(Hint.ReadOnly, Hint.Idempotent)
+
   private val runSummary =
     "Accept a prompt and start the turn. Returns when the turn is running, not when it finishes. " +
       "The turn keeps going if this call is cancelled. Poll status until the state is Ended, then export for the log. " +
@@ -99,11 +109,17 @@ private[mcp] object Jobs:
       .mcp("export")
 
   private val followSummary =
-    "Stream the retained log from the start, or strictly after an index. The event id is that index. " +
+    "Stream the retained log from the start, or strictly after an index. The SSE id is that index. " +
+      "Last-Event-ID and after are exclusive, and Last-Event-ID wins when both are set. " +
       "Dropping the stream does not stop the turn."
 
   private val follow =
-    fallible(Endpoint.get("sessions" / string("session") / "events").query[Option[Long]]("after"))
+    fallible(
+      Endpoint
+        .get("sessions" / string("session") / "events")
+        .query[Option[Long]]("after")
+        .header[Option[Long]]("Last-Event-ID")
+    )
       .name("follow")
       .summary(followSummary)
       .stream[WireEvent]
@@ -165,6 +181,11 @@ private[mcp] object Jobs:
       case Enable.AddGrant(entry)      => WireEnable.AddGrant(entry)
       case Enable.DefineServer(server) => WireEnable.DefineServer(server.value)
 
+  private def listed(terret: Terret): UIO[Chunk[ListedSession]] =
+    terret.list.map(_.map { session =>
+      ListedSession(session.id.value, WireState.from(session.state), session.workspace.path.toString)
+    })
+
   private def openSession(terret: Terret, job: OpenJob): IO[JobFailure, Opened] =
     for
       workspace <- workspaceOf(job.workspace)
@@ -213,16 +234,24 @@ private[mcp] object Jobs:
 
   private def followed(
       terret: Terret,
-      in: (String, Option[Long]),
+      in: (String, Option[Long], Option[Long]),
   ): IO[JobFailure, ZStream[Any, JobFailure, Observed[WireEvent]]] =
-    val (raw, after) = in
+    val (raw, after, last) = in
+    val cursor             = last.orElse(after)
     for
-      _  <- bounded(after)
+      _  <- bounded(cursor)
       id <- sessionOf(raw)
       _  <- terret.status(id).mapError(JobFailure.from)
-    yield terret.follow(id, after).mapError(JobFailure.from).map { entry =>
-      Observed(SseField.of(entry.index), WireEvent.from(entry.event))
-    }
+    yield terret
+      .follow(id, cursor)
+      .mapError(JobFailure.from)
+      .mapAccum(ActivityMemory.empty) { (memory, entry) =>
+        val (next, notes) = Activity.step(memory, entry.event)
+        val placed        = Activity.place(entry.index, entry.turn, entry.at, notes)
+        val frames        = liveFrames(entry, notes, placed).map(wire => Observed(SseField.of(entry.index), wire))
+        (next, frames)
+      }
+      .flatMap(ZStream.fromChunk)
 
   private def bounded(after: Option[Long]): IO[JobFailure, Unit] =
     after match
@@ -243,14 +272,24 @@ private[mcp] object Jobs:
       if milestones then
         ZIO.serviceWithZIO[Milestones] { service =>
           ZIO.foldLeft(entries)(Chunk.empty[Entry]) { (kept, entry) =>
-            service.classify(entry.event).map {
-              case Some(_) => kept :+ entry
-              case None    => kept
+            service.classify(entry.event).map { notes =>
+              if notes.nonEmpty then kept :+ entry else kept
             }
           }
         }
       else ZIO.succeed(entries)
     chosen.map(rows => Milestones.latest(rows, latest))
+
+  private def liveFrames(
+      entry: Entry,
+      notes: Chunk[ActivityNote],
+      placed: Chunk[ActivityEvent],
+  ): Chunk[WireEvent] =
+    val log = entry.event match
+      case updated: Event.ToolUpdated =>
+        Activity.wireUpdate(updated, notes).fold(Chunk.empty[WireEvent])(event => Chunk(WireEvent.from(event)))
+      case other => Chunk(WireEvent.from(other))
+    log ++ placed.map(WireEvent.activity)
 
   private def cursor(length: Int): Option[Long] =
     if length == 0 then None else Some(length.toLong - 1)

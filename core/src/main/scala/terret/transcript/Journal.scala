@@ -4,23 +4,33 @@ import terret.event.Event
 import terret.milestone.MilestoneSink
 import terret.session.SessionId
 import zio.stream.ZStream
-import zio.{Chunk, Hub, Ref, Semaphore, UIO, ZIO}
+import zio.{Chunk, Clock, Hub, Ref, Semaphore, UIO, ZIO}
 
-/** One retained event. `index` is stable: the next listen passes it back as `after`. */
-final case class Entry(index: Long, event: Event)
+import java.time.Instant
+
+/** One retained event. `index` is the listen cursor. `turn` is the epoch last marked for the session. `at` is when the
+  * entry was appended.
+  */
+final case class Entry(index: Long, event: Event, turn: Long = 0L, at: Instant = Instant.EPOCH)
 
 /** A page of the log. `cursor` is the last retained index, or nothing when the log is empty. */
 final case class Page(events: Chunk[Entry], cursor: Option[Long])
 
-/** The session log. Append is the only writer, so a flushed text run and a live emit share one index. */
-final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: MilestoneSink):
+/** The session log. Append is the only writer, so a flushed text run and a live emit share one index. The log stays in
+  * memory for the harness scope. Past the bound, the oldest entries drop and the indexes that remain do not move.
+  */
+final class Journal private (
+    slots: Ref[Map[SessionId, Journal.Slot]],
+    sink: MilestoneSink,
+    bound: JournalBound,
+):
   def open(id: SessionId): UIO[Unit] =
     for
       hub  <- Hub.unbounded[Entry]
       lock <- Semaphore.make(1)
       won  <- slots.modify { rows =>
         if rows.contains(id) then (false, rows)
-        else (true, rows.updated(id, Journal.Slot(Chunk.empty, hub, lock)))
+        else (true, rows.updated(id, Journal.Slot(Chunk.empty, 0L, 0L, hub, lock)))
       }
       _ <- if won then ZIO.unit else hub.shutdown.unit
     yield ()
@@ -31,24 +41,36 @@ final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: Mil
         case None       => ZIO.unit
         case Some(slot) =>
           slot.lock.withPermit {
-            slots
-              .modify { current =>
-                current.get(id) match
-                  case None        => (None, current)
-                  case Some(found) =>
-                    val entry = Entry(found.events.length.toLong, event)
-                    (Some(found.hub -> entry), current.updated(id, found.copy(events = found.events :+ event)))
-              }
-              .flatMap {
-                case None => ZIO.unit
-                // The offer stays inside the permit so it cannot pass the index. Publish runs later, outside it.
-                case Some(hub -> item) => hub.publish(item) *> sink.appended(id, item)
-              }
+            Clock.instant.flatMap { at =>
+              slots
+                .modify { current =>
+                  current.get(id) match
+                    case None        => (None, current)
+                    case Some(found) =>
+                      val entry = Entry(found.next, event, found.turn, at)
+                      val kept  = Journal.keep(found.events :+ entry, bound.limit)
+                      val next  = found.copy(events = kept, next = found.next + 1L)
+                      (Some(found.hub -> entry), current.updated(id, next))
+                }
+                .flatMap {
+                  case None => ZIO.unit
+                  // The offer stays inside the permit so it cannot pass the index. Publish runs later, outside it.
+                  case Some(hub -> item) => hub.publish(item) *> sink.appended(id, item)
+                }
+            }
           }
     }
 
+  /** Later appends carry `turn` until the next mark. A session that is not open is left alone. */
+  def mark(id: SessionId, turn: Long): UIO[Unit] =
+    slots.update { rows =>
+      rows.get(id) match
+        case None       => rows
+        case Some(slot) => rows.updated(id, slot.copy(turn = turn))
+    }
+
   def events(id: SessionId): UIO[Chunk[Event]] =
-    slots.get.map(_.get(id).fold(Chunk.empty[Event])(_.events))
+    slots.get.map(_.get(id).fold(Chunk.empty[Event])(_.events.map(_.event)))
 
   def isEmpty(id: SessionId): UIO[Boolean] =
     events(id).map(_.isEmpty)
@@ -57,7 +79,7 @@ final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: Mil
   def page(id: SessionId, after: Option[Long]): UIO[Option[Page]] =
     slots.get.map { rows =>
       rows.get(id).map { slot =>
-        val cursor = Journal.cursor(slot.events.length.toLong)
+        val cursor = Journal.cursor(slot.events)
         Page(Journal.select(slot.events, Journal.floor(after, cursor)), cursor)
       }
     }
@@ -71,12 +93,12 @@ final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: Mil
           case Some(slot) =>
             slot.hub.subscribe.flatMap { queue =>
               slots.get.map { current =>
-                val retained = current.get(id).fold(Chunk.empty[Event])(_.events)
-                val length   = retained.length.toLong
-                val start    = Journal.floor(after, Journal.cursor(length))
+                val retained = current.get(id).fold(Chunk.empty[Entry])(_.events)
+                val next     = current.get(id).fold(0L)(_.next)
+                val start    = Journal.floor(after, Journal.cursor(retained))
                 val replay   = Journal.select(retained, start)
                 val live     = ZStream.fromQueue(queue).filter { entry =>
-                  entry.index >= length && entry.index > start
+                  entry.index >= next && entry.index > start
                 }
                 ZStream.fromChunk(replay) ++ live
               }
@@ -86,15 +108,21 @@ final class Journal private (slots: Ref[Map[SessionId, Journal.Slot]], sink: Mil
 end Journal
 
 object Journal:
-  private final case class Slot(events: Chunk[Event], hub: Hub[Entry], lock: Semaphore)
+  private final case class Slot(events: Chunk[Entry], next: Long, turn: Long, hub: Hub[Entry], lock: Semaphore)
 
   def make: UIO[Journal] = make(MilestoneSink.discard)
 
-  def make(sink: MilestoneSink): UIO[Journal] =
-    Ref.make(Map.empty[SessionId, Slot]).map(Journal(_, sink))
+  def make(sink: MilestoneSink): UIO[Journal] = make(sink, JournalBound.default)
 
-  private def cursor(length: Long): Option[Long] =
-    if length == 0 then None else Some(length - 1)
+  def make(sink: MilestoneSink, bound: JournalBound): UIO[Journal] =
+    Ref.make(Map.empty[SessionId, Slot]).map(Journal(_, sink, bound))
+
+  private def keep(events: Chunk[Entry], limit: Int): Chunk[Entry] =
+    val extra = events.length - limit
+    if extra > 0 then events.drop(extra) else events
+
+  private def cursor(events: Chunk[Entry]): Option[Long] =
+    events.lastOption.map(_.index)
 
   /** A missing or negative cursor reads from the start. The job edge rejects a negative before this runs. */
   private def floor(after: Option[Long], cursor: Option[Long]): Long =
@@ -102,8 +130,6 @@ object Journal:
       case Some(n) if n >= 0 => cursor.fold(-1L)(end => math.min(n, end))
       case _                 => -1L
 
-  private def select(events: Chunk[Event], start: Long): Chunk[Entry] =
-    events.zipWithIndex.collect {
-      case (event, index) if index.toLong > start => Entry(index.toLong, event)
-    }
+  private def select(events: Chunk[Entry], start: Long): Chunk[Entry] =
+    events.filter(_.index > start)
 end Journal

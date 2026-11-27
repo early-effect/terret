@@ -4,6 +4,7 @@ import heddle.LinePipe
 import terret.event.{Event, ToolName, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
+import terret.transcript.JournalBound
 import terret.model.ModelKey
 import terret.permission.{Ceiling, PermissionPolicy}
 import terret.prompt.Prompt
@@ -63,6 +64,9 @@ final class GrokHarness private (
 
   def transcript(id: SessionId): IO[HarnessFailure, Transcript] =
     require(id) *> journal.events(id).map(Transcript(id, _))
+
+  def markTurn(id: SessionId, turn: Long): UIO[Unit] =
+    journal.mark(id, turn)
 
   def follow(id: SessionId, after: Option[Long]): ZStream[Any, HarnessFailure, Entry] =
     ZStream.unwrap(require(id).as(journal.follow(id, after)))
@@ -346,12 +350,13 @@ object GrokHarness:
       catalog: McpCatalog = McpCatalog.empty,
       hosts: HostAllowlist = HostAllowlist.closed,
       milestones: MilestoneSink = MilestoneSink.discard,
+      journalBound: JournalBound = JournalBound.default,
   ): ZIO[Scope, Nothing, GrokHarness] =
     for
       scope    <- ZIO.scope
       sessions <- Ref.make(Map.empty[SessionId, Slot])
       gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-      journal  <- Journal.make(milestones)
+      journal  <- Journal.make(milestones, journalBound)
       harness = GrokHarness(
         config,
         spawner,
@@ -375,13 +380,24 @@ object GrokHarness:
       catalog: McpCatalog = McpCatalog.live,
       network: NetworkPolicy = NetworkPolicy.empty,
       milestones: MilestoneSink = MilestoneSink.discard,
+      journal: JournalBound = JournalBound.default,
   ): ZLayer[Scope, Nothing, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer
     (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
       for
         acp     <- ZIO.service[AcpOpen]
         spawner <- ZIO.service[Spawner]
-        harness <- make(config, spawner, acp, writeRoots, mcp, catalog, HostAllowlist.fixed(network), milestones)
+        harness <- make(
+          config,
+          spawner,
+          acp,
+          writeRoots,
+          mcp,
+          catalog,
+          HostAllowlist.fixed(network),
+          milestones,
+          journal,
+        )
       yield harness: Harness
     }
 end GrokHarness

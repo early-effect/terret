@@ -43,6 +43,11 @@ object TerretMcp:
           .instructions(summary)
           .event[MilestoneFilter, MilestoneData]("session.milestone", "A session milestone")
           .pollAndWebhook(MilestoneEvents.accept)
+          .flatMap { milestones =>
+            milestones
+              .event[ActivityFilter, ActivityData]("session.activity", "Fine-grained session activity")
+              .pollAndWebhook(ActivityEvents.accept)
+          }
           .left
           .map(TerretMcpError.Rejected(_))
           .map { declared =>

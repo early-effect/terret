@@ -53,7 +53,7 @@ object EventsKeySpec extends ZIOSpecDefault:
         EventsKey.from("abd") != configured,
       )
     },
-    test("an unset key accepts any non-empty header and nobody otherwise") {
+    test("an unset key accepts nobody, including a non-empty header") {
       val headers = Headers.empty
       for
         named  <- EventsKey.principal(None)(headers.add(EventsKey.Header, Fips))
@@ -61,8 +61,8 @@ object EventsKeySpec extends ZIOSpecDefault:
         blank  <- EventsKey.principal(None)(headers.add(EventsKey.Header, ""))
         absent <- EventsKey.principal(None)(headers)
       yield assertTrue(
-        named.contains(Principal(FipsId)),
-        other.exists(principal => hashId(principal.value) && !principal.value.contains(Secret)),
+        named.isEmpty,
+        other.isEmpty,
         blank.isEmpty,
         absent.isEmpty,
       )

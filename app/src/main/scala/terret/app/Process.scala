@@ -1,7 +1,9 @@
 package terret.app
 
 import heddle.Server
+import heddle.http.Response
 import heddle.mcp.events.{Events, SubscriptionStore, WebhookTransport}
+import heddle.route.Routes
 import heddle.server.Port
 import terret.Terret
 import terret.config.TerretConfig
@@ -10,10 +12,13 @@ import terret.hooks.Hooks
 import terret.model.ModelCatalog
 import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
-import zio.{Scope, UIO, ZIO}
+import zio.{Scope, UIO, ULayer, ZIO, ZLayer}
 
 object Process:
-  def listen(config: ProcessConfig, gate: MilestoneGate): ZIO[Harness & ModelCatalog & Scope, ProcessError, Unit] =
+  def listen(
+      config: ProcessConfig,
+      gate: MilestoneGate,
+  ): ZIO[Harness & ModelCatalog & Scope, ProcessError, Unit] =
     ZIO.serviceWithZIO[Harness](listen(config, _, gate))
 
   def listen(
@@ -24,7 +29,7 @@ object Process:
     assemble(config, harness, gate).flatMap { prepared =>
       val body = config.listen match
         case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
-        case Listen.Http(host, port) => bind(prepared.served, host, port) *> ZIO.never
+        case Listen.Http(host, port) => http(prepared.served, host, port, config.access) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
       armed(prepared.served, gate, config)(body).ensuring(prepared.shutdown)
@@ -38,18 +43,43 @@ object Process:
         for
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
-          server   <- armed(prepared.served, gate, config)(bind(prepared.served, host, port))
+          server   <- armed(prepared.served, gate, config)(http(prepared.served, host, port, config.access))
         yield server
 
-  private def bind(
+  /** The local listener has no Access check. The tunnel listener, when configured, always requires a JWT. */
+  private def http(
+      served: Served,
+      host: String,
+      port: Int,
+      access: Option[AccessConfig],
+  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
+    for
+      local <- openListener(served, host, port)
+      _     <- ZIO.foreachDiscard(access)(cfg => tunnelListener(served, cfg.port))
+    yield local
+
+  private def openListener(
       served: Served,
       host: String,
       port: Int,
   ): ZIO[Milestones & Events.Env & Scope, ProcessError, Server] =
+    bind(served.routes, host, port)
+
+  private def tunnelListener(
+      served: Served,
+      port: Int,
+  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
+    bind(served.routes @@ AccessGate.http, AccessConfig.TunnelHost, port)
+
+  private def bind[R](
+      routes: Routes[R, Response],
+      host: String,
+      port: Int,
+  ): ZIO[R & Scope, ProcessError, Server] =
     for
       bound  <- ZIO.fromEither(Port.make(port).left.map(_ => ProcessError.Port(port)))
       server <- Server
-        .install(served.routes, Server.Config.default.copy(host = host, port = bound))
+        .install(routes, Server.Config.default.copy(host = host, port = bound))
         .mapError(ProcessError.Server(_))
     yield server
 
@@ -71,14 +101,15 @@ object Process:
 
   /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
   private def armed[A](served: Served, gate: MilestoneGate, config: ProcessConfig)(
-      body: ZIO[Milestones & Events.Env & Scope, ProcessError, A]
+      body: ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, A]
   ): ZIO[Scope, ProcessError, A] =
     val layers =
       served.mcp.eventsLayer(
         SubscriptionStore.file(config.subscriptions.toString, config.events.ttl.maxSubscriptions)
       ) ++
         WebhookTransport.live ++
-        Milestones.live
+        Milestones.live ++
+        access(config)
     for
       env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
@@ -92,6 +123,11 @@ object Process:
           yield a
         open.provideEnvironment(env ++ scope)
     yield value
+
+  private def access(config: ProcessConfig): ULayer[AccessGate] =
+    config.access match
+      case None      => AccessGate.open
+      case Some(cfg) => ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.audience)
 
   private final case class Prepared(served: Served, shutdown: UIO[Unit])
 end Process
