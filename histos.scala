@@ -32,7 +32,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val dsh = module("dsh", Jvm)(scala3)
       .dependsOn(core)
@@ -42,7 +42,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
     val find = module("find", Jvm)(scala3)
       .scalac(
@@ -68,7 +68,7 @@ object build extends HistosBuild:
         ScalacFlag.UnusedAll,
         ScalacFlag.ImplicitConversions,
       )
-      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.16.0-a4fe367ee229-SNAPSHOT")
+      .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val app = module("app", Jvm)(scala3)
       .dependsOn(mcp, grok, dsh, find)
@@ -83,8 +83,8 @@ object build extends HistosBuild:
         zio,
         zioStreams,
         zioJson,
-        dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT",
-        dep"rocks.earlyeffect::heddle-mcp:0.16.0-a4fe367ee229-SNAPSHOT",
+        dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT",
+        dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT",
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val docs = module("docs", Jvm)(scala3)
@@ -100,7 +100,7 @@ object build extends HistosBuild:
         dep"rocks.earlyeffect::specular-zio-test:0.21.4",
         dep"rocks.earlyeffect::specular-site:0.21.4",
         dep"rocks.earlyeffect::early-effect-docs-theme:0.21.4",
-        dep"rocks.earlyeffect::heddle:0.16.0-a4fe367ee229-SNAPSHOT",
+        dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT",
         zio,
         zioJson,
       )

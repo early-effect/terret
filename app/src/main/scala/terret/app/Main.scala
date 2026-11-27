@@ -25,7 +25,7 @@ object Main extends ZIOAppDefault:
         _       <- PidFile.write(loaded.pidFile).mapError(AppFailure.Service(_))
         gate    <- MilestoneGate.make
         _       <- Process
-          .listen(config, gate)
+          .listen(config.copy(subscriptions = Subscriptions.beside(loaded.pidFile)), gate)
           .provideSomeLayer(wired(config, gate) ++ GrokModels.layer(config.grokConfig))
           .mapError(AppFailure.Process(_))
       yield ()

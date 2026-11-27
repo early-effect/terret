@@ -1,14 +1,14 @@
 package terret.app
 
 import heddle.Server
-import heddle.mcp.events.{Events, WebhookTransport}
+import heddle.mcp.events.{Events, SubscriptionStore, WebhookTransport}
 import heddle.server.Port
 import terret.Terret
 import terret.config.TerretConfig
 import terret.harness.Harness
 import terret.hooks.Hooks
 import terret.model.ModelCatalog
-import terret.mcp.{MilestoneEvents, Served, TerretMcp}
+import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
 import zio.{Scope, UIO, ZIO}
 
@@ -27,7 +27,7 @@ object Process:
         case Listen.Http(host, port) => bind(prepared.served, host, port) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
-      armed(prepared.served, gate)(body).ensuring(prepared.shutdown)
+      armed(prepared.served, gate, config)(body).ensuring(prepared.shutdown)
     }
 
   /** Bind HTTP and leave the socket open until the scope closes. */
@@ -38,7 +38,7 @@ object Process:
         for
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
-          server   <- armed(prepared.served, gate)(bind(prepared.served, host, port))
+          server   <- armed(prepared.served, gate, config)(bind(prepared.served, host, port))
         yield server
 
   private def bind(
@@ -69,19 +69,25 @@ object Process:
         .mapError(ProcessError.Mcp(_))
     yield Prepared(served, terret.shutdown)
 
-  /** The caller's scope owns the ring, the worker, and the accept loop. */
-  private def armed[A](served: Served, gate: MilestoneGate)(
+  /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
+  private def armed[A](served: Served, gate: MilestoneGate, config: ProcessConfig)(
       body: ZIO[Milestones & Events.Env & Scope, ProcessError, A]
   ): ZIO[Scope, ProcessError, A] =
-    val layers = served.mcp.eventsLayer ++ WebhookTransport.live ++ Milestones.live
+    val layers =
+      served.mcp.eventsLayer(
+        SubscriptionStore.file(config.subscriptions.toString, config.events.ttl.maxSubscriptions)
+      ) ++
+        WebhookTransport.live ++
+        Milestones.live
     for
-      env   <- layers.build
+      env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
       value <-
         val open =
           for
             _ <- MilestoneEvents.attach(gate)
             _ <- Events.maintained
+            _ <- EventKeep.renewed(config.events.default, EventKeep.pace(config.events.floor))
             a <- body
           yield a
         open.provideEnvironment(env ++ scope)
