@@ -85,6 +85,7 @@ object build extends HistosBuild:
         zioJson,
         dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT",
         dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT",
+        dep"rocks.earlyeffect::ascent-html:0.10.0",
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val docs = module("docs", Jvm)(scala3)

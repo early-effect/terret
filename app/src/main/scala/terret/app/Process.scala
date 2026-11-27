@@ -10,9 +10,10 @@ import terret.config.TerretConfig
 import terret.harness.Harness
 import terret.hooks.Hooks
 import terret.model.ModelCatalog
+import terret.app.watch.{WatchRoutes, WatchStreams}
 import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
-import zio.{Scope, UIO, ULayer, ZIO, ZLayer}
+import zio.{Scope, ULayer, ZIO, ZLayer}
 
 object Process:
   def listen(
@@ -29,10 +30,11 @@ object Process:
     assemble(config, harness, gate).flatMap { prepared =>
       val body = config.listen match
         case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
-        case Listen.Http(host, port) => http(prepared.served, host, port, config.access) *> ZIO.never
+        case Listen.Http(host, port) =>
+          http(prepared.served, prepared.terret, host, port, config.access) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
-      armed(prepared.served, gate, config)(body).ensuring(prepared.shutdown)
+      armed(prepared.served, gate, config)(body).ensuring(prepared.terret.shutdown)
     }
 
   /** Bind HTTP and leave the socket open until the scope closes. */
@@ -43,33 +45,41 @@ object Process:
         for
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
-          server   <- armed(prepared.served, gate, config)(http(prepared.served, host, port, config.access))
+          server   <- armed(prepared.served, gate, config)(
+            http(prepared.served, prepared.terret, host, port, config.access)
+          )
         yield server
 
-  /** The local listener has no Access check. The tunnel listener, when configured, always requires a JWT. */
+  /** The local listener has no Access check and does not serve `/watch`. The tunnel listener requires a JWT on every
+    * path except `/mcp`, which keeps the events-key check.
+    */
   private def http(
       served: Served,
+      terret: Terret,
       host: String,
       port: Int,
       access: Option[AccessConfig],
-  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
+  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
     for
+      streams <- WatchStreams.make
+      watch = WatchRoutes.routes(terret, streams)
       local <- openListener(served, host, port)
-      _     <- ZIO.foreachDiscard(access)(cfg => tunnelListener(served, cfg.port))
+      _     <- ZIO.foreachDiscard(access)(cfg => tunnelListener(served, watch, cfg.port))
     yield local
 
   private def openListener(
       served: Served,
       host: String,
       port: Int,
-  ): ZIO[Milestones & Events.Env & Scope, ProcessError, Server] =
-    bind(served.routes, host, port)
+  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
+    bind(Ingress.local(served.routes), host, port)
 
   private def tunnelListener(
       served: Served,
+      watch: heddle.route.Routes[AuthLog, Nothing],
       port: Int,
-  ): ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, Server] =
-    bind(served.routes @@ AccessGate.http, AccessConfig.TunnelHost, port)
+  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
+    bind(Ingress.tunnel(served.routes, watch), AccessConfig.TunnelHost, port)
 
   private def bind[R](
       routes: Routes[R, Response],
@@ -97,11 +107,11 @@ object Process:
           TerretMcp.served(terret, config.version, config.events, config.eventsKey, surface)
         )
         .mapError(ProcessError.Mcp(_))
-    yield Prepared(served, terret.shutdown)
+    yield Prepared(served, terret)
 
   /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
   private def armed[A](served: Served, gate: MilestoneGate, config: ProcessConfig)(
-      body: ZIO[Milestones & Events.Env & AccessGate & Scope, ProcessError, A]
+      body: ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, A]
   ): ZIO[Scope, ProcessError, A] =
     val layers =
       served.mcp.eventsLayer(
@@ -109,7 +119,8 @@ object Process:
       ) ++
         WebhookTransport.live ++
         Milestones.live ++
-        access(config)
+        access(config) ++
+        AuthLog.live
     for
       env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
@@ -127,7 +138,7 @@ object Process:
   private def access(config: ProcessConfig): ULayer[AccessGate] =
     config.access match
       case None      => AccessGate.open
-      case Some(cfg) => ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.audience)
+      case Some(cfg) => ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.team, cfg.audience)
 
-  private final case class Prepared(served: Served, shutdown: UIO[Unit])
+  private final case class Prepared(served: Served, terret: Terret)
 end Process

@@ -15,6 +15,7 @@ object Redact:
     Pattern.compile("github_pat_[A-Za-z0-9_]+"),
     Pattern.compile("whsec_[A-Za-z0-9_\\-+=/]+"),
     Pattern.compile("(?i)bearer\\s+[A-Za-z0-9\\-._~+/=]+"),
+    Pattern.compile("xai-[A-Za-z0-9_\\-]+"),
     Pattern.compile("(?i)(x-terret-key\\s*[:=]\\s*)([^\\s\"',}]+)"),
     Pattern.compile("(?:AKIA|ASIA)[0-9A-Z]{16}"),
     Pattern.compile("(?i)(aws_secret_access_key\\s*[=:]\\s*)([A-Za-z0-9/+=]{40})"),
