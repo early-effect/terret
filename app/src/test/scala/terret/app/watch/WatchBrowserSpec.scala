@@ -21,10 +21,10 @@ import java.nio.file.{Files, Path}
 
 /** A real browser against the tunnel ingress. Histos does not copy arbitrary environment variables into the suite, so
   * the drive stays off unless `target/watch-e2e/enable` exists. Shots stay off unless
-  * `target/watch-shots/enable` exists. The suite `PATH` often has no `node`; `target/watch-e2e/node` may hold that
-  * binary's absolute path. The default run is a no-op and is not a CI browser job. The listener uses `AccessGate.open`
-  * so the drive does not need a Cloudflare JWT. Production still mounts `/watch` only on the tunnel, and that tunnel
-  * still requires a JWT.
+  * `target/watch-shots/enable` exists. A one-line path in `target/watch-e2e/node` selects the binary. When that file
+  * is absent, the drive uses `node` on `PATH`, which is what CI does. The default run is a no-op and is not a CI
+  * browser job. The listener uses `AccessGate.open` so the drive does not need a Cloudflare JWT. Production still
+  * mounts `/watch` only on the tunnel, and that tunnel still requires a JWT.
   */
 object WatchBrowserSpec extends ZIOSpecDefault:
   private val repo   = Path.of(sys.env.getOrElse("HISTOS_REPO", ".")).toAbsolutePath.normalize
@@ -110,6 +110,8 @@ object WatchBrowserSpec extends ZIOSpecDefault:
     "feed-phone-dark.png",
     "denied-desk-dark.png",
     "ended-phone-light.png",
+    "filter-desk-light.png",
+    "filter-phone-light.png",
   )
 
   /** Prompt `scene` fills the feed. Prompt `block` holds the turn so a queue can sit behind it. */
@@ -423,6 +425,11 @@ object WatchBrowserSpec extends ZIOSpecDefault:
       |    await page.focus("[data-prompt='send']");
       |    await shot("focus-desk-light");
       |    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+      |    await page.click("[data-chrome='desk'] [data-filter='events'] > summary");
+      |    await page.waitForSelector("[data-chrome='desk'] [data-filter='events'][open] ~ [data-chrome-part='chips'] a[data-chip='ToolStarted']");
+      |    await showRich();
+      |    await shot("filter-desk-light");
+      |    await page.click("[data-chrome='desk'] [data-filter='events'] > summary");
       |    await showRich();
       |    await shot("feed-desk-light");
       |    await scheme("dark");
@@ -430,6 +437,11 @@ object WatchBrowserSpec extends ZIOSpecDefault:
       |    await shot("feed-desk-dark");
       |    await page.setViewportSize({ width: 390, height: 844 });
       |    await scheme("light");
+      |    await page.click("[data-chrome='phone'] [data-filter='events'] > summary");
+      |    await page.waitForSelector("[data-chrome='phone'] [data-filter='events'][open] ~ [data-chrome-part='chips'] a[data-chip='TestLine']");
+      |    await showRich();
+      |    await shot("filter-phone-light");
+      |    await page.click("[data-chrome='phone'] [data-filter='events'] > summary");
       |    await showRich();
       |    await shot("feed-phone-light");
       |    await scheme("dark");

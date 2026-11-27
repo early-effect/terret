@@ -4,6 +4,7 @@ import ascent.ast.{Attr, UI}
 import ascent.domtypes.AttrValue
 import ascent.html.Html
 import terret.Terret
+import terret.permission.Permission
 import terret.session.{Session, SessionState}
 import zio.{Chunk, UIO, ZIO}
 
@@ -99,11 +100,7 @@ object WatchPage:
       brand,
       emptySessions(rows),
       picker(rows, selected, query),
-      el("div", "data-chrome-part" -> "toolbar")(
-        controls(selected, query, ended, compact = true),
-        jump,
-      ),
-      el("div", "data-chrome-part" -> "chips")(chips(selected, query, tools, statuses)),
+      toolbar(selected, query, tools, statuses, ended, compact = true),
     )
 
   private def desk(
@@ -121,11 +118,7 @@ object WatchPage:
         sessionLinks(rows, selected, query),
       ),
       el("div", "data-chrome-part" -> "main")(
-        el("div", "data-chrome-part" -> "toolbar")(
-          controls(selected, query, ended, compact = false),
-          jump,
-        ),
-        el("div", "data-chrome-part" -> "chips")(chips(selected, query, tools, statuses)),
+        toolbar(selected, query, tools, statuses, ended, compact = false),
       ),
     )
 
@@ -141,20 +134,20 @@ object WatchPage:
     frag(rows.map { row =>
       val id      = row.session.id.value
       val session = row.session
-      val allow   = session.effective.allow.toList.map(_.toString).sorted.mkString(",")
-      val dropped = session.dropped.toList.map(_.toString).sorted.mkString(",")
-      val model   = session.model.fold("default")(_.value)
-      el(
-        "a",
-        "href"          -> WatchQuery.path(Some(id), query),
-        "data-session"  -> id,
-        "data-selected" -> (if selected.contains(id) then "true" else "false"),
-        "data-state"    -> stateKey(session.state),
-      )(
-        el("span", "data-session-state" -> stateKey(session.state))(t(state(session.state))),
-        el("span", "data-session-id" -> id)(t(id)),
-        el("span", "data-session-meta" -> "path")(t(session.workspace.path.toString)),
-        el("span", "data-session-meta" -> "rest")(t(s"$allow dropped:$dropped $model")),
+      val model = session.model.fold("default")(_.value)
+      el("div", "data-session-card" -> id)(
+        el(
+          "a",
+          "href"          -> WatchQuery.path(Some(id), query),
+          "data-session"  -> id,
+          "data-selected" -> (if selected.contains(id) then "true" else "false"),
+          "data-state"    -> stateKey(session.state),
+        )(
+          el("span", "data-session-state" -> stateKey(session.state))(t(state(session.state))),
+          el("span", "data-session-id" -> id)(t(id)),
+          el("span", "data-session-meta" -> "path")(t(session.workspace.path.toString)),
+        ),
+        sessionFacts(id, session, model),
       )
     }*)
 
@@ -227,8 +220,26 @@ object WatchPage:
       "aria-label"  -> "Search the feed",
       "placeholder" -> "Search",
     )()
-    if compact then frag(thinking, inactive, clear, keys, search)
-    else frag(layouts, sizes, thinking, inactive, clear, keys, search)
+    val view =
+      if compact then frag(thinking, inactive, clear, keys)
+      else frag(layouts, sizes, thinking, inactive, clear, keys)
+    frag(el("div", "data-controls" -> "view")(view), search)
+
+  /** Chips follow the jump control so an open filter wraps under the whole control row. */
+  private def toolbar(
+      selected: Option[String],
+      query: WatchQuery,
+      tools: Chunk[String],
+      statuses: Chunk[String],
+      ended: Set[String],
+      compact: Boolean,
+  ): UI[Any] =
+    el("div", "data-chrome-part" -> "toolbar")(
+      controls(selected, query, ended, compact),
+      el("details", "data-filter" -> "events")(el("summary")(t("Filter"))),
+      jump,
+      el("div", "data-chrome-part" -> "chips")(chips(selected, query, tools, statuses)),
+    )
 
   private def chips(
       selected: Option[String],
@@ -240,7 +251,7 @@ object WatchPage:
       link(
         selected,
         WatchQuery.toggleKind(query, kind),
-        kind.wire,
+        kindLabel(kind),
         "data-chip" -> kind.wire,
         "data-on"   -> flag(query.kinds.contains(kind)),
       )
@@ -249,21 +260,27 @@ object WatchPage:
       link(
         selected,
         query.copy(tool = Some(name)),
-        name,
+        toolLabel(name),
         "data-chip" -> "tool",
         "data-on"   -> flag(query.tool.contains(name)),
       )
     }
-    val statusChips = statuses.map { name =>
+    val known       = tools.toSet
+    val statusChips = statuses.filterNot(known.contains).map { name =>
       link(
         selected,
         query.copy(status = Some(name)),
-        name,
+        statusLabel(name),
         "data-chip" -> "status",
         "data-on"   -> flag(query.status.contains(name)),
       )
     }
-    frag(frag(kinds*), frag(toolChips*), frag(statusChips*))
+    val groups = Chunk(
+      Option.when(kinds.nonEmpty)(chipGroup("kind", "Kind", kinds)),
+      Option.when(toolChips.nonEmpty)(chipGroup("tool", "Tool", toolChips)),
+      Option.when(statusChips.nonEmpty)(chipGroup("status", "Status", statusChips)),
+    ).flatten
+    frag(groups*)
 
   private def feed(
       rows: Chunk[WatchRow],
@@ -305,12 +322,12 @@ object WatchPage:
     val current = query.row.flatMap(id => rows.find(_.id == id)).orElse(rows.headOption)
     frag(
       frag(rows.map { row =>
-        link(selected, query.copy(row = Some(row.id)), row.kind.wire, "data-row-link" -> row.id)
+        link(selected, query.copy(row = Some(row.id)), kindLabel(row.kind), "data-row-link" -> row.id)
       }*),
       el("section", "data-panel" -> "detail")(
         current match
           case None      => t("Select an event")
-          case Some(row) => frag(t(row.kind.wire), el("div", "data-detail" -> row.id)(t(row.text)))
+          case Some(row) => frag(t(kindLabel(row.kind)), el("div", "data-detail" -> row.id)(t(row.text)))
       ),
     )
 
@@ -325,7 +342,7 @@ object WatchPage:
       "data-tool"   -> row.tool.getOrElse(""),
       "data-status" -> row.status.getOrElse(""),
     )(
-      el("header")(t(row.kind.wire)),
+      el("header")(t(kindLabel(row.kind))),
       el(
         "a",
         "href"               -> WatchQuery.path(selected, WatchQuery.toggleOpen(query, row.id)),
@@ -438,12 +455,64 @@ object WatchPage:
       case SessionState.Running  => "running"
       case SessionState.Ended(_) => "ended"
 
+  private def sessionFacts(id: String, session: Session, model: String): UI[Any] =
+    val allow   = phrase(session.effective.allow.toList.map(permissionLabel))
+    val dropped = session.dropped.toList.map(permissionLabel)
+    el("details", "data-session-facts" -> id)(
+      el("summary")(t("Access")),
+      el("span", "data-session-meta" -> "allow")(t(s"Allow $allow")),
+      el("span", "data-session-meta" -> "model")(t(s"Model $model")),
+      if dropped.isEmpty then frag()
+      else el("span", "data-session-meta" -> "dropped")(t(s"Dropped ${phrase(dropped)}")),
+    )
+
+  private def phrase(names: List[String]): String =
+    if names.isEmpty then "none" else names.sorted.mkString(", ")
+
+  private def permissionLabel(permission: Permission): String =
+    permission match
+      case Permission.ReadWorkspace  => "read workspace"
+      case Permission.WriteWorkspace => "write workspace"
+      case Permission.RunCommands    => "run commands"
+      case Permission.Network        => "network"
+
+  private def kindLabel(kind: WatchKind): String =
+    kind match
+      case WatchKind.ToolStarted  => "Tool started"
+      case WatchKind.ToolFinished => "Tool finished"
+      case WatchKind.Output       => "Output"
+      case WatchKind.TestLine     => "Test"
+      case WatchKind.Plan         => "Plan"
+      case WatchKind.Message      => "Message"
+      case WatchKind.Refused      => "Refused"
+      case WatchKind.Thought      => "Thought"
+      case WatchKind.Turn         => "Turn"
+
+  /** Audit events are stored as tool names. A real tool name stays as the harness spelled it. */
+  private def toolLabel(name: String): String =
+    name match
+      case "SessionOpened"  => "Session opened"
+      case "SteerSent"      => "Steer sent"
+      case "SteerQueued"    => "Steer queued"
+      case "TurnCancelled"  => "Turn cancelled"
+      case "SessionResumed" => "Session resumed"
+      case other            => other
+
+  private def statusLabel(name: String): String =
+    val phrase = toolLabel(name)
+    if phrase != name then phrase
+    else if name.nonEmpty && name.forall(_.isLower) then name.capitalize
+    else name
+
+  private def chipGroup(name: String, title: String, items: Chunk[UI[Any]]): UI[Any] =
+    el("div", "data-chip-group" -> name)(
+      el("span", "data-chip-label" -> name)(t(title)),
+      el("div", "data-chip-row" -> name)(frag(items*)),
+    )
+
   private def label(row: Listed): String =
     val session = row.session
-    val model   = session.model.fold("default")(_.value)
-    val allow   = session.effective.allow.toList.map(_.toString).sorted.mkString(",")
-    val dropped = session.dropped.toList.map(_.toString).sorted.mkString(",")
-    s"${state(session.state)} ${session.id.value} ${session.workspace.path} $allow dropped:$dropped $model"
+    s"${state(session.state)} ${session.id.value} ${session.workspace.path}"
 
   private def state(found: SessionState): String =
     found match
