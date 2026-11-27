@@ -13,6 +13,8 @@ import zio.durationInt
 import zio.{ConfigProvider, Scope, ZIO, ZLayer}
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.nio.file.{Files, Path}
+import scala.jdk.CollectionConverters.*
 
 object ProcessSpec extends ZIOSpecDefault:
   def spec = suite("process")(
@@ -134,6 +136,14 @@ object ProcessSpec extends ZIOSpecDefault:
         chosen.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"),
       )
     },
+    test("subscriptions sit beside the pid file") {
+      assertTrue(
+        Subscriptions.file == Subscriptions.beside(PidFile.defaultPath),
+        Subscriptions.beside(Path.of("target", "state", "server.pid")) ==
+          Path.of("target", "state", "subscriptions.json"),
+        Subscriptions.beside(Path.of("server.pid")) == Path.of(".terret", "subscriptions.json"),
+      )
+    },
     test("the Warp file names the local HTTP endpoint") {
       val doc = WarpLocal.http(WarpLocal.url("0.0.0.0", 8080))
       assertTrue(
@@ -146,7 +156,17 @@ object ProcessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
-          config = ProcessConfig.local.copy(listen = Listen.Http("127.0.0.1", 0))
+          dir    <- ZIO.acquireRelease(
+            ZIO.attempt {
+              val root = Path.of("target")
+              Files.createDirectories(root)
+              Files.createTempDirectory(root, "process-subscriptions")
+            }
+          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+          )
           server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           status <- listed(port)
@@ -221,4 +241,12 @@ object ProcessSpec extends ZIOSpecDefault:
           case _                    => Set.empty
       case _ => Set.empty
     }.toSet
+
+  private def deleteTree(root: Path): Unit =
+    if Files.exists(root) then
+      val walked = Files.walk(root)
+      try
+        val paths = walked.iterator.asScala.toVector.sortBy(_.getNameCount)(using Ordering[Int].reverse)
+        paths.foreach(Files.deleteIfExists(_))
+      finally walked.close()
 end ProcessSpec

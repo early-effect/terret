@@ -1,0 +1,36 @@
+[
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "call-503da2a7-1e9f-4d9c-94c6-714c8f23cce4-89",
+    "title": "ask_user_question",
+    "rawInput": {
+      "questions": [
+        {
+          "question": "How should a restart keep webhook subscriptions?"
+        }
+      ]
+    }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call-503da2a7-1e9f-4d9c-94c6-714c8f23cce4-89",
+    "title": "Ask: How should a restart keep webhook subscriptions?",
+    "rawInput": {
+      "variant": "AskUserQuestion",
+      "questions": [
+        {
+          "question": "How should a restart keep webhook subscriptions?"
+        }
+      ]
+    }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call-503da2a7-1e9f-4d9c-94c6-714c8f23cce4-89",
+    "status": "failed",
+    "rawOutput": {
+      "error": "tool_execution_failed",
+      "message": "Failed to reach the client for user question: Method not found"
+    }
+  }
+]

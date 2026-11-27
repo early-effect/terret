@@ -67,8 +67,10 @@ An empty version is rejected. A relative root is rejected. The packaged process 
 `supervisor` is `launchd`, `foreground`, or `none`. `none` is the default: restart does not call a
 service manager. `launchd` reads `launchd.labels` and `launchd.plistDir`. There is no built-in job
 label. `foreground` reads `foreground.command`, one executable path. The server writes `pidFile`
-when it starts. Restart waits use `restart.pace`, `restart.exit`, `restart.port`, and
-`restart.listen`.
+when it starts. Webhook subscriptions and ring heads are stored in `subscriptions.json` beside
+that file, so a restart keeps each id and cursor and the next event is one past the saved head.
+A subscription whose deliveries are failing is left to expire. Restart waits use `restart.pace`,
+`restart.exit`, `restart.port`, and `restart.listen`.
 """,
     exampleValue(ProcessConfig.local.harness).assert { harness =>
       assertTrue(harness == ProcessHarness.Grok(GrokConfig.stdio))

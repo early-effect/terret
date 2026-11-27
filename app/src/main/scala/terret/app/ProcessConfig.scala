@@ -1,5 +1,6 @@
 package terret.app
 
+import heddle.mcp.events.StoreError
 import terret.dsh.{DshConfig, DshConfigError}
 import terret.grok.{
   AcpBind,
@@ -37,6 +38,7 @@ final case class ProcessConfig(
     events: EventPolicy = EventPolicy.terret,
     eventsKey: Option[EventsKey] = None,
     grokConfig: Path,
+    subscriptions: Path = Subscriptions.file,
 )
 
 object ProcessConfig:
@@ -369,34 +371,45 @@ enum ProcessError:
   case Mcp(error: terret.mcp.TerretMcpError)
   case McpGrant(error: McpGrantError)
   case Events(error: EventPolicyError)
+  case Subscriptions(error: StoreError)
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
   case Config(error: zio.Config.Error)
 
   def render: String = this match
-    case Listen(value)       => s"listen is http or stdio, got $value"
-    case Host                => "host is empty"
-    case Port(value)         => s"port is 0 to 65535, got $value"
-    case Version             => "version is empty"
-    case Policy(value)       => s"policy is Closed, Inherit, or Clamp, got $value"
-    case Permission(value)   => s"unknown permission $value"
-    case Transport(value)    => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
-    case Approval(value)     => s"approval is Ask or Always, got $value"
-    case Harness(value)      => s"harness is grok or dsh, got $value"
-    case ProfileUnexpected   => "profile belongs on the dsh harness"
-    case GrokKeys            => "transport, approval, and bind belong on the grok harness"
-    case BindIncomplete      => "a socket transport needs bindHost, bindPort, and bindSecret"
-    case BindUnexpected      => "bind fields belong on a socket transport"
-    case CliAsk              => "the CLI transport cannot answer a permission prompt"
-    case Workspace(error)    => s"workspace ${error.toString}"
-    case Grok(error)         => s"grok ${error.toString}"
-    case GrokConfigPath      => "grok.config is empty"
-    case Dsh(error)          => s"dsh ${error.toString}"
-    case NetworkGrant(error) => error.render
-    case Mcp(error)          => s"mcp ${error.toString}"
-    case McpGrant(error)     => error.render
-    case Events(error)       => error.render
-    case Server(error)       => error.message
-    case Stdio(cause)        => s"stdio ${cause.toString}"
-    case Config(error)       => error.toString
+    case Listen(value)        => s"listen is http or stdio, got $value"
+    case Host                 => "host is empty"
+    case Port(value)          => s"port is 0 to 65535, got $value"
+    case Version              => "version is empty"
+    case Policy(value)        => s"policy is Closed, Inherit, or Clamp, got $value"
+    case Permission(value)    => s"unknown permission $value"
+    case Transport(value)     => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
+    case Approval(value)      => s"approval is Ask or Always, got $value"
+    case Harness(value)       => s"harness is grok or dsh, got $value"
+    case ProfileUnexpected    => "profile belongs on the dsh harness"
+    case GrokKeys             => "transport, approval, and bind belong on the grok harness"
+    case BindIncomplete       => "a socket transport needs bindHost, bindPort, and bindSecret"
+    case BindUnexpected       => "bind fields belong on a socket transport"
+    case CliAsk               => "the CLI transport cannot answer a permission prompt"
+    case Workspace(error)     => s"workspace ${error.toString}"
+    case Grok(error)          => s"grok ${error.toString}"
+    case GrokConfigPath       => "grok.config is empty"
+    case Dsh(error)           => s"dsh ${error.toString}"
+    case NetworkGrant(error)  => error.render
+    case Mcp(error)           => s"mcp ${error.toString}"
+    case McpGrant(error)      => error.render
+    case Events(error)        => error.render
+    case Subscriptions(error) => subscriptionMessage(error)
+    case Server(error)        => error.message
+    case Stdio(cause)         => s"stdio ${cause.toString}"
+    case Config(error)        => error.toString
+
+  private def subscriptionMessage(error: StoreError): String =
+    error match
+      case StoreError.Unreadable(_)   => "could not read event subscriptions"
+      case StoreError.Undecodable     => "event subscriptions could not be decoded"
+      case StoreError.Unwritable(_)   => "could not write event subscriptions"
+      case StoreError.Unavailable     => "event subscriptions are unavailable"
+      case StoreError.Capacity(limit) => s"event subscriptions exceed $limit"
+      case StoreError.Restore(_)      => "event subscriptions could not be restored"
 end ProcessError
