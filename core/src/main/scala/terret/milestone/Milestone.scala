@@ -56,6 +56,7 @@ object Milestones:
       case Event.Assistant(_)                                => Chunk.empty
       case Event.Thought(_)                                  => Chunk.empty
       case Event.Plan(_)                                     => Chunk.empty
+      case Event.Refused(_, _, _)                            => Chunk.empty
       case Event.ToolStarted(call) if call.name.value == Ask =>
         val summary = clip(Finished.question(call.input, call.name.value))
         Chunk(Notice(MilestoneKind.WaitingOnPermission, summary, s"wait:${call.id.value}"))

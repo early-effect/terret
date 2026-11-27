@@ -34,6 +34,7 @@ final case class ProcessConfig(
     version: String,
     harness: ProcessHarness,
     writeRoots: Chunk[Workspace] = Chunk.empty,
+    readRoots: Chunk[Workspace] = Chunk.empty,
     mcp: McpPolicy = McpPolicy.empty,
     network: NetworkPolicy = NetworkPolicy.empty,
     events: EventPolicy = EventPolicy.terret,
@@ -87,6 +88,13 @@ object ProcessConfig:
       BoundRaw(journal, team, audience, port)
     }
 
+  private final case class RootsRaw(read: Option[String], write: Option[String])
+
+  private val rootsRaw: Config[RootsRaw] =
+    (Config.string("readRoots").optional ++ Config.string("writeRoots").optional).map { (read, write) =>
+      RootsRaw(read, write)
+    }
+
   private val eventRaw: Config[EventRaw] =
     (
       Config.string("verification").withDefault(EventPolicy.name(EventPolicy.terret.verification)) ++
@@ -115,7 +123,7 @@ object ProcessConfig:
         Config.string("bindHost").optional ++
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional ++
-        Config.string("writeRoots").optional ++
+        rootsRaw ++
         Config.string("mcp").optional ++
         Config.string("network").optional ++
         eventRaw ++
@@ -138,7 +146,7 @@ object ProcessConfig:
           bindHost,
           bindPort,
           bindSecret,
-          writeRoots,
+          roots,
           mcp,
           network,
           events,
@@ -161,7 +169,8 @@ object ProcessConfig:
           bindHost,
           bindPort,
           bindSecret,
-          writeRoots,
+          roots.read,
+          roots.write,
           mcp,
           network,
           events.verification,
@@ -184,7 +193,8 @@ object ProcessConfig:
       root       <- rootOf(raw.root)
       version    <- versionOf(raw.version)
       harness    <- harnessOf(raw, policy)
-      roots      <- rootsOf(raw.writeRoots)
+      reads      <- rootsOf(raw.readRoots)
+      writes     <- rootsOf(raw.writeRoots)
       grants     <- grantsOf(raw.mcp)
       network    <- hostsOf(raw.network)
       events     <- eventsOf(raw)
@@ -198,7 +208,8 @@ object ProcessConfig:
       root,
       version,
       harness,
-      roots,
+      writes,
+      reads,
       grants,
       network,
       events,
@@ -353,6 +364,7 @@ object ProcessConfig:
       bindHost: Option[String],
       bindPort: Option[Int],
       bindSecret: Option[String],
+      readRoots: Option[String] = None,
       writeRoots: Option[String] = None,
       mcp: Option[String] = None,
       network: Option[String] = None,

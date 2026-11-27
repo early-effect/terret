@@ -66,6 +66,7 @@ object Main extends ZIOAppDefault:
           network = config.network,
           milestones = milestones,
           journal = config.journal,
+          readRoots = config.readRoots,
         )
       case ProcessHarness.Dsh(dsh) => DshHarness.layer(dsh, milestones, config.journal)
 end Main

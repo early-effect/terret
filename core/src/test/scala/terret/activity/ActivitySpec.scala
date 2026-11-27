@@ -55,6 +55,16 @@ object ActivitySpec extends ZIOSpecDefault:
         more.map(_.text) == Chunk("world"),
       )
     },
+    test("a refusal is a message and does not join the assistant text") {
+      val reason = "grep reads ~/.cursor, outside the workspace; grant it in terret.readRoots"
+      val (kept, notes) = Activity.step(ActivityMemory.empty, Event.Refused("c1", "grep", reason))
+      val (_, more)    = Activity.step(kept, Event.Assistant("hello"))
+      assertTrue(
+        notes.map(note => (note.kind, note.call, note.name, note.status, note.text)) ==
+          Chunk((ActivityKind.Message, Some("c1"), Some("grep"), Some("refused"), reason)),
+        more.map(_.text) == Chunk("hello"),
+      )
+    },
     test("a tool start hangs under the turn, and a later update sends only the suffix") {
       val when                      = Instant.parse("2026-11-21T15:04:05Z")
       val started                   = Event.ToolStarted(ToolCall(id, name, Json.Str("body")))

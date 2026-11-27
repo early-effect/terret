@@ -63,7 +63,11 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
           "run_terminal_command needs WriteWorkspace, clamped by server policy",
         ),
         escaped == PermissionAnswer
-          .Refused("reject-once", "call_1", "run_terminal_command writes /tmp/terret-probe.log, outside the workspace"),
+          .Refused(
+            "reject-once",
+            "call_1",
+            "run_terminal_command writes /tmp/terret-probe.log, outside the workspace; grant it in terret.writeRoots",
+          ),
         rooted == PermissionAnswer.Selected("allow-once"),
         command == PermissionAnswer.Selected("allow-once"),
       )
@@ -82,7 +86,11 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
           "call_1",
           "run_terminal_command needs WriteWorkspace, clamped by server policy",
         ),
-        edit == PermissionAnswer.Refused("reject-once", "call_1", "edit writes /etc/passwd, outside the workspace"),
+        edit == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "edit writes /etc/passwd, outside the workspace; grant it in terret.writeRoots",
+        ),
       )
     },
     test("a recorded shell permission uses the live option ids") {
@@ -113,18 +121,18 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         escaped == PermissionAnswer.Refused(
           "reject-once",
           "call_1",
-          "write writes /etc/passwd, outside the workspace",
+          "write writes /etc/passwd, outside the workspace; grant it in terret.writeRoots",
         ),
         kept == PermissionAnswer.Selected("allow-once"),
         paths == PermissionAnswer.Refused(
           "reject-once",
           "call_1",
-          "edit writes /etc/passwd, outside the workspace",
+          "edit writes /etc/passwd, outside the workspace; grant it in terret.writeRoots",
         ),
         wrapped == PermissionAnswer.Refused(
           "reject-once",
           "call_1",
-          "edit writes /etc/passwd, outside the workspace",
+          "edit writes /etc/passwd, outside the workspace; grant it in terret.writeRoots",
         ),
       )
     },
@@ -420,8 +428,18 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
   ) =
     ZIO
       .fromEither(Workspace.from("/work"))
-      .map { root =>
-        PermissionChoice.decide(policy, ceiling, root, roots, params, access, hosts)
+      .flatMap { root =>
+        PermissionChoice.decide(
+          policy,
+          ceiling,
+          root,
+          Chunk.empty,
+          roots,
+          params,
+          FileRoots.unchanged,
+          access,
+          hosts,
+        )
       }
       .orDieWith(_ => new IllegalArgumentException("workspace"))
 end PermissionChoiceSpec

@@ -27,6 +27,8 @@ final class GrokHarness private (
     mcp: McpPolicy,
     catalog: McpCatalog,
     hosts: HostAllowlist,
+    readRoots: Chunk[Workspace],
+    files: FileRoots,
 ) extends Harness:
 
   def open(
@@ -282,7 +284,9 @@ final class GrokHarness private (
       slot.policy,
       slot.ceiling,
       slot.workspace,
+      readRoots,
       writeRoots,
+      files,
       slot.names,
       slot.refusals,
       slot.printed,
@@ -351,6 +355,8 @@ object GrokHarness:
       hosts: HostAllowlist = HostAllowlist.closed,
       milestones: MilestoneSink = MilestoneSink.discard,
       journalBound: JournalBound = JournalBound.default,
+      readRoots: Chunk[Workspace] = Chunk.empty,
+      files: FileRoots = FileRoots.live,
   ): ZIO[Scope, Nothing, GrokHarness] =
     for
       scope    <- ZIO.scope
@@ -369,6 +375,8 @@ object GrokHarness:
         mcp,
         catalog,
         hosts,
+        readRoots,
+        files,
       )
       _ <- ZIO.addFinalizer(harness.close)
     yield harness
@@ -381,6 +389,7 @@ object GrokHarness:
       network: NetworkPolicy = NetworkPolicy.empty,
       milestones: MilestoneSink = MilestoneSink.discard,
       journal: JournalBound = JournalBound.default,
+      readRoots: Chunk[Workspace] = Chunk.empty,
   ): ZLayer[Scope, Nothing, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer
     (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
@@ -397,6 +406,7 @@ object GrokHarness:
           HostAllowlist.fixed(network),
           milestones,
           journal,
+          readRoots,
         )
       yield harness: Harness
     }

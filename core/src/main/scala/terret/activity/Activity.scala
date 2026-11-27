@@ -81,12 +81,13 @@ object Activity:
 
   def step(memory: ActivityMemory, event: Event): (ActivityMemory, Chunk[ActivityNote]) =
     event match
-      case Event.ToolStarted(call) => started(memory, call)
-      case Event.ToolUpdated(call) => updated(memory, call)
-      case Event.Assistant(text)   => message(memory, text)
-      case Event.Thought(text)     => message(memory, text)
-      case Event.Plan(steps)       => plan(memory, steps)
-      case Event.TurnFinished(_)   => (memory, Chunk.empty)
+      case Event.ToolStarted(call)           => started(memory, call)
+      case Event.ToolUpdated(call)           => updated(memory, call)
+      case Event.Assistant(text)             => message(memory, text)
+      case Event.Thought(text)               => message(memory, text)
+      case Event.Plan(steps)                 => plan(memory, steps)
+      case Event.Refused(call, name, reason) => refused(memory, call, name, reason)
+      case Event.TurnFinished(_)             => (memory, Chunk.empty)
 
   private def started(memory: ActivityMemory, call: ToolCall): (ActivityMemory, Chunk[ActivityNote]) =
     val name = call.name.value
@@ -118,6 +119,21 @@ object Activity:
       tests = previous.tests ++ lines,
     )
     (memory.copy(calls = memory.calls.updated(id, next)), output ++ tests ++ finish)
+
+  private def refused(
+      memory: ActivityMemory,
+      call: String,
+      name: String,
+      reason: String,
+  ): (ActivityMemory, Chunk[ActivityNote]) =
+    val note = ActivityNote(
+      ActivityKind.Message,
+      Option.when(call.nonEmpty)(call),
+      Option.when(name.nonEmpty)(name),
+      Some("refused"),
+      reason,
+    )
+    (memory, Chunk(note))
 
   private def message(memory: ActivityMemory, text: String): (ActivityMemory, Chunk[ActivityNote]) =
     val (delta, stored) = prose(memory.message, text)

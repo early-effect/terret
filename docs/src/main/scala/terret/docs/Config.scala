@@ -42,8 +42,11 @@ Keys live under `terret`. `listen` is `http` or `stdio`. `policy` is `Closed`, `
 `profile` belongs to dsh and defaults to `headless`. A profile on grok is rejected. `transport`
 (`Cli`, `AcpStdio`, or `AcpWebSocket`), `approval` (`Ask` or `Always`), and the bind triple belong
 to grok. Setting them on dsh is rejected. `Ask` is the default. Under `Closed` or `Clamp`, an omitted
-transport is `AcpStdio`, and an explicit `Cli` is rejected. `Inherit` keeps `Cli`. `writeRoots` is an
-optional comma-separated list of absolute paths a shell write may use besides the session workspace.
+transport is `AcpStdio`, and an explicit `Cli` is rejected. `Inherit` keeps `Cli`. `readRoots` and
+`writeRoots` are optional comma-separated lists of absolute paths. `readRoots` grants reads besides
+the session workspace. `writeRoots` grants writes besides the session workspace. Both default to
+empty. A read root does not grant writes, and a write root does not grant reads. The shell is not
+confined to those roots. When `RunCommands` is granted, the shell cwd is the workspace.
 A socket transport needs `bindHost`, `bindPort`, and `bindSecret`. Bind fields on any other transport
 are rejected. `mcp` is an opt-in grant for harness MCP calls. Empty denies them. `histos` grants
 every tool on that server. `histos:version` grants only `version`. dsh stores the value and does
@@ -130,6 +133,9 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
       assertTrue(loaded == Left(ProcessError.CliAsk))
     },
     exampleValue(ProcessConfig.load(base.copy(writeRoots = Some("work")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(readRoots = Some("work")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
     },
     exampleValue(ProcessConfig.load(base.copy(mcp = Some("histos:version"))).map(_.mcp)).assert { policy =>

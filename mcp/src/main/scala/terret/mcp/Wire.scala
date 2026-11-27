@@ -92,6 +92,7 @@ enum WireEvent derives Schema, JsonCodec:
   case ToolStarted(id: String, name: String, input: String)
   case ToolUpdated(id: String, name: String, input: String)
   case Plan(steps: Chunk[String])
+  case Refused(call: String, name: String, reason: String)
   case TurnFinished(outcome: WireOutcome)
   case Activity(
       id: String,
@@ -113,8 +114,10 @@ object WireEvent:
         ToolStarted(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
       case Event.ToolUpdated(call) =>
         ToolUpdated(call.id.value, Redact.text(call.name.value), Redact.text(call.input.toJson))
-      case Event.Plan(steps)           => Plan(steps.map(step => Redact.text(step.text)))
-      case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
+      case Event.Plan(steps)                     => Plan(steps.map(step => Redact.text(step.text)))
+      case Event.Refused(call, name, reason)     =>
+        Refused(call, Redact.text(name), Redact.text(reason))
+      case Event.TurnFinished(outcome)           => TurnFinished(WireOutcome.from(outcome))
 
   def activity(event: terret.activity.ActivityEvent): WireEvent =
     Activity(
