@@ -589,9 +589,14 @@ object McpJobsSpec extends ZIOSpecDefault:
       case _: WireEvent.ToolStarted  => "ToolStarted"
       case _: WireEvent.ToolUpdated  => "ToolUpdated"
       case _: WireEvent.Plan         => "Plan"
-      case _: WireEvent.Refused      => "Refused"
-      case _: WireEvent.TurnFinished => "TurnFinished"
-      case _: WireEvent.Activity     => "Activity"
+      case _: WireEvent.Refused        => "Refused"
+      case _: WireEvent.TurnFinished   => "TurnFinished"
+      case _: WireEvent.SteerQueued    => "SteerQueued"
+      case _: WireEvent.SteerSent      => "SteerSent"
+      case _: WireEvent.TurnCancelled  => "TurnCancelled"
+      case _: WireEvent.SessionResumed => "SessionResumed"
+      case _: WireEvent.SessionOpened  => "SessionOpened"
+      case _: WireEvent.Activity       => "Activity"
 
   private def awaitEvent(queue: Queue[Message], id: String, kind: String): UIO[Unit] =
     queue.poll.flatMap {

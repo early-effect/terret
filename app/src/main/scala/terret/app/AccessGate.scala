@@ -91,7 +91,11 @@ object AccessGate:
     Middleware.interceptZIO { request =>
       ZIO
         .serviceWithZIO[AccessGate](_.allow(request.headers))
-        .tapError(error => ZIO.serviceWithZIO[AuthLog](_.record(AuthReason.from(error), request.path.render)))
+        .tapError { error =>
+          ZIO.serviceWithZIO[AuthLog](
+            _.record(AuthReason.from(error), request.path.render, AccessActor.of(request.headers))
+          )
+        }
         .mapError(_ => denied)
         .as(request)
     }

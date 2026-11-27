@@ -27,6 +27,7 @@ enum WatchKind:
   case TestLine
   case Plan
   case Message
+  case Refused
   case Thought
   case Turn
 
@@ -37,6 +38,7 @@ enum WatchKind:
     case WatchKind.TestLine     => "TestLine"
     case WatchKind.Plan         => "Plan"
     case WatchKind.Message      => "Message"
+    case WatchKind.Refused      => "Refused"
     case WatchKind.Thought      => "Thought"
     case WatchKind.Turn         => "Turn"
 end WatchKind
@@ -94,6 +96,7 @@ object WatchQuery:
       WatchKind.TestLine,
       WatchKind.Plan,
       WatchKind.Message,
+      WatchKind.Refused,
     )
 
   val default: WatchQuery =
@@ -168,8 +171,8 @@ object WatchQuery:
     query.q.map(strip).filter(_.nonEmpty).map { raw =>
       val token = raw.map(css).mkString
       "#feed [data-row]{display:none}" +
-        s"""#feed [data-row][data-text*="$token"]{display:block}""" +
-        s"""#feed [data-row]:has([data-text*="$token"]){display:block}"""
+        s"""#feed [data-row][data-text*="$token"]{display:grid}""" +
+        s"""#feed [data-row]:has([data-text*="$token"]){display:grid}"""
     }
 
   def toggleKind(query: WatchQuery, kind: WatchKind): WatchQuery =

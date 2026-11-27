@@ -20,13 +20,14 @@ object AuthReason:
       case AccessError.Malformed  => Malformed
       case AccessError.UnknownKid => UnknownKid
 
-/** One rejected request. The reason is the error name. The path is the request path. The token and any email stay out.
+/** One rejected request. The reason is the error name. The path is the request path. `actor` is the viewer hash when a
+  * token was presented. The token and any email stay out.
   */
-final case class Denial(reason: String, path: String, at: Instant)
+final case class Denial(reason: String, path: String, at: Instant, actor: Option[String])
 
 /** A bounded log of auth denials. Past the cap, the oldest entry drops. */
 trait AuthLog:
-  def record(reason: AuthReason, path: String): UIO[Unit]
+  def record(reason: AuthReason, path: String, actor: Option[String] = None): UIO[Unit]
   def recent: UIO[Chunk[Denial]]
 
 object AuthLog:
@@ -36,10 +37,10 @@ object AuthLog:
     ZLayer.scoped {
       Ref.make(Chunk.empty[Denial]).map { rows =>
         new:
-          def record(reason: AuthReason, path: String): UIO[Unit] =
+          def record(reason: AuthReason, path: String, actor: Option[String] = None): UIO[Unit] =
             Clock.instant.flatMap { at =>
               rows.update { current =>
-                val next = current :+ Denial(reason.toString, path, at)
+                val next = current :+ Denial(reason.toString, path, at, actor)
                 if next.length > Limit then next.takeRight(Limit) else next
               }
             }

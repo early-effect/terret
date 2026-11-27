@@ -6,7 +6,7 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
 import terret.transcript.JournalBound
 import terret.model.ModelKey
-import terret.permission.{Ceiling, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy, SessionTools}
 import terret.prompt.Prompt
 import terret.session.SessionId
 import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
@@ -36,10 +36,12 @@ final class GrokHarness private (
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey] = None,
+      tools: SessionTools = SessionTools.Unset,
   ): IO[HarnessFailure, SessionId] =
+    val chosen = grantsOf(tools)
     config.transport match
-      case GrokTransport.Cli => openCli(workspace, ceiling, policy, model)
-      case _                 => openAcp(workspace, ceiling, policy, model)
+      case GrokTransport.Cli => openCli(workspace, ceiling, policy, model, chosen)
+      case _                 => openAcp(workspace, ceiling, policy, model, chosen)
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrap {
@@ -79,6 +81,9 @@ final class GrokHarness private (
       case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
     }
 
+  def note(id: SessionId, event: Event): UIO[Unit] =
+    journal.append(id, event)
+
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     require(id).flatMap { slot =>
       slot.hostCancel.set(true) *>
@@ -105,6 +110,7 @@ final class GrokHarness private (
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey],
+      grants: McpPolicy,
   ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
@@ -122,7 +128,7 @@ final class GrokHarness private (
           id,
           GrokHarness.Slot
             .empty(workspace, ceiling, policy, names, refusals, printed, hostCancel)
-            .copy(network = network, model = model),
+            .copy(network = network, model = model, grants = grants),
         )
       )
     yield id
@@ -132,13 +138,14 @@ final class GrokHarness private (
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey],
+      grants: McpPolicy,
   ): IO[HarnessFailure, SessionId] =
     scope.extend {
       for
         loaded <- catalog.load(workspace).mapError(_ => HarnessFailure.Protocol(ProtocolFault.Malformed))
-        passed = mcp.granted(loaded)
+        passed = grants.granted(loaded)
         network    <- hosts.load
-        pipe       <- acp.open(workspace, policy, ceiling, mcp, network, model)
+        pipe       <- acp.open(workspace, policy, ceiling, grants, network, model)
         result     <- handshake(pipe, workspace, passed).tapError(_ => pipe.close)
         id         <- ZIO.fromEither(AcpEvents.sessionId(result)).mapError(HarnessFailure.Protocol(_))
         names      <- Ref.make(Map.empty[String, ToolName])
@@ -151,7 +158,14 @@ final class GrokHarness private (
             id,
             GrokHarness.Slot
               .empty(workspace, ceiling, policy, names, refusals, printed, hostCancel)
-              .copy(pipe = Some(pipe), nextId = 3, mcpServers = passed, network = network, model = model),
+              .copy(
+                pipe = Some(pipe),
+                nextId = 3,
+                mcpServers = passed,
+                network = network,
+                model = model,
+                grants = grants,
+              ),
           )
         )
       yield id
@@ -219,7 +233,17 @@ final class GrokHarness private (
   private def cliTurn(id: SessionId, slot: GrokHarness.Slot, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
     ZStream.unwrapScoped {
       val argv =
-        Launch.cli(config, id, prompt, slot.prompted, slot.policy, slot.ceiling, mcp, slot.network, slot.model)
+        Launch.cli(
+          config,
+          id,
+          prompt,
+          slot.prompted,
+          slot.policy,
+          slot.ceiling,
+          slot.grants,
+          slot.network,
+          slot.model,
+        )
       for
         spawned <- ZIO.acquireRelease(spawner.spawn(argv.command, argv.args, slot.workspace))(_.destroy)
         _       <- markPrompted(id)
@@ -291,9 +315,14 @@ final class GrokHarness private (
       slot.refusals,
       slot.printed,
       slot.hostCancel,
-      McpAccess(mcp, slot.mcpServers.map(_.server).toSet),
+      McpAccess(slot.grants, slot.mcpServers.map(_.server).toSet),
       slot.network,
     )
+
+  private def grantsOf(tools: SessionTools): McpPolicy =
+    tools match
+      case SessionTools.Unset          => mcp
+      case SessionTools.Chosen(grants) => McpPolicy(grants.map(grant => McpGrant(grant.server, grant.tools)))
 
   private def append(id: SessionId, event: Event): UIO[Unit] =
     journal.append(id, event)
@@ -320,6 +349,7 @@ object GrokHarness:
       mcpServers: Chunk[McpServer] = Chunk.empty,
       network: NetworkPolicy = NetworkPolicy.empty,
       model: Option[ModelKey] = None,
+      grants: McpPolicy = McpPolicy.empty,
   )
 
   private[grok] object Slot:

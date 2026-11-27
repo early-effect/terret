@@ -6,7 +6,7 @@ import terret.harness.{Harness, HarnessFailure, ProtocolFault}
 import terret.milestone.MilestoneSink
 import terret.transcript.JournalBound
 import terret.model.ModelKey
-import terret.permission.{Ceiling, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy, SessionTools}
 import terret.prompt.Prompt
 import terret.session.SessionId
 import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
@@ -27,6 +27,7 @@ final class DshHarness private (
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey] = None,
+      tools: SessionTools = SessionTools.Unset,
   ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
@@ -34,7 +35,7 @@ final class DshHarness private (
         .fromEither(SessionId.from(uuid.toString))
         .mapError(_ => HarnessFailure.Protocol(ProtocolFault.Incomplete))
       _ <- journal.open(id)
-      _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy, model)))
+      _ <- sessions.update(_.updated(id, DshHarness.Slot.empty(workspace, ceiling, policy, model).copy(tools = tools)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -71,6 +72,9 @@ final class DshHarness private (
       case Some(found) => ZIO.succeed(found)
       case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
     }
+
+  def note(id: SessionId, event: Event): UIO[Unit] =
+    journal.append(id, event)
 
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     require(id) *> gates.get.flatMap(open => ZIO.foreachDiscard(open.get(id))(_.succeed(())))
@@ -121,6 +125,7 @@ object DshHarness:
       policy: PermissionPolicy,
       remote: Option[String],
       model: Option[ModelKey],
+      tools: SessionTools = SessionTools.Unset,
   )
 
   private[dsh] object Slot:

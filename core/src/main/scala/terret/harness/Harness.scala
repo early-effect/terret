@@ -2,7 +2,7 @@ package terret.harness
 
 import terret.event.Event
 import terret.model.ModelKey
-import terret.permission.{Ceiling, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy, SessionTools}
 import terret.prompt.Prompt
 import terret.session.SessionId
 import terret.transcript.{Entry, Page, Transcript}
@@ -16,6 +16,7 @@ trait Harness:
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey] = None,
+      tools: SessionTools = SessionTools.Unset,
   ): IO[HarnessFailure, SessionId]
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event]
   def resume(id: SessionId): ZStream[Any, HarnessFailure, Event]
@@ -26,6 +27,9 @@ trait Harness:
   /** Entries appended after this belong to `turn`. The id is the session epoch. */
   def markTurn(id: SessionId, turn: Long): UIO[Unit]
   def cancel(id: SessionId): IO[HarnessFailure, Unit]
+
+  /** Append one event the harness did not produce. A session that is not open is left alone. */
+  def note(id: SessionId, event: Event): UIO[Unit]
 
   /** Release every child this harness still owns. Idempotent. */
   def close: UIO[Unit]

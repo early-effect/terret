@@ -4,7 +4,7 @@ import terret.event.{Event, TurnOutcome}
 import terret.harness.{Harness, HarnessFailure}
 import terret.milestone.MilestoneSink
 import terret.model.ModelKey
-import terret.permission.{Ceiling, PermissionPolicy}
+import terret.permission.{Ceiling, PermissionPolicy, SessionTools}
 import terret.prompt.Prompt
 import terret.session.SessionId
 import terret.transcript.{Entry, Journal, Page, Retain, Transcript}
@@ -26,6 +26,7 @@ final case class Applied(
     ceiling: Ceiling,
     policy: PermissionPolicy,
     model: Option[ModelKey],
+    tools: SessionTools,
 )
 
 final class InMemory private (
@@ -39,19 +40,20 @@ final class InMemory private (
   def cancelled: UIO[Chunk[SessionId]] = cancelledIds.get
 
   def applied(id: SessionId): IO[HarnessFailure, Applied] =
-    slot(id).map(found => Applied(found.workspace, found.ceiling, found.policy, found.model))
+    slot(id).map(found => Applied(found.workspace, found.ceiling, found.policy, found.model, found.tools))
 
   def open(
       workspace: Workspace,
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey] = None,
+      tools: SessionTools = SessionTools.Unset,
   ): IO[HarnessFailure, SessionId] =
     for
       uuid <- Random.nextUUID
       id = SessionId.trusted(uuid.toString)
       _ <- journal.open(id)
-      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy, model)))
+      _ <- sessions.update(_.updated(id, InMemory.Slot(workspace, ceiling, policy, model, tools)))
     yield id
 
   def prompt(id: SessionId, prompt: Prompt): ZStream[Any, HarnessFailure, Event] =
@@ -85,6 +87,9 @@ final class InMemory private (
       case None        => ZIO.fail(HarnessFailure.UnknownSession(id))
     }
 
+  def note(id: SessionId, event: Event): UIO[Unit] =
+    journal.append(id, event)
+
   def cancel(id: SessionId): IO[HarnessFailure, Unit] =
     slot(id).flatMap { _ =>
       gates.get.flatMap { open =>
@@ -115,6 +120,7 @@ object InMemory:
       ceiling: Ceiling,
       policy: PermissionPolicy,
       model: Option[ModelKey],
+      tools: SessionTools,
   )
 
   def make(script: Script, milestones: MilestoneSink = MilestoneSink.discard): UIO[InMemory] =

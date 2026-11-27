@@ -23,14 +23,18 @@ object Ingress:
   ): Routes[R & AccessGate & AuthLog, Nothing] =
     Routes.fromHandler {
       Handler.fromFunctionZIO { request =>
-        WatchSecurity.crossSite(request) match
+        WatchSecurity.screen(request) match
           case Some(refused) => ZIO.succeed(WatchSecurity.seal(refused, hsts))
           case None          =>
             if !hsts || WatchSecurity.mcp(request) then answer(routes, request, hsts)
             else
               ZIO
                 .serviceWithZIO[AccessGate](_.allow(request.headers))
-                .tapError(error => ZIO.serviceWithZIO[AuthLog](_.record(AuthReason.from(error), request.path.render)))
+                .tapError { error =>
+                  ZIO.serviceWithZIO[AuthLog](
+                    _.record(AuthReason.from(error), request.path.render, AccessActor.of(request.headers))
+                  )
+                }
                 .foldZIO(
                   _ => ZIO.succeed(WatchSecurity.seal(WatchSecurity.denied, hsts)),
                   _ =>

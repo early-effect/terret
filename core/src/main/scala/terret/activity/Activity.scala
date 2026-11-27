@@ -14,6 +14,7 @@ enum ActivityKind:
   case TestLine
   case Plan
   case Message
+  case Refused
 
 final case class ActivityNote(
     kind: ActivityKind,
@@ -62,8 +63,8 @@ object Activity:
   def place(index: Long, turn: Long, at: Instant, notes: Chunk[ActivityNote]): Chunk[ActivityEvent] =
     notes.zipWithIndex.map { (note, nth) =>
       val underCall = note.kind match
-        case ActivityKind.Output | ActivityKind.TestLine | ActivityKind.ToolFinished => true
-        case ActivityKind.ToolStarted | ActivityKind.Plan | ActivityKind.Message     => false
+        case ActivityKind.Output | ActivityKind.TestLine | ActivityKind.ToolFinished | ActivityKind.Refused => true
+        case ActivityKind.ToolStarted | ActivityKind.Plan | ActivityKind.Message                         => false
       val parent = if underCall then note.call.getOrElse(turnId(turn)) else turnId(turn)
       val id     = if note.kind == ActivityKind.ToolStarted then note.call.getOrElse(s"$index:$nth") else s"$index:$nth"
       ActivityEvent(id, parent, note.kind, note.call, note.name, note.status, note.text, at)
@@ -88,6 +89,13 @@ object Activity:
       case Event.Plan(steps)                 => plan(memory, steps)
       case Event.Refused(call, name, reason) => refused(memory, call, name, reason)
       case Event.TurnFinished(_)             => (memory, Chunk.empty)
+      case Event.SteerQueued(_, _, text, _)  => noted(memory, "SteerQueued", text)
+      case Event.SteerSent(_, text, _)       => noted(memory, "SteerSent", text)
+      case Event.TurnCancelled(actor, _)     => noted(memory, "TurnCancelled", actor)
+      case Event.SessionResumed(actor, _)    => noted(memory, "SessionResumed", actor)
+      case Event.SessionOpened(actor, workspace, model, _) =>
+        val shown = model.fold(workspace)(name => s"$workspace $name")
+        noted(memory, "SessionOpened", s"$actor $shown")
 
   private def started(memory: ActivityMemory, call: ToolCall): (ActivityMemory, Chunk[ActivityNote]) =
     val name = call.name.value
@@ -127,13 +135,21 @@ object Activity:
       reason: String,
   ): (ActivityMemory, Chunk[ActivityNote]) =
     val note = ActivityNote(
-      ActivityKind.Message,
+      ActivityKind.Refused,
       Option.when(call.nonEmpty)(call),
       Option.when(name.nonEmpty)(name),
       Some("refused"),
       reason,
     )
     (memory, Chunk(note))
+
+  private def noted(
+      memory: ActivityMemory,
+      kind: String,
+      text: String,
+  ): (ActivityMemory, Chunk[ActivityNote]) =
+    val clipped = if text.length <= 160 then text else text.take(160)
+    (memory, Chunk(ActivityNote(ActivityKind.Message, None, Some(kind), Some(kind), clipped)))
 
   private def message(memory: ActivityMemory, text: String): (ActivityMemory, Chunk[ActivityNote]) =
     val (delta, stored) = prose(memory.message, text)
