@@ -16,15 +16,21 @@ cap, and the session records what was dropped.
 rejected. An unset root means the opened workspace is its own root.
 
 On Grok, `Ask` under `Closed` or `Clamp` is ACP stdio. The ceiling removes every tool it does not
-grant, and terret answers `session/request_permission`. A shell write needs `RunCommands` and
-`WriteWorkspace`, and the target has to sit in the session workspace or a `writeRoots` path. A
-ceiling without `RunCommands` removes the shell, including both names Grok uses for it.
+grant, and terret answers `session/request_permission`. A file tool is allowed only when its path,
+after `~` and `..` and symlink resolution, sits inside a granted root. With no extra config the only
+root is the session workspace. `readRoots` adds read roots and `writeRoots` adds write roots. Both
+default to empty, and neither grant implies the other: `ReadWorkspace` never grants a write. The
+check runs when the call arrives, against the real path. A path that is already outside every root
+is refused without resolving it. A refusal names the missing grant, or `terret.readRoots` /
+`terret.writeRoots`, and it is recorded as an activity message. When server policy removed the
+grant, the refusal says it was clamped by server policy, and the turn continues.
+A ceiling without `RunCommands` removes the shell, including both names Grok uses for it. When the
+shell is granted, its cwd is the workspace. The shell is not confined: a command can still reach
+past that cwd, and sandboxing it is a separate follow-up. A shell write that the command line shows
+still needs `WriteWorkspace` and a path in the workspace or `writeRoots`. That scan is not a sandbox.
 `Network` covers `web_fetch` and `web_search`. A ceiling without `Network` removes both and
 passes `--disable-web-search`. A `use_tool` request whose `tool_name` is one of those, or
-another network tool, is `Network` too. A refusal names the missing grant. When server policy
-removed that grant, the refusal says it was clamped by server policy, and the turn continues.
-An edit or a write checks `file_path` and every other path in `rawInput` against the workspace
-roots. A running command reports only new output.
+another network tool, is `Network` too. A running command reports only new output.
 """,
     exampleValue(PermissionPolicy.Closed.ceiling).assert { cap =>
       assertTrue(cap.allow == Set(Permission.ReadWorkspace))

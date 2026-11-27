@@ -112,6 +112,10 @@ object ProcessSpec extends ZIOSpecDefault:
           .map(root => zio.Chunk(root))
           .left
           .map(ProcessError.Workspace(_)),
+        ProcessConfig.load(defaults.copy(transport = None, readRoots = Some("work"))) ==
+          Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
+        ProcessConfig.load(defaults.copy(transport = None, readRoots = Some("/tmp"))).map(_.readRoots) ==
+          terret.workspace.Workspace.from("/tmp").map(root => zio.Chunk(root)).left.map(ProcessError.Workspace(_)),
       )
     },
     test("an empty version and a relative root are refused") {

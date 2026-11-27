@@ -35,6 +35,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           streamed == Chunk(
             Event.Thought("hmm"),
             Event.Assistant("hello"),
+            Event.Refused("call_1", "edit", "edit needs WriteWorkspace, clamped by server policy"),
             Event.ToolUpdated(printed),
             Event.TurnFinished(TurnOutcome.Completed),
           ),
@@ -225,7 +226,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       filePath(params) match
         case None       => ZIO.dieMessage("recorded write frame has no file_path")
         case Some(path) =>
-          val reason = s"write writes $path, outside the workspace"
+          val reason = s"write writes $path, outside the workspace; grant it in terret.writeRoots"
           recorded(params, "outside the workspace", "write").map { (got, record) =>
             refused(got, record, "outside the workspace", reason)
           }
@@ -269,6 +270,10 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       record.payloads.exists(option(_, "reject-once")),
       record.payloads.exists(followup(_, reason)),
       refusalText(got, reason),
+      got.exists {
+        case Event.Refused(_, _, text) => text == reason
+        case _                         => false
+      },
       thoughtHas(got, phrase),
       assistantHas(got, phrase),
       !thoughtHas(got, reason),

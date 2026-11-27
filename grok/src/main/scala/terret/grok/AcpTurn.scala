@@ -13,7 +13,9 @@ object AcpTurn:
       policy: PermissionPolicy,
       ceiling: Ceiling,
       workspace: Workspace,
+      readRoots: Chunk[Workspace],
       writeRoots: Chunk[Workspace],
+      files: FileRoots,
       names: Ref[Map[String, ToolName]],
       refusals: Ref[Map[String, String]],
       printed: Ref[Map[String, String]],
@@ -66,18 +68,29 @@ object AcpTurn:
       scope: Scope,
   ): IO[HarnessFailure, Chunk[Event]] =
     if method == "session/request_permission" then
-      val decision =
-        PermissionChoice.decide(
+      PermissionChoice
+        .decide(
           scope.policy,
           scope.ceiling,
           scope.workspace,
+          scope.readRoots,
           scope.writeRoots,
           params,
+          scope.files,
           scope.mcp,
           scope.network,
         )
-      remember(scope, decision) *> pipe.write(Wire.ok(requestId, PermissionChoice.body(decision))).as(Chunk.empty)
+        .flatMap { decision =>
+          remember(scope, decision) *>
+            pipe.write(Wire.ok(requestId, PermissionChoice.body(decision))).as(refused(params, decision))
+        }
     else pipe.write(Wire.fail(requestId, Wire.methodNotFound, "Method not found")).as(Chunk.empty)
+
+  private def refused(params: Json, decision: PermissionAnswer): Chunk[Event] =
+    decision match
+      case PermissionAnswer.Refused(_, callId, reason) =>
+        Chunk(Event.Refused(callId, PermissionChoice.statedName(params), reason))
+      case _ => Chunk.empty
 
   private def remember(scope: Scope, decision: PermissionAnswer): IO[HarnessFailure, Unit] =
     decision match

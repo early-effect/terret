@@ -3,9 +3,9 @@ package terret.grok
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.ast.Json
-import zio.Chunk
+import zio.{Chunk, UIO, ZIO}
 
-import java.nio.file.{InvalidPathException, Path}
+import java.nio.file.Path
 
 enum PermissionAnswer:
   case Selected(optionId: String)
@@ -13,27 +13,34 @@ enum PermissionAnswer:
   case Cancelled
 
 object PermissionChoice:
+  val readRootsKey  = "terret.readRoots"
+  val writeRootsKey = "terret.writeRoots"
+
   def decide(
       policy: PermissionPolicy,
       ceiling: Ceiling,
       workspace: Workspace,
+      readRoots: Chunk[Workspace],
       writeRoots: Chunk[Workspace],
       params: Json,
+      files: FileRoots,
       access: McpAccess = McpAccess.closed,
       hosts: NetworkPolicy = NetworkPolicy.empty,
-  ): PermissionAnswer =
-    val tool = JsonFields
-      .obj(params)
-      .flatMap(JsonFields.field(_, "toolCall"))
-      .flatMap(JsonFields.obj)
-      .getOrElse(Json.Obj())
-    val kind  = JsonFields.str(tool, "kind").getOrElse("")
-    val allow = allows(policy, ceiling, workspace, writeRoots, tool, kind, access, hosts)
-    pick(options(params), allow, callId(tool))
+      home: Path = FileRoots.home,
+  ): UIO[PermissionAnswer] =
+    val tool = toolOf(params)
+    val kind = JsonFields.str(tool, "kind").getOrElse("")
+    allows(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, access, hosts, files, home).map { decision =>
+      pick(options(params), decision, callId(tool))
+    }
+
+  def statedName(params: Json): String =
+    val tool = toolOf(params)
+    label(tool, JsonFields.str(tool, "kind").getOrElse(""))
 
   def body(answer: PermissionAnswer): Json =
     answer match
-      case PermissionAnswer.Selected(optionId)           => selected(optionId)
+      case PermissionAnswer.Selected(optionId) => selected(optionId)
       case PermissionAnswer.Refused(optionId, _, reason) =>
         Json.Obj(
           "outcome" -> Json.Obj("outcome" -> Json.Str("selected"), "optionId" -> Json.Str(optionId)),
@@ -45,45 +52,94 @@ object PermissionChoice:
   private def selected(optionId: String): Json =
     Json.Obj("outcome" -> Json.Obj("outcome" -> Json.Str("selected"), "optionId" -> Json.Str(optionId)))
 
+  private def toolOf(params: Json): Json.Obj =
+    JsonFields
+      .obj(params)
+      .flatMap(JsonFields.field(_, "toolCall"))
+      .flatMap(JsonFields.obj)
+      .getOrElse(Json.Obj())
+
   private def allows(
       policy: PermissionPolicy,
       ceiling: Ceiling,
       workspace: Workspace,
+      readRoots: Chunk[Workspace],
       writeRoots: Chunk[Workspace],
       tool: Json.Obj,
       kind: String,
       access: McpAccess,
       hosts: NetworkPolicy,
-  ): Decision =
-    if networkKind(kind) || webTool(tool) then networkDecision(policy, ceiling, tool, kind, hosts)
+      files: FileRoots,
+      home: Path,
+  ): UIO[Decision] =
+    if networkKind(kind) || webTool(tool) then ZIO.succeed(networkDecision(policy, ceiling, tool, kind, hosts))
     else
       val call = mcpCall(tool)
       policy match
         case PermissionPolicy.Inherit =>
           call match
-            case Some(found) => mcpDecision(access, found)
-            case None        => Decision.Allow
+            case Some(found) => ZIO.succeed(mcpDecision(access, found))
+            case None        =>
+              route(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, files, home, inherited = true)
         case _ =>
           call match
-            case Some(found) => mcpDecision(access, found)
+            case Some(found) => ZIO.succeed(mcpDecision(access, found))
             case None        =>
-              normalize(kind) match
-                case "read" | "search" | "grep" | "glob" =>
-                  grant(policy, ceiling, Permission.ReadWorkspace, label(tool, kind))
-                case "edit" | "write" | "delete" | "move" | "rename" =>
-                  guarded(
-                    policy,
-                    ceiling,
-                    Permission.WriteWorkspace,
-                    label(tool, kind),
-                    locations(tool),
-                    cwd(tool, workspace),
-                    roots(workspace, writeRoots),
-                  )
-                case "execute" | "bash" | "terminal" =>
-                  shell(policy, ceiling, tool, workspace, writeRoots)
-                case "think" | "thought" => Decision.Allow
-                case _                   => Decision.Deny(s"${label(tool, kind)} needs a granted permission")
+              route(policy, ceiling, workspace, readRoots, writeRoots, tool, kind, files, home, inherited = false)
+
+  private def route(
+      policy: PermissionPolicy,
+      ceiling: Ceiling,
+      workspace: Workspace,
+      readRoots: Chunk[Workspace],
+      writeRoots: Chunk[Workspace],
+      tool: Json.Obj,
+      kind: String,
+      files: FileRoots,
+      home: Path,
+      inherited: Boolean,
+  ): UIO[Decision] =
+    val name = label(tool, kind)
+    normalize(kind) match
+      case "read" | "search" | "grep" | "glob" | "list" =>
+        confine(
+          policy,
+          ceiling,
+          Permission.ReadWorkspace,
+          name,
+          "reads",
+          readRootsKey,
+          locations(tool),
+          workspace,
+          readRoots,
+          files,
+          home,
+        )
+      case "edit" | "write" | "delete" | "move" | "rename" | "create" =>
+        confine(
+          policy,
+          ceiling,
+          Permission.WriteWorkspace,
+          name,
+          "writes",
+          writeRootsKey,
+          locations(tool),
+          workspace,
+          writeRoots,
+          files,
+          home,
+        )
+      case "execute" | "bash" | "terminal" =>
+        shell(policy, ceiling, tool, workspace, writeRoots, files, home)
+      case "think" | "thought" => ZIO.succeed(Decision.Allow)
+      case _ if locations(tool).nonEmpty =>
+        val mode = if readOnly(tool) then Permission.ReadWorkspace else Permission.WriteWorkspace
+        val verb = if mode == Permission.ReadWorkspace then "reads" else "writes"
+        val key  = if mode == Permission.ReadWorkspace then readRootsKey else writeRootsKey
+        val extra = if mode == Permission.ReadWorkspace then readRoots else writeRoots
+        confine(policy, ceiling, mode, name, verb, key, locations(tool), workspace, extra, files, home)
+      case _ if inherited => ZIO.succeed(Decision.Allow)
+      case _              => ZIO.succeed(Decision.Deny(s"$name needs a granted permission"))
 
   private def networkDecision(
       policy: PermissionPolicy,
@@ -131,43 +187,115 @@ object PermissionChoice:
       tool: Json.Obj,
       workspace: Workspace,
       writeRoots: Chunk[Workspace],
-  ): Decision =
+      files: FileRoots,
+      home: Path,
+  ): UIO[Decision] =
     val name = label(tool, "execute")
-    if !ceiling.allow.contains(Permission.RunCommands) then Decision.Deny(missing(policy, Permission.RunCommands, name))
+    if !ceiling.allow.contains(Permission.RunCommands) then
+      ZIO.succeed(Decision.Deny(missing(policy, Permission.RunCommands, name)))
     else
-      val effect  = command(tool).fold(ShellEffect.Opaque)(ShellWrite.effect)
-      val located = locations(tool)
-      val writing = effect match
-        case ShellEffect.ReadOnly  => located.nonEmpty
-        case ShellEffect.Writes(_) => true
-        case ShellEffect.Opaque    => true
-      if !writing then Decision.Allow
-      else if !ceiling.allow.contains(Permission.WriteWorkspace) then
-        Decision.Deny(missing(policy, Permission.WriteWorkspace, name))
-      else
-        val targets = effect match
-          case ShellEffect.Writes(paths) => paths ++ located
-          case _                         => located
-        val base  = cwd(tool, workspace)
-        val roots = this.roots(workspace, writeRoots)
-        targets.find(path => !inside(path, base, roots)) match
-          case Some(path) => Decision.Deny(s"$name writes $path, outside the workspace")
-          case None       => Decision.Allow
+      shellBase(tool, workspace, files, home).flatMap {
+        case ShellBase.Off(raw) => ZIO.succeed(Decision.Deny(s"$name cwd is $raw, outside the workspace"))
+        case ShellBase.Ok(base) =>
+          val effect  = command(tool).fold(ShellEffect.Opaque)(ShellWrite.effect)
+          val located = locations(tool)
+          val writing = effect match
+            case ShellEffect.ReadOnly  => located.nonEmpty
+            case ShellEffect.Writes(_) => true
+            case ShellEffect.Opaque    => true
+          if !writing then ZIO.succeed(Decision.Allow)
+          else if !ceiling.allow.contains(Permission.WriteWorkspace) then
+            ZIO.succeed(Decision.Deny(missing(policy, Permission.WriteWorkspace, name)))
+          else
+            val targets = effect match
+              case ShellEffect.Writes(paths) => paths ++ located
+              case _                         => located
+            each(
+              name,
+              "writes",
+              writeRootsKey,
+              targets,
+              base,
+              rootPaths(workspace, writeRoots),
+              home,
+              files,
+            )
+      }
 
-  private def guarded(
+  private def confine(
       policy: PermissionPolicy,
       ceiling: Ceiling,
       permission: Permission,
       name: String,
+      verb: String,
+      key: String,
+      targets: Chunk[String],
+      workspace: Workspace,
+      extra: Chunk[Workspace],
+      files: FileRoots,
+      home: Path,
+  ): UIO[Decision] =
+    if !ceiling.allow.contains(permission) then ZIO.succeed(Decision.Deny(missing(policy, permission, name)))
+    else each(name, verb, key, targets, workspace.path, rootPaths(workspace, extra), home, files)
+
+  private def each(
+      name: String,
+      verb: String,
+      key: String,
       targets: Chunk[String],
       base: Path,
       roots: Chunk[Path],
-  ): Decision =
-    if !ceiling.allow.contains(permission) then Decision.Deny(missing(policy, permission, name))
-    else
-      targets.find(path => !inside(path, base, roots)) match
-        case Some(path) => Decision.Deny(s"$name writes $path, outside the workspace")
-        case None       => Decision.Allow
+      home: Path,
+      files: FileRoots,
+  ): UIO[Decision] =
+    def go(rest: Chunk[String]): UIO[Decision] =
+      rest.headOption match
+        case None => ZIO.succeed(Decision.Allow)
+        case Some(target) =>
+          placed(target, base, roots, home, files).flatMap {
+            case false => ZIO.succeed(Decision.Deny(outside(name, verb, target, key)))
+            case true  => go(rest.drop(1))
+          }
+    go(targets)
+
+  private def outside(name: String, verb: String, path: String, key: String): String =
+    s"$name $verb $path, outside the workspace; grant it in $key"
+
+  /** A path outside every root is refused here and is not resolved. */
+  private def placed(
+      target: String,
+      base: Path,
+      roots: Chunk[Path],
+      home: Path,
+      files: FileRoots,
+  ): UIO[Boolean] =
+    FileRoots.lexical(target, base, home) match
+      case None => ZIO.succeed(false)
+      case Some(abs) =>
+        val cover = roots.filter(root => abs.startsWith(root))
+        if cover.isEmpty then ZIO.succeed(false)
+        else
+          files.resolve(abs).flatMap {
+            case None => ZIO.succeed(false)
+            case Some(real) =>
+              ZIO.foreach(cover)(files.resolve).map { resolved =>
+                resolved.flatten.exists(root => real.startsWith(root))
+              }
+          }
+
+  private def shellBase(tool: Json.Obj, workspace: Workspace, files: FileRoots, home: Path): UIO[ShellBase] =
+    val raw = JsonFields
+      .field(tool, "rawInput")
+      .flatMap(JsonFields.obj)
+      .flatMap(obj => JsonFields.str(obj, "cwd").filter(_.nonEmpty))
+    raw match
+      case None => ZIO.succeed(ShellBase.Ok(workspace.path))
+      case Some(text) =>
+        placed(text, workspace.path, Chunk(workspace.path.normalize), home, files).flatMap {
+          case false => ZIO.succeed(ShellBase.Off(text))
+          case true  =>
+            ZIO.succeed(ShellBase.Ok(FileRoots.lexical(text, workspace.path, home).getOrElse(workspace.path)))
+        }
 
   private def grant(
       policy: PermissionPolicy,
@@ -240,35 +368,15 @@ object PermissionChoice:
     val key = normalize(name).replace("_", "")
     key == "path" || key == "paths" || key.endsWith("path")
 
-  private def cwd(tool: Json.Obj, workspace: Workspace): Path =
-    val raw = JsonFields
-      .field(tool, "rawInput")
-      .flatMap(JsonFields.obj)
-      .flatMap(obj => JsonFields.str(obj, "cwd").filter(_.nonEmpty))
-    raw.flatMap(absolute).getOrElse(workspace.path)
-
-  private def absolute(raw: String): Option[Path] =
-    try
-      val path = Path.of(raw)
-      if path.isAbsolute then Some(path.normalize) else None
-    catch case _: InvalidPathException => None
-
-  private def roots(workspace: Workspace, extra: Chunk[Workspace]): Chunk[Path] =
+  private def rootPaths(workspace: Workspace, extra: Chunk[Workspace]): Chunk[Path] =
     (workspace +: extra).map(_.path.normalize)
 
-  private def inside(target: String, base: Path, roots: Chunk[Path]): Boolean =
-    resolve(target, base) match
-      case None       => false
-      case Some(path) => roots.exists(root => path.startsWith(root))
-
-  private def resolve(target: String, base: Path): Option[Path] =
-    if target.isEmpty then None
-    else
-      try
-        val raw = Path.of(target)
-        val abs = if raw.isAbsolute then raw else base.resolve(raw)
-        Some(abs.normalize)
-      catch case _: InvalidPathException => None
+  private def readOnly(tool: Json.Obj): Boolean =
+    JsonFields.field(tool, "_meta").flatMap(JsonFields.obj).flatMap { meta =>
+      JsonFields.field(meta, "x.ai/tool").flatMap(JsonFields.obj).flatMap(found => JsonFields.field(found, "read_only"))
+    } match
+      case Some(Json.Bool(value)) => value
+      case _                      => false
 
   private def mcpDecision(access: McpAccess, call: McpCall): Decision =
     call match
@@ -418,6 +526,10 @@ object PermissionChoice:
   private enum Decision:
     case Allow
     case Deny(reason: String)
+
+  private enum ShellBase:
+    case Ok(path: Path)
+    case Off(raw: String)
 
   private enum McpCall:
     case Search
