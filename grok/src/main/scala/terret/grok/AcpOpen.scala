@@ -56,7 +56,7 @@ object AcpOpen:
           "readTextFile"  -> Json.Bool(false),
           "writeTextFile" -> Json.Bool(false),
         ),
-        "terminal" -> Json.Bool(false),
+        "terminal" -> Json.Bool(true),
       ),
       "clientInfo" -> Json.Obj(
         "name"    -> Json.Str("terret"),

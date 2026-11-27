@@ -72,6 +72,25 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
         command == PermissionAnswer.Selected("allow-once"),
       )
     },
+    test("a shell the scan would allow is refused when this host cannot sandbox") {
+      val version = shell("./histos --version")
+      val outside = shell("echo hi > /tmp/terret-probe.log")
+      for
+        denied  <- checked(PermissionPolicy.Clamp(commands), commands, version, sandbox = ShellSandbox.missing)
+        escaped <- checked(PermissionPolicy.Clamp(both), both, outside, sandbox = ShellSandbox.missing)
+      yield assertTrue(
+        denied == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "run_terminal_command cannot be sandboxed on this host",
+        ),
+        escaped == PermissionAnswer.Refused(
+          "reject-once",
+          "call_1",
+          "run_terminal_command writes /tmp/terret-probe.log, outside the workspace; grant it in terret.writeRoots",
+        ),
+      )
+    },
     test("tee and cp are writes, and an edit outside the workspace is refused") {
       val tee    = shell("echo hi | tee out.txt")
       val copied = shell("cp README.md target/x.md")
@@ -425,6 +444,7 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
       roots: Chunk[Workspace] = Chunk.empty,
       access: McpAccess = McpAccess.closed,
       hosts: NetworkPolicy = NetworkPolicy.empty,
+      sandbox: ShellSandbox = ShellSandbox.ready,
   ) =
     ZIO
       .fromEither(Workspace.from("/work"))
@@ -439,6 +459,7 @@ object PermissionChoiceSpec extends ZIOSpecDefault:
           FileRoots.unchanged,
           access,
           hosts,
+          sandbox = sandbox,
         )
       }
       .orDieWith(_ => new IllegalArgumentException("workspace"))

@@ -122,6 +122,53 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         }
       }
     },
+    test("terminal/create runs the peeled argument vector") {
+      val script  = "printf x"
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
+      val frames  = handshake ++ Chunk(
+        Wire.request(
+          Json.Str("term-1"),
+          "x.ai/terminal/create",
+          Json.Obj(
+            "command"          -> Json.Str("/bin/bash"),
+            "args"             -> Json.Arr(Json.Str("-lc"), Json.Str(script)),
+            "env"              -> Json.Arr(Json.Obj("name" -> Json.Str("EVIL"), "value" -> Json.Str("1"))),
+            "outputByteLimit" -> Json.Num(BigDecimal(1000)),
+          ),
+        ),
+        ok(3, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+      )
+      (for
+        seen <- Ref.make(Chunk.empty[(Chunk[String], Int)])
+        _    <- stub[ShellSandbox](_.profile(any[ShellBounds]))(ZIO.succeed("(version 1)\n(deny default)\n"))
+        _    <- stub[ShellSandbox](_.start(any[Chunk[String]], any[ShellBounds], any[Int])) {
+          (argv: Chunk[String], _: ShellBounds, limit: Int) =>
+            seen.update(_ :+ (argv, limit)).as(idleTerminal)
+        }
+        sandbox <- ZIO.service[ShellSandbox]
+        answered <- drive(frames, sandbox = sandbox) { (harness, record) =>
+          turn(harness, record, ceiling).map { (_, got) =>
+            got.payloads.exists(terminalId)
+          }
+        }
+        argv <- seen.get
+      yield assertTrue(
+        answered,
+        argv == Chunk((Chunk("/bin/sh", "-c", script), 1000)),
+      )).provide(stubbed[ShellSandbox])
+    },
+    test("terminal/create without a command is invalid params") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
+      val frames  = handshake ++ Chunk(
+        Wire.request(Json.Str("term-2"), "_x.ai/terminal/create", Json.Obj()),
+        ok(3, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+      )
+      drive(frames) { (harness, seen) =>
+        turn(harness, seen, ceiling).map { (_, record) =>
+          assertTrue(record.payloads.exists(hasCode(_, Wire.invalidParams)))
+        }
+      }
+    },
     test("a redirect to /dev/null does not need WriteWorkspace") {
       val run = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       drive(shellFrames("echo hi > /dev/null", allowed = true)) { (harness, seen) =>
@@ -325,6 +372,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
       roots: Chunk[Workspace] = Chunk.empty,
       after: After = After.Eof,
       failPermission: Boolean = false,
+      sandbox: ShellSandbox = ShellSandbox.ready,
   )(use: (GrokHarness, Ref[Seen]) => ZIO[Any, HarnessFailure, A]): ZIO[Any, HarnessFailure, A] =
     ZIO.scoped {
       (for
@@ -350,7 +398,7 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           record(seen, json) *> rejectPermission(json, failPermission)
         }
         _       <- stub[RpcPipe](_.close)(ZIO.unit)
-        harness <- GrokHarness.make(GrokConfig.stdio, spawner, acp, roots)
+        harness <- GrokHarness.make(GrokConfig.stdio, spawner, acp, roots, sandbox = sandbox)
         result  <- use(harness, seen)
       yield result).provideSome[Scope](stubbed[RpcPipe], stubbed[AcpOpen], stubbed[Spawner])
     }
@@ -652,6 +700,16 @@ object AcpHarnessSpec extends ZIOSpecDefault:
           case Some(inner: Json.Obj) => JsonFields.str(inner, "optionId").contains(optionId)
           case _                     => false
       case _ => false
+
+  private val idleTerminal: SandboxHandle = new:
+    def snapshot: zio.UIO[(String, Boolean, Option[Int])] = ZIO.succeed(("", false, Some(0)))
+    def awaitExit: zio.IO[SandboxError, Int]              = ZIO.succeed(0)
+    def kill: zio.UIO[Unit]                               = ZIO.unit
+
+  private def terminalId(json: Json): Boolean =
+    json match
+      case obj: Json.Obj => JsonFields.str(obj, "terminalId").exists(_.nonEmpty)
+      case _             => false
 
   private def hasCode(json: Json, code: Int): Boolean =
     json match

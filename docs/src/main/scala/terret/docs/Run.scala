@@ -42,9 +42,10 @@ approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses A
 the CLI transport cannot answer a permission prompt. The ceiling removes every tool it does not
 grant, and terret answers the prompts that remain. A file tool stays inside the session workspace
 unless `readRoots` or `writeRoots` grants that path for that mode. `ReadWorkspace` never grants a
-write. The shell stays off unless `RunCommands` is granted. When it runs, its cwd is the workspace,
-and it is not confined. A shell write that the command line shows needs `RunCommands` and
-`WriteWorkspace`. A stop Grok cancels on its own is not a host cancel.
+write. The shell stays off unless `RunCommands` is granted. When it runs, its cwd is the workspace.
+A command terret starts is confined to that workspace and the configured roots. A shell write
+that the command line shows needs `RunCommands` and `WriteWorkspace`. A host that cannot
+sandbox refuses the command. A stop Grok cancels on its own is not a host cancel.
 
 Warp's local agent reads `.warp/.mcp.json` in the project or the home directory. The file names that
 URL. A bind on `0.0.0.0` is written as `127.0.0.1`.

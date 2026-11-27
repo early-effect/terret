@@ -25,9 +25,11 @@ is refused without resolving it. A refusal names the missing grant, or `terret.r
 `terret.writeRoots`, and it is recorded as an activity message. When server policy removed the
 grant, the refusal says it was clamped by server policy, and the turn continues.
 A ceiling without `RunCommands` removes the shell, including both names Grok uses for it. When the
-shell is granted, its cwd is the workspace. The shell is not confined: a command can still reach
-past that cwd, and sandboxing it is a separate follow-up. A shell write that the command line shows
-still needs `WriteWorkspace` and a path in the workspace or `writeRoots`. That scan is not a sandbox.
+shell is granted, its cwd is the workspace. The scan refuses a write the command line shows unless
+`WriteWorkspace` covers that path. A command terret starts is confined: it may write in the workspace
+and `writeRoots` only when `WriteWorkspace` is granted, it may read the workspace and `readRoots`,
+and network follows `Network`. A host that cannot apply that profile refuses the command. Grok's
+own process is not sandboxed.
 `Network` covers `web_fetch` and `web_search`. A ceiling without `Network` removes both and
 passes `--disable-web-search`. A `use_tool` request whose `tool_name` is one of those, or
 another network tool, is `Network` too. A running command reports only new output.

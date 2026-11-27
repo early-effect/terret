@@ -29,6 +29,8 @@ final class GrokHarness private (
     hosts: HostAllowlist,
     readRoots: Chunk[Workspace],
     files: FileRoots,
+    sandbox: ShellSandbox,
+    terminals: ShellTerminals,
 ) extends Harness:
 
   def open(
@@ -94,7 +96,7 @@ final class GrokHarness private (
     }
 
   def close: UIO[Unit] =
-    sessions.get.zip(gates.get).flatMap { (rows, open) =>
+    terminals.shutdown *> sessions.get.zip(gates.get).flatMap { (rows, open) =>
       ZIO.foreachDiscard(rows) { (id, slot) =>
         slot.hostCancel.set(true) *>
           ZIO.foreachDiscard(open.get(id))(_.succeed(())) *>
@@ -317,6 +319,8 @@ final class GrokHarness private (
       slot.hostCancel,
       McpAccess(slot.grants, slot.mcpServers.map(_.server).toSet),
       slot.network,
+      sandbox,
+      terminals,
     )
 
   private def grantsOf(tools: SessionTools): McpPolicy =
@@ -387,12 +391,14 @@ object GrokHarness:
       journalBound: JournalBound = JournalBound.default,
       readRoots: Chunk[Workspace] = Chunk.empty,
       files: FileRoots = FileRoots.live,
+      sandbox: ShellSandbox = ShellSandbox.live,
   ): ZIO[Scope, Nothing, GrokHarness] =
     for
-      scope    <- ZIO.scope
-      sessions <- Ref.make(Map.empty[SessionId, Slot])
-      gates    <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
-      journal  <- Journal.make(milestones, journalBound)
+      scope     <- ZIO.scope
+      sessions  <- Ref.make(Map.empty[SessionId, Slot])
+      gates     <- Ref.make(Map.empty[SessionId, Promise[HarnessFailure, Unit]])
+      journal   <- Journal.make(milestones, journalBound)
+      terminals <- ShellTerminals.make(sandbox)
       harness = GrokHarness(
         config,
         spawner,
@@ -407,6 +413,8 @@ object GrokHarness:
         hosts,
         readRoots,
         files,
+        sandbox,
+        terminals,
       )
       _ <- ZIO.addFinalizer(harness.close)
     yield harness
@@ -422,10 +430,11 @@ object GrokHarness:
       readRoots: Chunk[Workspace] = Chunk.empty,
   ): ZLayer[Scope, Nothing, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer
-    (services ++ (services >>> AcpOpen.layer)) >>> ZLayer.scoped {
+    (services ++ (services >>> AcpOpen.layer) ++ ShellSandbox.layer) >>> ZLayer.scoped {
       for
         acp     <- ZIO.service[AcpOpen]
         spawner <- ZIO.service[Spawner]
+        sandbox <- ZIO.service[ShellSandbox]
         harness <- make(
           config,
           spawner,
@@ -437,6 +446,7 @@ object GrokHarness:
           milestones,
           journal,
           readRoots,
+          sandbox = sandbox,
         )
       yield harness: Harness
     }

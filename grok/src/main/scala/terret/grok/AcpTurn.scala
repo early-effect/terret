@@ -22,6 +22,8 @@ object AcpTurn:
       hostCancel: Ref[Boolean],
       mcp: McpAccess,
       network: NetworkPolicy,
+      sandbox: ShellSandbox,
+      terminals: ShellTerminals,
   )
 
   def await(pipe: RpcPipe, id: Int): IO[HarnessFailure, Json] =
@@ -79,11 +81,13 @@ object AcpTurn:
           scope.files,
           scope.mcp,
           scope.network,
+          sandbox = scope.sandbox,
         )
         .flatMap { decision =>
           remember(scope, decision) *>
             pipe.write(Wire.ok(requestId, PermissionChoice.body(decision))).as(refused(params, decision))
         }
+    else if AcpTerminal.isTerminal(method) then AcpTerminal.answer(pipe, requestId, method, params, scope)
     else pipe.write(Wire.fail(requestId, Wire.methodNotFound, "Method not found")).as(Chunk.empty)
 
   private def refused(params: Json, decision: PermissionAnswer): Chunk[Event] =
