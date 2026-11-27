@@ -7,6 +7,7 @@ import terret.mcp.given
 import terret.redact.Redact
 import terret.error.TerretError
 import terret.find.{CallError, EmbeddingProblem, FetchProblem, FindError}
+import terret.github.{GhError, GhProblem}
 import terret.harness.{HarnessFailure, ProtocolFault}
 import terret.model.CatalogError
 import terret.permission.Permission
@@ -144,6 +145,16 @@ object WireEvent:
     )
 end WireEvent
 
+enum WireGhProblem derives Schema, JsonCodec:
+  case Limit(value: Int)
+  case Number(value: Int)
+  case Run(value: Long)
+  case Title
+  case Body
+  case Branch(raw: String)
+  case Detached
+end WireGhProblem
+
 enum JobFailure derives Schema, JsonCodec:
   case WorkspaceDenied(workspace: String, root: String)
   case WorkspaceInvalid(problem: WorkspaceProblem)
@@ -164,6 +175,11 @@ enum JobFailure derives Schema, JsonCodec:
   case BadArguments
   case BadTool
   case ToolUnavailable(detail: String)
+  case GhDenied(grant: String, op: String, message: String)
+  case GhRejected(problem: WireGhProblem)
+  case GhFailed(code: Int, detail: String)
+  case GhUnavailable
+  case GhTooLarge
 
 object JobFailure:
   def from(error: TerretError): JobFailure =
@@ -194,6 +210,25 @@ object JobFailure:
       case CallError.BadTool                  => BadTool
       case CallError.BadArguments             => BadArguments
       case CallError.Unavailable(detail)      => ToolUnavailable(detail)
+
+  def fromGh(error: GhError): JobFailure =
+    error match
+      case GhError.NotGranted(grant, op) =>
+        GhDenied(grant.name, op, s"$op needs a gh ${grant.name} grant in terret.gh")
+      case GhError.BadRequest(problem) => GhRejected(wireProblem(problem))
+      case GhError.Failed(code, detail) => GhFailed(code, detail)
+      case GhError.Unavailable          => GhUnavailable
+      case GhError.TooLarge             => GhTooLarge
+
+  private def wireProblem(problem: GhProblem): WireGhProblem =
+    problem match
+      case GhProblem.Limit(value)  => WireGhProblem.Limit(value)
+      case GhProblem.Number(value) => WireGhProblem.Number(value)
+      case GhProblem.Run(value)    => WireGhProblem.Run(value)
+      case GhProblem.Title         => WireGhProblem.Title
+      case GhProblem.Body          => WireGhProblem.Body
+      case GhProblem.Branch(raw)   => WireGhProblem.Branch(raw)
+      case GhProblem.Detached      => WireGhProblem.Detached
 
   /** Diagnostic text. Callers do not branch on it. */
   private def detail(error: FindError): String =

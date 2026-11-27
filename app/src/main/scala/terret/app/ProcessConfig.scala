@@ -15,6 +15,7 @@ import terret.grok.{
   NetworkGrantError,
   NetworkPolicy,
 }
+import terret.github.{GhAccess, GhGrantError}
 import terret.mcp.{EventPolicy, EventPolicyError, EventsKey}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.transcript.{JournalBound, JournalBoundError}
@@ -37,6 +38,7 @@ final case class ProcessConfig(
     readRoots: Chunk[Workspace] = Chunk.empty,
     mcp: McpPolicy = McpPolicy.empty,
     network: NetworkPolicy = NetworkPolicy.empty,
+    gh: GhAccess = GhAccess.empty,
     events: EventPolicy = EventPolicy.terret,
     eventsKey: Option[EventsKey] = None,
     grokConfig: Path,
@@ -88,6 +90,14 @@ object ProcessConfig:
       BoundRaw(journal, team, audience, port)
     }
 
+  private final case class OptInRaw(mcp: Option[String], network: Option[String], gh: Option[String])
+
+  private val optInRaw: Config[OptInRaw] =
+    (Config.string("mcp").optional ++ Config.string("network").optional ++ Config.string("gh").optional).map {
+      (mcp, network, gh) =>
+        OptInRaw(mcp, network, gh)
+    }
+
   private final case class RootsRaw(read: Option[String], write: Option[String])
 
   private val rootsRaw: Config[RootsRaw] =
@@ -124,8 +134,7 @@ object ProcessConfig:
         Config.int("bindPort").optional ++
         Config.string("bindSecret").optional ++
         rootsRaw ++
-        Config.string("mcp").optional ++
-        Config.string("network").optional ++
+        optInRaw ++
         eventRaw ++
         boundRaw ++
         GrokModels.config
@@ -147,8 +156,7 @@ object ProcessConfig:
           bindPort,
           bindSecret,
           roots,
-          mcp,
-          network,
+          optIn,
           events,
           bound,
           grokConfig,
@@ -171,8 +179,9 @@ object ProcessConfig:
           bindSecret,
           roots.read,
           roots.write,
-          mcp,
-          network,
+          optIn.mcp,
+          optIn.network,
+          optIn.gh,
           events.verification,
           events.floor,
           events.default,
@@ -197,6 +206,7 @@ object ProcessConfig:
       writes     <- rootsOf(raw.writeRoots)
       grants     <- grantsOf(raw.mcp)
       network    <- hostsOf(raw.network)
+      gh         <- ghOf(raw.gh)
       events     <- eventsOf(raw)
       grokConfig <- grokConfigOf(raw.grokConfig)
       journal    <- journalOf(raw.journalLimit)
@@ -212,6 +222,7 @@ object ProcessConfig:
       reads,
       grants,
       network,
+      gh,
       events,
       eventsKey,
       grokConfig,
@@ -368,6 +379,7 @@ object ProcessConfig:
       writeRoots: Option[String] = None,
       mcp: Option[String] = None,
       network: Option[String] = None,
+      gh: Option[String] = None,
       eventVerification: String = EventPolicy.name(EventPolicy.terret.verification),
       eventFloor: Duration = EventPolicy.terret.floor,
       eventDefault: Duration = EventPolicy.terret.default,
@@ -384,6 +396,11 @@ object ProcessConfig:
     raw match
       case None       => Right(McpPolicy.empty)
       case Some(text) => McpPolicy.parse(text).left.map(ProcessError.McpGrant(_))
+
+  private def ghOf(raw: Option[String]): Either[ProcessError, GhAccess] =
+    raw match
+      case None       => Right(GhAccess.empty)
+      case Some(text) => GhAccess.parse(text).left.map(ProcessError.GhGrant(_))
 
   private def hostsOf(raw: Option[String]): Either[ProcessError, NetworkPolicy] =
     raw match
@@ -454,6 +471,7 @@ enum ProcessError:
   case NetworkGrant(error: NetworkGrantError)
   case Mcp(error: terret.mcp.TerretMcpError)
   case McpGrant(error: McpGrantError)
+  case GhGrant(error: GhGrantError)
   case Events(error: EventPolicyError)
   case Journal(error: JournalBoundError)
   case Access(error: AccessConfigError)
@@ -484,6 +502,7 @@ enum ProcessError:
     case NetworkGrant(error)  => error.render
     case Mcp(error)           => s"mcp ${error.toString}"
     case McpGrant(error)      => error.render
+    case GhGrant(error)       => error.render
     case Events(error)        => error.render
     case Journal(error)       => journalMessage(error)
     case Access(error)        => accessMessage(error)

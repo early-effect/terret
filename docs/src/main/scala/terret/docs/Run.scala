@@ -17,7 +17,9 @@ the way a heddle is a guide on a loom. It is not the host, and it is not the har
 A coding host speaks MCP. Cursor, Claude Code, Grok Bot, and Warp are hosts. A coding harness does
 not speak MCP. Grok Build and dsh are harnesses. Terret takes MCP in and talks to the harness
 through an adapter. The core never learns a harness's name. The jobs a host calls stay `open`,
-`run`, `status`, `resume`, `export`, `cancel`, `find`, and `call`. `find` searches the MCP catalog.
+`run`, `status`, `resume`, `export`, `cancel`, `find`, `call`, and the gh tools. `find` searches the
+MCP catalog. The gh tools need `terret.gh`. Empty denies them. `read` and `write` are separate, and
+merge needs `write`.
 `call` runs one tool when `terret.mcp` grants that server or tool. `open` takes an optional `model`
 key from the grok config. A grok process terret spawns is started with `--model`, and the result
 reports the chosen model. `follow` is a subscription on that same API, not a job. A host listens

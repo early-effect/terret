@@ -4,6 +4,7 @@ import heddle.*
 import terret.Terret
 import terret.activity.{Activity, ActivityEvent, ActivityMemory, ActivityNote}
 import terret.find.{Enable, FindHint, FindResult, ToolRef}
+import terret.github.{Gh, GhAccess}
 import terret.milestone.Milestones
 import terret.permission.{Ceiling, Permission}
 import terret.prompt.Prompt
@@ -17,8 +18,15 @@ import zio.stream.ZStream
 import zio.{Chunk, IO, UIO, ZIO}
 
 private[mcp] object Jobs:
-  def api(terret: Terret, version: String, tools: ToolSurface): Api[Milestones] =
-    Api(TerretMcp.name, version, Some(TerretMcp.summary))
+  def api(
+      terret: Terret,
+      version: String,
+      tools: ToolSurface,
+      gh: Gh,
+      access: GhAccess,
+  ): Api[Milestones] =
+    GhJobs.attach(
+      Api(TerretMcp.name, version, Some(TerretMcp.summary))
       .job(open)(openSession(terret, _))
       // job promotes. resource keeps GET /sessions on HTTP and off tools/list.
       .resource(list)(_ => listed(terret))
@@ -29,9 +37,13 @@ private[mcp] object Jobs:
       .job(cancel)(stop(terret, _))
       .job(find)(searched(tools, _))
       .job(call)(called(tools, _))
-      .stream(follow)(followed(terret, _))
+      .stream(follow)(followed(terret, _)),
+      terret,
+      gh,
+      access,
+    )
 
-  private def fallible[In, Out](endpoint: Endpoint[In, Nothing, Out]): Endpoint[In, JobFailure, Out] =
+  private[mcp] def fallible[In, Out](endpoint: Endpoint[In, Nothing, Out]): Endpoint[In, JobFailure, Out] =
     endpoint.outErrors[JobFailure](
       ErrorCase[JobFailure.WorkspaceDenied](Status.Forbidden),
       ErrorCase[JobFailure.WorkspaceInvalid](Status.BadRequest),
@@ -52,6 +64,11 @@ private[mcp] object Jobs:
       ErrorCase[JobFailure.BadArguments.type](Status.BadRequest),
       ErrorCase[JobFailure.BadTool.type](Status.BadRequest),
       ErrorCase[JobFailure.ToolUnavailable](Status.BadGateway),
+      ErrorCase[JobFailure.GhDenied](Status.Forbidden),
+      ErrorCase[JobFailure.GhRejected](Status.BadRequest),
+      ErrorCase[JobFailure.GhFailed](Status.BadGateway),
+      ErrorCase[JobFailure.GhUnavailable.type](Status.BadGateway),
+      ErrorCase[JobFailure.GhTooLarge.type](Status.BadGateway),
     )
 
   private val openSummary =
@@ -300,7 +317,7 @@ private[mcp] object Jobs:
       _  <- terret.cancel(id).mapError(JobFailure.from)
     yield Stopped(job.session)
 
-  private def sessionOf(raw: String): IO[JobFailure, SessionId] =
+  private[mcp] def sessionOf(raw: String): IO[JobFailure, SessionId] =
     ZIO.fromEither(SessionId.from(raw)).mapError { case SessionIdError.Empty =>
       JobFailure.EmptySession
     }

@@ -15,6 +15,7 @@ import terret.app.{
   WarpLocal,
 }
 import terret.dsh.DshConfig
+import terret.github.{GhAccess, GhGrant, GhGrantError}
 import terret.mcp.{EventPolicy, EventPolicyError}
 import terret.grok.{
   AcpBind,
@@ -54,7 +55,11 @@ not pass servers. An allowed server comes from the workspace `.mcp.json`. `find`
 that same grant. Empty returns no hits and hint `NoGrants`. A call also needs the server defined
 in `.mcp.json`. `network` is a host
 allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does
-not apply it. `events.verification` is `Skip` or `Required`. The default is `Skip`, because the
+not apply it. `gh` grants `gh` operations on the session workspace. Empty denies them. `read`
+lists and views pull requests, issues, checks, and workflow runs. `write` creates and comments, and
+it merges when the caller names a method. `write` does not grant read. `read,write` grants both.
+A missing grant names itself. dsh does not apply it. `events.verification` is `Skip` or `Required`.
+The default is `Skip`, because the
 edge already rejects a request with no `x-terret-key`. `events.key` (`TERRET_EVENTS_KEY`) is optional.
 When it is set, that header must match it or the caller is not a principal. When it is unset, or
 empty, a presented non-empty `x-terret-key` is not a principal either. An absent or blank header stays
@@ -149,6 +154,12 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
     },
     exampleValue(ProcessConfig.load(base.copy(network = Some("example.com,")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.NetworkGrant(NetworkGrantError.BadToken(""))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(gh = Some("read"))).map(_.gh)).assert { access =>
+      assertTrue(access == Right(GhAccess(Set(GhGrant.Read))))
+    },
+    exampleValue(ProcessConfig.load(base.copy(gh = Some("merge")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.GhGrant(GhGrantError.BadToken("merge"))))
     },
     exampleValue(ProcessConfig.load(base.copy(grokConfig = Some("/var/terret/grok.toml"))).map(_.grokConfig)).assert {
       path =>

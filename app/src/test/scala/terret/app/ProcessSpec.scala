@@ -229,7 +229,31 @@ object ProcessSpec extends ZIOSpecDefault:
           server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           status <- listed(port)
-        yield assertTrue(status == Right(Set("open", "run", "status", "resume", "export", "cancel", "find", "call")))
+        yield assertTrue(
+          status == Right(
+            Set(
+              "open",
+              "run",
+              "status",
+              "resume",
+              "export",
+              "cancel",
+              "find",
+              "call",
+              "gh_pr_list",
+              "gh_pr_view",
+              "gh_pr_checks",
+              "gh_issue_list",
+              "gh_issue_view",
+              "gh_run_view",
+              "gh_pr_create",
+              "gh_pr_comment",
+              "gh_pr_merge",
+              "gh_issue_create",
+              "gh_issue_comment",
+            )
+          )
+        )
       }
     },
     test("the local listener stays open and the tunnel listener requires a JWT") {
@@ -279,7 +303,29 @@ object ProcessSpec extends ZIOSpecDefault:
           tunnelWatch.headers.get("Content-Security-Policy").exists(_.contains("frame-ancestors 'none'")),
           tunnelWatch.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
           tunnelWatch.headers.get("Access-Control-Allow-Origin").isEmpty,
-          mcp == Right(Set("open", "run", "status", "resume", "export", "cancel", "find", "call")),
+          mcp == Right(
+            Set(
+              "open",
+              "run",
+              "status",
+              "resume",
+              "export",
+              "cancel",
+              "find",
+              "call",
+              "gh_pr_list",
+              "gh_pr_view",
+              "gh_pr_checks",
+              "gh_issue_list",
+              "gh_issue_view",
+              "gh_run_view",
+              "gh_pr_create",
+              "gh_pr_comment",
+              "gh_pr_merge",
+              "gh_issue_create",
+              "gh_issue_comment",
+            )
+          ),
         )
       }
     },

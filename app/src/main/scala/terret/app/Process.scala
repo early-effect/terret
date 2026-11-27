@@ -11,6 +11,7 @@ import terret.harness.Harness
 import terret.hooks.Hooks
 import terret.model.ModelCatalog
 import terret.app.watch.{CsrfTokens, Steer, WatchRoutes, WatchStreams}
+import terret.github.Gh
 import terret.mcp.{EventKeep, MilestoneEvents, Served, TerretMcp}
 import terret.milestone.{MilestoneGate, Milestones}
 import zio.{Chunk, Scope, ULayer, ZIO, ZLayer}
@@ -104,9 +105,10 @@ object Process:
       catalog <- ZIO.service[ModelCatalog]
       terret  <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate, catalog)
       surface <- ToolRuntime.make(config)
+      gh      <- ZIO.service[Gh].provide(Gh.live)
       served  <- ZIO
         .fromEither(
-          TerretMcp.served(terret, config.version, config.events, config.eventsKey, surface)
+          TerretMcp.served(terret, config.version, config.events, config.eventsKey, surface, gh, config.gh)
         )
         .mapError(ProcessError.Mcp(_))
     yield Prepared(served, terret)
