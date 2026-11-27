@@ -39,6 +39,7 @@ import terret.find.{
   ToolRef,
   Withheld,
 }
+import terret.github.{Gh, GhAccess, GhCommand, GhGrant, GhOp}
 import terret.permission.{Permission, PermissionPolicy}
 import terret.workspace.Workspace
 import zio.json.*
@@ -49,7 +50,27 @@ import zio.durationInt
 import zio.{Chunk, IO, Promise, Queue, Ref, Scope, UIO, ZIO, ZLayer}
 
 object McpJobsSpec extends ZIOSpecDefault:
-  private val jobs = Set("open", "run", "status", "resume", "export", "cancel", "find", "call")
+  private val jobs = Set(
+    "open",
+    "run",
+    "status",
+    "resume",
+    "export",
+    "cancel",
+    "find",
+    "call",
+    "gh_pr_list",
+    "gh_pr_view",
+    "gh_pr_checks",
+    "gh_issue_list",
+    "gh_issue_view",
+    "gh_run_view",
+    "gh_pr_create",
+    "gh_pr_comment",
+    "gh_pr_merge",
+    "gh_issue_create",
+    "gh_issue_comment",
+  )
 
   private type Env = Milestones & Events.Env
 
@@ -457,6 +478,44 @@ object McpJobsSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("gh_pr_list without a read grant names terret.gh and does not start gh") {
+      val program =
+        for
+          gh     <- ZIO.service[Gh]
+          result <- hosted(Script.echo, gh = gh) { (_, host) =>
+            for
+              opened <- host.open
+              denied <- host.call("gh_pr_list", GhPrListJob(opened.session, 10, GhPrState.Open))
+            yield assertTrue(
+              failure(denied) == Right(
+                JobFailure.GhDenied("read", "pr list", "pr list needs a gh read grant in terret.gh")
+              )
+            )
+          }
+        yield result
+      program.provide(stubbed[GhCommand] >>> Gh.layer)
+    },
+    test("gh_pr_view runs against the session workspace") {
+      val program =
+        for
+          seen <- Ref.make(Option.empty[String])
+          _    <- stub[Gh](_.perform(any[GhOp], any[Workspace], any[GhAccess])) { (_, workspace, _) =>
+            seen.set(Some(workspace.path.toString)) *> ZIO.succeed("[]")
+          }
+          gh     <- ZIO.service[Gh]
+          result <- hosted(Script.echo, gh = gh, access = GhAccess(Set(GhGrant.Read))) { (_, host) =>
+            for
+              opened <- host.open
+              viewed <- host.call("gh_pr_view", GhPrViewJob(opened.session, 4))
+              path   <- seen.get
+            yield assertTrue(
+              structured(viewed.result).flatMap(_.as[GhText]) == Right(GhText("[]")),
+              path.contains("/work"),
+            )
+          }
+        yield result
+      program.provide(stubbed[Gh])
+    },
   ) @@ TestAspect.timeout(20.seconds) @@ TestAspect.withLiveClock
 
   private val openAll: OpenJob =
@@ -705,6 +764,8 @@ object McpJobsSpec extends ZIOSpecDefault:
       script: Script,
       config: TerretConfig = TerretConfig.closed,
       catalog: ModelCatalog = ModelCatalog.empty,
+      gh: Gh = Gh.closed,
+      access: GhAccess = GhAccess.empty,
   )(
       use: (InMemory, Host) => ZIO[Any, Fail, TestResult]
   ): ZIO[Any, Fail, TestResult] =
@@ -712,7 +773,7 @@ object McpJobsSpec extends ZIOSpecDefault:
       for
         memory <- InMemory.make(script)
         terret <- Terret.make(memory, config, Hooks.identity, catalog = catalog)
-        mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test")).mapError(Fail.Build(_))
+        mcp    <- ZIO.fromEither(TerretMcp.mcp(terret, "test", gh = gh, access = access)).mapError(Fail.Build(_))
         pipes  <- LinePipe.connected
         (client, remote) = pipes
         fiber  <- supply(mcp)(mcp.stdio(remote)).forkScoped

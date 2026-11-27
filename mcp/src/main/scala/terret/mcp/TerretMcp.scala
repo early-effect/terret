@@ -6,6 +6,7 @@ import heddle.mcp.events.Events
 import heddle.mcp.{Mcp, McpBuildError}
 import heddle.route.Routes
 import terret.Terret
+import terret.github.{Gh, GhAccess}
 import terret.milestone.Milestones
 import zio.NonEmptyChunk
 
@@ -17,8 +18,10 @@ object TerretMcp:
       terret: Terret,
       version: String,
       tools: ToolSurface = ToolSurface.closed,
+      gh: Gh = Gh.closed,
+      access: GhAccess = GhAccess.empty,
   ): Either[TerretMcpError, Api[Milestones]] =
-    checked(version).map(Jobs.api(terret, _, tools))
+    checked(version).map(Jobs.api(terret, _, tools, gh, access))
 
   def mcp(
       terret: Terret,
@@ -26,8 +29,10 @@ object TerretMcp:
       events: EventPolicy = EventPolicy.terret,
       key: Option[EventsKey] = None,
       tools: ToolSurface = ToolSurface.closed,
+      gh: Gh = Gh.closed,
+      access: GhAccess = GhAccess.empty,
   ): Either[TerretMcpError, Mcp[Milestones & Events.Env]] =
-    served(terret, version, events, key, tools).map(_.mcp)
+    served(terret, version, events, key, tools, gh, access).map(_.mcp)
 
   /** MCP on `/mcp`, plus the API routes. HTTP serves both. Stdio serves `mcp` only. */
   def served(
@@ -36,8 +41,10 @@ object TerretMcp:
       events: EventPolicy = EventPolicy.terret,
       key: Option[EventsKey] = None,
       tools: ToolSurface = ToolSurface.closed,
+      gh: Gh = Gh.closed,
+      access: GhAccess = GhAccess.empty,
   ): Either[TerretMcpError, Served] =
-    api(terret, version, tools).flatMap { built =>
+    api(terret, version, tools, gh, access).flatMap { built =>
       Mcp.from(built).left.map(TerretMcpError.Rejected(_)).flatMap { raw =>
         raw
           .instructions(summary)

@@ -12,6 +12,8 @@ object Redact:
   private val patterns: List[Pattern] = List(
     Pattern.compile("ghp_[A-Za-z0-9]+"),
     Pattern.compile("gho_[A-Za-z0-9]+"),
+    Pattern.compile("ghs_[A-Za-z0-9]+"),
+    Pattern.compile("ghr_[A-Za-z0-9]+"),
     Pattern.compile("github_pat_[A-Za-z0-9_]+"),
     Pattern.compile("whsec_[A-Za-z0-9_\\-+=/]+"),
     Pattern.compile("(?i)bearer\\s+[A-Za-z0-9\\-._~+/=]+"),

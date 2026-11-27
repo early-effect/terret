@@ -15,7 +15,10 @@ import zio.test.*
 object Jobs extends DocSpec:
   def doc = page("Jobs")(
     md"""
-A host attaches to `open`, `list`, `run`, `status`, `resume`, `export`, `cancel`, `find`, and `call`.
+A host attaches to `open`, `list`, `run`, `status`, `resume`, `export`, `cancel`, `find`, `call`,
+and the gh tools: `gh_pr_list`, `gh_pr_view`, `gh_pr_checks`, `gh_issue_list`, `gh_issue_view`,
+`gh_run_view`, `gh_pr_create`, `gh_pr_comment`, `gh_pr_merge`, `gh_issue_create`, and
+`gh_issue_comment`.
 `list` is `GET /sessions` and is not an MCP tool. It returns each session this process holds, with
 its state. `GET /watch` is served only on the tunnel listener and reads the feed. Steering is POST on that
 listener: `POST /watch/{id}/run`, `/cancel`, `/resume`, and `POST /watch/open`. The local listener
@@ -39,6 +42,11 @@ session state. One call shows whether the caller is caught up. `cancel` is the o
 returns no hits and hint `NoGrants`. `call` runs one tool. `arguments` is a JSON object as text. A
 tool with no server is `NotCallable`. A missing grant is `NotGranted`. A granted server that
 `.mcp.json` does not define is `UnknownServer`.
+
+The gh tools run `gh` in the session workspace. `terret.gh` is empty unless set. `read` grants the
+six read tools. `write` grants create, comment, and merge, and it does not grant read. A missing
+grant is `GhDenied` and names that grant, for example `pr list needs a gh read grant in terret.gh`.
+Merge requires a method. It is not the default, and it does not enable auto-merge.
 
 `follow` is a subscription, not a job. A host listens with MCP `subscriptions/listen`, or
 opens `GET /sessions/{session}/events` as server-sent events. The SSE id is the journal index.
@@ -70,7 +78,28 @@ An empty server version is rejected before the catalog is built.
       assertTrue(
         built == Right(
           (
-            Set("open", "list", "run", "status", "resume", "export", "cancel", "find", "call"),
+            Set(
+              "open",
+              "list",
+              "run",
+              "status",
+              "resume",
+              "export",
+              "cancel",
+              "find",
+              "call",
+              "gh_pr_list",
+              "gh_pr_view",
+              "gh_pr_checks",
+              "gh_issue_list",
+              "gh_issue_view",
+              "gh_run_view",
+              "gh_pr_create",
+              "gh_pr_comment",
+              "gh_pr_merge",
+              "gh_issue_create",
+              "gh_issue_comment",
+            ),
             Set("follow"),
           )
         )

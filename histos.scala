@@ -44,6 +44,16 @@ object build extends HistosBuild:
       )
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt)
+    val github = module("github", Jvm)(scala3)
+      .dependsOn(core)
+      .scalac(
+        ScalacFlag.Deprecation,
+        ScalacFlag.Feature,
+        ScalacFlag.UnusedAll,
+        ScalacFlag.ImplicitConversions,
+      )
+      .libraryDependencies(zio)
+      .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val find = module("find", Jvm)(scala3)
       .scalac(
         ScalacFlag.Deprecation,
@@ -61,7 +71,7 @@ object build extends HistosBuild:
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val mcp = module("mcp", Jvm)(scala3)
-      .dependsOn(core, find)
+      .dependsOn(core, find, github)
       .scalac(
         ScalacFlag.Deprecation,
         ScalacFlag.Feature,
@@ -71,7 +81,7 @@ object build extends HistosBuild:
       .libraryDependencies(zio, zioStreams, zioJson, dep"rocks.earlyeffect::heddle-mcp:0.16.0-SNAPSHOT")
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val app = module("app", Jvm)(scala3)
-      .dependsOn(mcp, grok, dsh, find)
+      .dependsOn(mcp, grok, dsh, find, github)
       .main(MainClass("terret.app.Main"))
       .scalac(
         ScalacFlag.Deprecation,
@@ -89,7 +99,7 @@ object build extends HistosBuild:
       )
       .testDependencies(zioTest, zioTestSbt, dep"rocks.earlyeffect::slayer:0.3.0")
     val docs = module("docs", Jvm)(scala3)
-      .dependsOn(app, dsh)
+      .dependsOn(app, dsh, github)
       .scalac(
         ScalacFlag.Deprecation,
         ScalacFlag.Feature,
@@ -128,6 +138,7 @@ object build extends HistosBuild:
         app,
         docs,
         find,
+        github,
       )
 
   override def services =
