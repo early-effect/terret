@@ -81,6 +81,7 @@ object WatchSpec extends ZIOSpecDefault:
     },
     test("a patch frame is the datastar dialect") {
       val elements = WatchPatch.elements("<div id=\"feed\">a &lt; b</div>", 4)
+      val wrapped  = WatchPatch.elements("<div id=\"feed\">one\ntwo</div>", 5)
       val signals  = WatchPatch.signals("live")
       val bad      = WatchPatch.parse("datastar-patch-elements", "mode sideways\nelements <div></div>")
       assertTrue(
@@ -88,6 +89,9 @@ object WatchSpec extends ZIOSpecDefault:
         elements.id.map(_.value).contains("4"),
         WatchPatch.parse("datastar-patch-elements", elements.data) == Right(
           WatchFrame.Elements("#feed", "outer", "<div id=\"feed\">a &lt; b</div>", true)
+        ),
+        WatchPatch.parse("datastar-patch-elements", wrapped.data) == Right(
+          WatchFrame.Elements("#feed", "outer", "<div id=\"feed\">one\ntwo</div>", true)
         ),
         WatchPatch.parse("datastar-patch-signals", signals.data).exists {
           case WatchFrame.Signals(json, only) => json.contains("\"follow\"") && only
@@ -166,7 +170,7 @@ object WatchSpec extends ZIOSpecDefault:
           journal <- opened._3.list
         yield assertTrue(
           missing.status.code == 401,
-          missing.body.text.contains("access denied"),
+          missing.body.text.exists(_.contains("access denied")),
           !missing.body.text.exists(_.contains("missing")),
           held == 0,
           journal.length == 1,
@@ -214,7 +218,7 @@ object WatchSpec extends ZIOSpecDefault:
           _    <- beating.interrupt
         yield assertTrue(
           bad.status.code == 400,
-          bad.body.text.contains("bad query"),
+          bad.body.text.exists(_.contains("bad query")),
           taken.exists(_.data.contains("visible-tail")),
           taken.exists(_.id.map(_.value).contains("1")),
           ping.contains(": ping"),

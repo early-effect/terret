@@ -204,16 +204,16 @@ object WatchRoutes:
   private def failed(error: SteerError): Response =
     error match
       case SteerError.Unknown(_)     => WatchSecurity.denied
-      case SteerError.Busy(_)        => Response.text("busy", Status.Conflict)
-      case SteerError.EmptyPrompt    => Response.text("empty prompt", Status.BadRequest)
-      case SteerError.Oversize       => Response.text("bad prompt", Status.BadRequest)
-      case SteerError.UnknownItem(_) => Response.text("unknown item", Status.BadRequest)
-      case SteerError.Workspace(_)   => Response.text("bad workspace", Status.BadRequest)
-      case SteerError.BadAllow(_)    => Response.text("bad allow", Status.BadRequest)
-      case SteerError.Mcp(_)         => Response.text("bad mcp", Status.BadRequest)
-      case SteerError.Model(_, _)    => Response.text("unknown model", Status.BadRequest)
-      case SteerError.Models         => Response.text("bad model", Status.BadGateway)
-      case SteerError.Harness(_)     => Response.text("bad request", Status.BadRequest)
+      case SteerError.Busy(_)        => WatchSecurity.notice("busy", Status.Conflict)
+      case SteerError.EmptyPrompt    => WatchSecurity.notice("empty prompt", Status.BadRequest)
+      case SteerError.Oversize       => WatchSecurity.notice("bad prompt", Status.BadRequest)
+      case SteerError.UnknownItem(_) => WatchSecurity.notice("unknown item", Status.BadRequest)
+      case SteerError.Workspace(_)   => WatchSecurity.notice("bad workspace", Status.BadRequest)
+      case SteerError.BadAllow(_)    => WatchSecurity.notice("bad allow", Status.BadRequest)
+      case SteerError.Mcp(_)         => WatchSecurity.notice("bad mcp", Status.BadRequest)
+      case SteerError.Model(_, _)    => WatchSecurity.notice("unknown model", Status.BadRequest)
+      case SteerError.Models         => WatchSecurity.notice("bad model", Status.BadGateway)
+      case SteerError.Harness(_)     => WatchSecurity.notice("bad request", Status.BadRequest)
 
   private def back(id: Option[String], keys: Keys): Response =
     seal(Response.redirect(WatchQuery.path(id, WatchQuery.default.copy(keys = keys)), Status.SeeOther))

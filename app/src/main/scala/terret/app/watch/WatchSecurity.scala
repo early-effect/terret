@@ -10,19 +10,35 @@ object WatchSecurity:
   val Denied: String = "access denied"
 
   def denied: Response =
-    Response.text(Denied, Status.Unauthorized)
+    notice(Denied, Status.Unauthorized)
 
   def forbidden: Response =
-    Response.text(Denied, Status.Forbidden)
+    notice(Denied, Status.Forbidden)
 
   def badQuery: Response =
-    Response.text("bad query", Status.BadRequest)
+    notice("bad query", Status.BadRequest)
 
   def busy: Response =
-    Response.text("too many streams", Status.TooManyRequests)
+    notice("too many streams", Status.TooManyRequests)
 
   def unsupported: Response =
-    Response.text("unsupported media type", Status.UnsupportedMediaType)
+    notice("unsupported media type", Status.UnsupportedMediaType)
+
+  /** A same-origin document for a short refusal. The message is the only fact the page states. */
+  def notice(message: String, status: Status): Response =
+    Response.html(sheet(message), status)
+
+  private def sheet(message: String): String =
+    s"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>terret watch</title><link rel="stylesheet" href="/watch.css"></head><body><main data-state="notice"><p data-brand="mark">terret <span data-brand="sub">watch</span></p><h1>${escape(message)}</h1></main></body></html>"""
+
+  private def escape(raw: String): String =
+    raw.flatMap {
+      case '&' => "&amp;"
+      case '<' => "&lt;"
+      case '>' => "&gt;"
+      case '"' => "&quot;"
+      case ch  => ch.toString
+    }
 
   def html(body: String, nonce: String): Response =
     Response

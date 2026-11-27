@@ -20,8 +20,10 @@ object WatchPatch:
   val Modes: Set[String]    = Set("outer", "inner", "replace", "append", "prepend", "before", "after", "remove")
 
   def elements(html: String, index: Long): ServerSentEvent =
+    // A raw newline ends the field. Each line of the feed is its own `elements` field so the client can join them back.
+    val body = html.split("\n", -1).map(line => s"elements $line").mkString("\n")
     ServerSentEvent(
-      data = s"selector #feed\nmode outer\nuseViewTransition true\nelements $html",
+      data = s"selector #feed\nmode outer\nuseViewTransition true\n$body",
       event = Some(SseField("datastar-patch-elements")),
       id = Some(SseField.of(index)),
     )

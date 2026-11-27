@@ -171,8 +171,8 @@ object WatchQuery:
     query.q.map(strip).filter(_.nonEmpty).map { raw =>
       val token = raw.map(css).mkString
       "#feed [data-row]{display:none}" +
-        s"""#feed [data-row][data-text*="$token"]{display:block}""" +
-        s"""#feed [data-row]:has([data-text*="$token"]){display:block}"""
+        s"""#feed [data-row][data-text*="$token"]{display:grid}""" +
+        s"""#feed [data-row]:has([data-text*="$token"]){display:grid}"""
     }
 
   def toggleKind(query: WatchQuery, kind: WatchKind): WatchQuery =
