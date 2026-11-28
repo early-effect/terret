@@ -1,5 +1,6 @@
 package terret.grok
 
+import terret.git.GitLayout
 import terret.permission.{Ceiling, Permission}
 import terret.workspace.Workspace
 import zio.{Chunk, Fiber, IO, Promise, Ref, Scope, UIO, ZIO, ZLayer}
@@ -22,6 +23,7 @@ enum SandboxError:
       case BadPath(path) => s"$name cannot be sandboxed at $path"
       case Rejected      => s"$name cannot be sandboxed"
       case TooLarge      => s"$name cannot be sandboxed"
+end SandboxError
 
 final case class ShellBounds(
     cwd: Path,
@@ -39,7 +41,7 @@ object ShellBounds:
       writeRoots: Chunk[Workspace],
       cwd: Path,
   ): ShellBounds =
-    val reads = (workspace +: readRoots).map(_.path)
+    val reads  = (workspace +: readRoots).map(_.path)
     val writes =
       if ceiling.allow.contains(Permission.WriteWorkspace) then (workspace +: writeRoots).map(_.path)
       else Chunk.empty
@@ -76,14 +78,18 @@ object ShellSandbox:
   val ready: ShellSandbox   = Ready
   val missing: ShellSandbox = Missing
 
-  /** One sandbox and its temp directory. The directory is removed when the scope closes. */
-  def make(home: Path): ZIO[Scope, SandboxError, ShellSandbox] =
+  /** One sandbox and its temp directory. The directory is removed when the scope closes.
+    *
+    * `project` is the session root. Linked-worktree git paths are granted only when they resolve strictly inside it. An
+    * empty root uses the nearest ancestor of the workspace that contains those paths, and never `/`.
+    */
+  def make(home: Path, project: Option[Path] = None): ZIO[Scope, SandboxError, ShellSandbox] =
     ZIO.acquireRelease(openTemp)(path => SessionTemp.remove(Path.of(path.text))).flatMap { temp =>
-      Ref.make(Noted.empty).map(noted => Live(home, temp, noted))
+      Ref.make(Noted.empty).map(noted => Live(home, temp, noted, project))
     }
 
-  val layer: ZLayer[Any, SandboxError, ShellSandbox] =
-    ZLayer.scoped(make(FileRoots.home))
+  def layer(project: Option[Path] = None): ZLayer[Any, SandboxError, ShellSandbox] =
+    ZLayer.scoped(make(FileRoots.home, project))
 
   private def openTemp: IO[SandboxError, AbsPath] =
     SessionTemp.openDefault.flatMap { made =>
@@ -122,6 +128,7 @@ object ShellSandbox:
 
     def start(argv: Chunk[String], bounds: ShellBounds, limit: Int): IO[SandboxError, SandboxHandle] =
       ZIO.dieMessage("ShellSandbox.ready does not run a command")
+  end Ready
 
   private object Missing extends ShellSandbox:
     def profile(bounds: ShellBounds): IO[SandboxError, String] =
@@ -132,6 +139,7 @@ object ShellSandbox:
 
     def start(argv: Chunk[String], bounds: ShellBounds, limit: Int): IO[SandboxError, SandboxHandle] =
       ZIO.fail(SandboxError.Unavailable)
+  end Missing
 
   private val SystemReads: Chunk[String] = Chunk(
     "/usr",
@@ -146,8 +154,8 @@ object ShellSandbox:
     "/var/select",
   )
 
-  /** Reads, writes, ancestors, and link literals for one command. Caches are writable only when `writable` is set.
-    * The temp directory is writable either way. `existingSystem` reports which system paths are present.
+  /** Reads, writes, ancestors, and link literals for one command. Caches are writable only when `writable` is set. The
+    * temp directory is writable either way. `existingSystem` reports which system paths are present.
     */
   private[grok] def policyOf(
       reads: Chunk[AbsPath],
@@ -160,6 +168,7 @@ object ShellSandbox:
       caches: Chunk[CacheGrant],
       temp: Option[AbsPath],
       existingSystem: String => Option[AbsPath],
+      git: GitSeat = GitSeat.empty,
   ): SeatbeltPolicy =
     val toolReads   = rootOf(jdk) ++ rootOf(sbt)
     val toolLinks   = linkOf(jdk) ++ linkOf(sbt)
@@ -167,8 +176,8 @@ object ShellSandbox:
     val cacheWrites = if writable then cacheReads else Chunk.empty
     val tempPaths   = temp.fold(Chunk.empty[AbsPath])(path => Chunk(path))
     val system      = SystemReads.flatMap(existingSystem)
-    val allReads    = dedup(reads ++ system ++ toolReads ++ cacheReads ++ tempPaths)
-    val allWrites   = dedup(writes ++ cacheWrites ++ tempPaths)
+    val allReads    = dedup(reads ++ system ++ toolReads ++ cacheReads ++ tempPaths ++ git.reads)
+    val allWrites   = dedup(writes ++ cacheWrites ++ tempPaths ++ git.writes)
     val reached     = allReads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, path) =>
       Option(Path.of(path.text).getParent) match
         case None         => acc
@@ -235,12 +244,17 @@ object ShellSandbox:
 
   private final case class Reach(ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
 
-  private final case class Noted(jdk: Option[String], sbt: Option[String], caches: Chunk[String])
+  private final case class Noted(
+      jdk: Option[String],
+      sbt: Option[String],
+      caches: Chunk[String],
+      git: Option[String],
+  )
 
   private object Noted:
-    val empty: Noted = Noted(None, None, Chunk.empty)
+    val empty: Noted = Noted(None, None, Chunk.empty, None)
 
-  private final class Live(home: Path, temp: AbsPath, noted: Ref[Noted]) extends ShellSandbox:
+  private final class Live(home: Path, temp: AbsPath, noted: Ref[Noted], project: Option[Path]) extends ShellSandbox:
     def profile(bounds: ShellBounds): IO[SandboxError, String] =
       prepare(bounds).map(_.text)
 
@@ -271,7 +285,8 @@ object ShellSandbox:
           reads  <- ZIO.foreach(bounds.reads)(real)
           writes <- ZIO.foreach(bounds.writes)(real)
           host   <- hostGrants
-          policy <- assembled(reads, writes, cwd, bounds, host, temp)
+          git    <- gitSeat(Path.of(cwd.text), bounds.writable)
+          policy <- assembled(reads, writes, cwd, bounds, host, temp, git)
         yield Prepared(SeatbeltProfile.render(policy), Path.of(cwd.text), temp)
 
     private def assembled(
@@ -281,6 +296,7 @@ object ShellSandbox:
         bounds: ShellBounds,
         host: HostGrants,
         temp: AbsPath,
+        git: GitSeat,
     ): IO[SandboxError, SeatbeltPolicy] =
       // A path that cannot be stated refuses the command. It is not a defect in the sandbox.
       ZIO
@@ -296,10 +312,11 @@ object ShellSandbox:
             host.caches,
             Some(temp),
             existing,
+            git,
           )
         )
-        .refineOrDie {
-          case _: IOException | _: SecurityException | _: InvalidPathException => SandboxError.Unavailable
+        .refineOrDie { case _: IOException | _: SecurityException | _: InvalidPathException =>
+          SandboxError.Unavailable
         }
 
     private def real(path: Path): IO[SandboxError, AbsPath] =
@@ -309,7 +326,7 @@ object ShellSandbox:
             case Right(abs)                     => ZIO.succeed(abs)
             case Left(AbsPathError.NotAbsolute) => ZIO.fail(SandboxError.BadPath(found.toString))
             case Left(AbsPathError.Illegal)     => ZIO.fail(SandboxError.BadPath(found.toString))
-        case None        => ZIO.fail(SandboxError.BadPath(path.toString))
+        case None => ZIO.fail(SandboxError.BadPath(path.toString))
       }
 
     private def hostGrants: UIO[HostGrants] =
@@ -332,18 +349,40 @@ object ShellSandbox:
         grant => ZIO.succeed((Some(grant), None)),
       )
 
+    private def gitSeat(workspace: Path, writable: Boolean): UIO[GitSeat] =
+      GitLayout
+        .locate(workspace, project)
+        .foldZIO(
+          fault => noteGit(fault.explain).as(GitSeat.empty),
+          {
+            case None        => ZIO.succeed(GitSeat.empty)
+            case Some(found) =>
+              GitGrant.seat(found, writable).foldZIO(fault => noteGit(fault.explain).as(GitSeat.empty), ZIO.succeed(_))
+          },
+        )
+
+    private def noteGit(message: String): UIO[Unit] =
+      noted
+        .modify { prev =>
+          if prev.git.contains(message) then (Chunk.empty, prev)
+          else (Chunk(message), prev.copy(git = Some(message)))
+        }
+        .flatMap(lines => ZIO.foreachDiscard(lines)(ZIO.logInfo(_)))
+
     private def publish(jdk: Option[String], sbt: Option[String], caches: Chunk[String]): UIO[Unit] =
-      val next = Noted(jdk, sbt, caches)
-      noted.modify { prev =>
-        val lines =
-          fresh(prev.jdk, next.jdk) ++ fresh(prev.sbt, next.sbt) ++ next.caches.filterNot(prev.caches.contains)
-        (lines, next)
-      }.flatMap(lines => ZIO.foreachDiscard(lines)(ZIO.logInfo(_)))
+      noted
+        .modify { prev =>
+          val next  = Noted(jdk, sbt, caches, prev.git)
+          val lines =
+            fresh(prev.jdk, next.jdk) ++ fresh(prev.sbt, next.sbt) ++ next.caches.filterNot(prev.caches.contains)
+          (lines, next)
+        }
+        .flatMap(lines => ZIO.foreachDiscard(lines)(ZIO.logInfo(_)))
 
     private def fresh(prev: Option[String], next: Option[String]): Chunk[String] =
       next match
         case Some(line) if !prev.contains(line) => Chunk(line)
-        case _                                   => Chunk.empty
+        case _                                  => Chunk.empty
 
     private def open(argv: Chunk[String], bounds: ShellBounds, combined: Boolean): IO[SandboxError, Process] =
       prepare(bounds).flatMap(ready => spawn(ready.text, argv, ready.cwd, ready.temp, combined))
@@ -384,14 +423,12 @@ object ShellSandbox:
       catch case _: IOException => ()
 
     private def stop(process: Process): UIO[Unit] =
-      ZIO
-        .attemptBlocking {
-          val children = process.descendants()
-          try children.forEach(child => child.destroy())
-          finally children.close()
-          process.destroy()
-        }
-        .ignore
+      ZIO.attemptBlocking {
+        val children = process.descendants()
+        try children.forEach(child => child.destroy())
+        finally children.close()
+        process.destroy()
+      }.ignore
 
     private def collect(process: Process): IO[SandboxError, SandboxOutput] =
       val code: IO[SandboxError, Int] =
@@ -473,6 +510,7 @@ object ShellSandbox:
           case Some(waiting) => waiting.map(Some(_))
           case None          => ZIO.succeed(None)
         }
+    end LiveHandle
 
     private final case class Captured(bytes: Array[Byte], truncated: Boolean):
       def text: String = new String(bytes, StandardCharsets.UTF_8)
@@ -482,7 +520,9 @@ object ShellSandbox:
         else if bytes.length >= limit then copy(truncated = true)
         else if bytes.length + next.length <= limit then Captured(bytes ++ next, truncated = false)
         else Captured(bytes ++ next.take(limit - bytes.length), truncated = true)
+    end Captured
 
     private object Captured:
       val empty: Captured = Captured(Array.emptyByteArray, truncated = false)
+  end Live
 end ShellSandbox

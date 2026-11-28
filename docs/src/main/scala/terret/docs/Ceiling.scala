@@ -44,7 +44,20 @@ a granted cache is readable, so a command with `Network` can still send other fi
 with the cache write can change a cache that a later unsandboxed build trusts, and it can delete a
 granted cache directory. Each sandbox gets its own temp directory, mode 0700, and may read and write
 only that directory, even without `WriteWorkspace`. The directory is removed when the sandbox's scope
-closes. `/tmp`, `/private/tmp`, and `/var/folders` are not granted. `Network` is on only when the
+closes. `/tmp`, `/private/tmp`, and `/var/folders` are not granted. A linked worktree keeps its
+checkout in the workspace and its git data elsewhere. When the worktree admin directory and the
+common git directory both resolve, symlinks included, strictly inside the project root, the profile
+grants those paths and no other common-dir path. The project root is `terret.root` when it is set.
+When it is unset, it is the nearest ancestor of the workspace that strictly contains both
+directories, and `/` is never that ancestor. The admin directory is readable and writable. Under
+the common directory, `objects`, `refs`, `logs`, `packed-refs`, and `packed-refs.lock` are readable and writable, and
+the writes are present only when `WriteWorkspace` is granted. `config` and `hooks` are read-only.
+`hooks` is never writable. The common `HEAD` is read-only, so the session cannot move the main
+checkout. A `gitdir:` pointer or a symlink that leaves the project root adds no path. A normal
+repository adds none, because its `.git` is already inside the workspace grant. The gh tools use
+the same resolution: `GIT_DIR` is the admin directory, `GIT_COMMON_DIR` is the common directory,
+and `GIT_WORK_TREE` is the workspace. A pointer that leaves the project root is refused.
+`Network` is on only when the
 ceiling grants it, which a command
 needs when a cache is empty and it has to fetch. A host that cannot apply that profile refuses
 the command. Grok's own process is not sandboxed.

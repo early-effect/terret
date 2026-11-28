@@ -123,12 +123,12 @@ object WireEvent:
       case Event.Plan(steps)                 => Plan(steps.map(step => Redact.text(step.text)))
       case Event.Refused(call, name, reason) =>
         Refused(call, Redact.text(name), Redact.text(reason))
-      case Event.TurnFinished(outcome) => TurnFinished(WireOutcome.from(outcome))
+      case Event.TurnFinished(outcome)              => TurnFinished(WireOutcome.from(outcome))
       case Event.SteerQueued(actor, item, text, at) =>
         SteerQueued(actor, item, Redact.text(text), at.toString)
-      case Event.SteerSent(actor, text, at) => SteerSent(actor, Redact.text(text), at.toString)
-      case Event.TurnCancelled(actor, at)   => TurnCancelled(actor, at.toString)
-      case Event.SessionResumed(actor, at)  => SessionResumed(actor, at.toString)
+      case Event.SteerSent(actor, text, at)                 => SteerSent(actor, Redact.text(text), at.toString)
+      case Event.TurnCancelled(actor, at)                   => TurnCancelled(actor, at.toString)
+      case Event.SessionResumed(actor, at)                  => SessionResumed(actor, at.toString)
       case Event.SessionOpened(actor, workspace, model, at) =>
         SessionOpened(actor, workspace, model, at.toString)
 
@@ -153,7 +153,7 @@ enum WireGhProblem derives Schema, JsonCodec:
   case Body
   case Branch(raw: String)
   case Detached
-end WireGhProblem
+  case GitDir
 
 enum JobFailure derives Schema, JsonCodec:
   case WorkspaceDenied(workspace: String, root: String)
@@ -215,7 +215,7 @@ object JobFailure:
     error match
       case GhError.NotGranted(grant, op) =>
         GhDenied(grant.name, op, s"$op needs a gh ${grant.name} grant in terret.gh")
-      case GhError.BadRequest(problem) => GhRejected(wireProblem(problem))
+      case GhError.BadRequest(problem)  => GhRejected(wireProblem(problem))
       case GhError.Failed(code, detail) => GhFailed(code, detail)
       case GhError.Unavailable          => GhUnavailable
       case GhError.TooLarge             => GhTooLarge
@@ -229,6 +229,7 @@ object JobFailure:
       case GhProblem.Body          => WireGhProblem.Body
       case GhProblem.Branch(raw)   => WireGhProblem.Branch(raw)
       case GhProblem.Detached      => WireGhProblem.Detached
+      case GhProblem.GitDir        => WireGhProblem.GitDir
 
   /** Diagnostic text. Callers do not branch on it. */
   private def detail(error: FindError): String =

@@ -7,7 +7,6 @@ enum GhError:
   case Failed(code: Int, detail: String)
   case Unavailable
   case TooLarge
-end GhError
 
 enum GhProblem:
   case Limit(value: Int)
@@ -17,7 +16,7 @@ enum GhProblem:
   case Body
   case Branch(raw: String)
   case Detached
-end GhProblem
+  case GitDir
 
 enum GhGrant:
   case Read, Write

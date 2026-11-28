@@ -112,7 +112,7 @@ object Process:
       catalog <- ZIO.service[ModelCatalog]
       terret  <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate, catalog)
       surface <- ToolRuntime.make(config)
-      gh      <- ZIO.service[Gh].provide(Gh.live)
+      gh      <- ZIO.service[Gh].provide(Gh.live(config.root.map(_.path)))
       served  <- ZIO
         .fromEither(TerretMcp.served(terret, config.version, config.events, key, surface, gh, config.gh))
         .mapError(ProcessError.Mcp(_))
@@ -121,7 +121,7 @@ object Process:
   /** Stdio with a source still reads it, so a world-readable file fails before the pipe opens. */
   private def loadKey(config: ProcessConfig): ZIO[Any, ProcessError, Option[EventsKey]] =
     ZIO.fromEither(KeyGate.ready(config.listen, config.key)).flatMap {
-      case None => ZIO.succeed(None)
+      case None         => ZIO.succeed(None)
       case Some(source) =>
         SecretStore.load(source).mapBoth(ProcessError.Key(_), Some(_)).provide(Keychain.live)
     }
@@ -145,7 +145,7 @@ object Process:
       _ <- ZIO.foreachDiscard(skipped) { row =>
         ZIO.consoleWith(_.printLineError(row.render)).ignore
       }
-      env <- layers.build.mapError(ProcessError.Subscriptions(_))
+      env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
       value <-
         val open =
