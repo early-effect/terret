@@ -1,7 +1,7 @@
 package terret.app
 
 import terret.dsh.DshHarness
-import terret.grok.{GrokHarness, GrokModels}
+import terret.grok.{GrokHarness, GrokModels, SandboxError}
 import terret.harness.Harness
 import terret.milestone.MilestoneGate
 import zio.{ExitCode, Scope, UIO, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer}
@@ -27,7 +27,10 @@ object Main extends ZIOAppDefault:
         _       <- Process
           .listen(config.copy(subscriptions = Subscriptions.beside(loaded.pidFile)), gate)
           .provideSomeLayer(wired(config, gate) ++ GrokModels.layer(config.grokConfig))
-          .mapError(AppFailure.Process(_))
+          .mapError {
+            case error: ProcessError => AppFailure.Process(error)
+            case error: SandboxError => AppFailure.Sandbox(error)
+          }
       yield ()
     served.foldZIO(
       error => report(error.render),
@@ -59,7 +62,7 @@ object Main extends ZIOAppDefault:
     ZIO.consoleWith(_.printLineError(message)).orDie *>
       exit(ExitCode.failure).as(ExitCode.failure)
 
-  private def wired(config: ProcessConfig, milestones: MilestoneGate): ZLayer[Scope, Nothing, Harness] =
+  private def wired(config: ProcessConfig, milestones: MilestoneGate): ZLayer[Scope, SandboxError, Harness] =
     config.harness match
       case ProcessHarness.Grok(grok) =>
         GrokHarness.layer(
@@ -78,9 +81,11 @@ enum AppFailure:
   case Process(error: ProcessError)
   case Service(error: ServiceError)
   case Restart(error: RestartFailure)
+  case Sandbox(error: SandboxError)
 
   def render: String = this match
     case Process(error) => error.render
     case Service(error) => error.render
     case Restart(error) => error.render
+    case Sandbox(error) => error.explain("shell")
 end AppFailure

@@ -165,6 +165,7 @@ object ConfineSpec extends ZIOSpecDefault:
           call(kind, path),
           files,
           home = home,
+          sandbox = ShellSandbox.missing,
         )
       }
     }

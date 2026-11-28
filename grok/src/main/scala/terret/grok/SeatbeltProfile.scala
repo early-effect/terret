@@ -2,57 +2,73 @@ package terret.grok
 
 import zio.Chunk
 
+import java.nio.file.Path
+
+/** Why a string is not a profile path. */
+enum AbsPathError:
+  case NotAbsolute
+  case Illegal
+
+/** An absolute path that can be quoted into a seatbelt profile. Controls are rejected. `"` and `\` are escaped. */
+opaque type AbsPath = String
+
+object AbsPath:
+  def from(raw: String): Either[AbsPathError, AbsPath] =
+    if !raw.startsWith("/") || raw.isEmpty then Left(AbsPathError.NotAbsolute)
+    else if raw.exists(illegal) then Left(AbsPathError.Illegal)
+    else Right(raw)
+
+  extension (path: AbsPath) def text: String = path
+
+  private def illegal(ch: Char): Boolean =
+    ch < ' ' || ch == '\u007f'
+end AbsPath
+
 /** Already-resolved absolute paths. The command string is not an input. */
 final case class SeatbeltPolicy(
-    reads: Chunk[String],
-    writes: Chunk[String],
-    ancestors: Chunk[String],
+    reads: Chunk[AbsPath],
+    writes: Chunk[AbsPath],
+    ancestors: Chunk[AbsPath],
     network: Boolean,
-    links: Chunk[String] = Chunk.empty,
+    links: Chunk[AbsPath] = Chunk.empty,
+    denies: Chunk[AbsPath] = Chunk.empty,
 )
 
 object SeatbeltProfile:
-  def render(policy: SeatbeltPolicy): Either[SandboxError, String] =
-    for
-      reads     <- each(policy.reads)
-      writes    <- each(policy.writes)
-      ancestors <- each(policy.ancestors)
-      links     <- each(policy.links)
-    yield
-      val body =
-        preamble ++
-          reads.map(quoted => s"(allow file-read* (subpath $quoted))") ++
-          writes.map(quoted => s"(allow file-write* (subpath $quoted))") ++
-          ancestors.map(quoted => s"(allow file-read-metadata (literal $quoted))") ++
-          links.map(quoted => s"(allow file-read-data (literal $quoted))") ++
-          (if policy.network then Chunk("(allow network*)") else Chunk.empty)
-      body.mkString("", "\n", "\n")
+  def render(policy: SeatbeltPolicy): String =
+    val body =
+      preamble ++
+        policy.reads.map(path => s"(allow file-read* (subpath ${quote(path)}))") ++
+        policy.writes.map(path => s"(allow file-write* (subpath ${quote(path)}))") ++
+        policy.ancestors.map(path => s"(allow file-read-metadata (literal ${quote(path)}))") ++
+        policy.links.map(path => s"(allow file-read-data (literal ${quote(path)}))") ++
+        // Last matching rule wins, so a literal deny has to follow the cache subpath allow.
+        policy.denies.map(path => s"(deny file-read* (literal ${quote(path)}))") ++
+        policy.denies.map(path => s"(deny file-write* (literal ${quote(path)}))") ++
+        (if policy.network then Chunk("(allow network*)") else Chunk.empty)
+    body.mkString("", "\n", "\n")
 
-  def quote(raw: String): Either[SandboxError, String] =
-    if !raw.startsWith("/") then Left(SandboxError.BadPath(raw))
-    else if raw.exists(ch => ch < ' ' || ch == '\u007f') then Left(SandboxError.BadPath(raw))
-    else
-      val escaped = raw.flatMap {
-        case '\\' => "\\\\"
-        case '"'  => "\\\""
-        case ch   => ch.toString
-      }
-      Right("\"" + escaped + "\"")
+  def quote(path: AbsPath): String =
+    val escaped = path.text.flatMap {
+      case '\\' => "\\\\"
+      case '"'  => "\\\""
+      case ch   => ch.toString
+    }
+    "\"" + escaped + "\""
 
   /** Parents of `path`, not `path` itself. `getcwd` stats them. Their contents stay closed. */
-  def ancestors(path: String): Chunk[String] =
-    def go(current: java.nio.file.Path): Chunk[String] =
+  def ancestors(path: AbsPath): Chunk[AbsPath] =
+    def go(current: Path): Chunk[AbsPath] =
       Option(current.getParent) match
         case None => Chunk.empty
         case Some(parent) =>
-          val text = parent.toString
-          if text == "/" then Chunk("/") else text +: go(parent)
-    go(java.nio.file.Path.of(path))
-
-  private def each(paths: Chunk[String]): Either[SandboxError, Chunk[String]] =
-    paths.foldLeft[Either[SandboxError, Chunk[String]]](Right(Chunk.empty)) { (acc, path) =>
-      acc.flatMap(done => quote(path).map(done :+ _))
-    }
+          AbsPath.from(parent.toString) match
+            case Right(abs) =>
+              val rest = if parent.toString == "/" then Chunk.empty else go(parent)
+              abs +: rest
+            case Left(AbsPathError.NotAbsolute) => Chunk.empty
+            case Left(AbsPathError.Illegal)     => Chunk.empty
+    go(Path.of(path.text))
 
   private val preamble: Chunk[String] =
     Chunk(

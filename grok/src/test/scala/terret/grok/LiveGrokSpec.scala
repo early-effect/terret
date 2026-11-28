@@ -183,7 +183,12 @@ object LiveGrokSpec extends ZIOSpecDefault:
         .orDieWith(_ => new IllegalArgumentException("workspace"))
       log <- wire.open
       spawner = tee(Spawner.jdk, log)
-      harness <- GrokHarness.make(GrokConfig.stdio, spawner, AcpOpen.live(GrokConfig.stdio, spawner))
+      harness <- GrokHarness.make(
+        GrokConfig.stdio,
+        spawner,
+        AcpOpen.live(GrokConfig.stdio, spawner),
+        sandbox = ShellSandbox.missing,
+      )
       id      <- harness.open(root, ceiling, policy)
     yield (root, harness, id, wire)
 
@@ -211,6 +216,7 @@ object LiveGrokSpec extends ZIOSpecDefault:
         AcpOpen.live(GrokConfig.stdio, spawner),
         mcp = histosGrant,
         catalog = McpCatalog.live,
+        sandbox = ShellSandbox.missing,
       )
       id <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
     yield (harness, id, wire.file)

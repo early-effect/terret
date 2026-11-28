@@ -28,7 +28,12 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls    <- Ref.make(Chunk.empty[SpawnCall])
-          harness  <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead)
+          harness  <- GrokHarness.make(
+            GrokConfig.cli,
+            recording(ndjson, 0, calls),
+            dead,
+            sandbox = ShellSandbox.missing,
+          )
           root     <- workspace
           id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
@@ -76,6 +81,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
             GrokConfig.cli,
             recording("{\"type\":\"text\",\"data\":\"par\"}\n{\"type\":\"text\",\"data\":\"tial\"}", 3, calls),
             dead,
+            sandbox = ShellSandbox.missing,
           )
           root   <- workspace
           id     <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
@@ -96,7 +102,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, recording("", 0, calls), dead)
+          harness <- GrokHarness.make(GrokConfig.cli, recording("", 0, calls), dead, sandbox = ShellSandbox.missing)
           root    <- workspace
           id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           failed  <- harness.prompt(id, Prompt("hello")).runCollect.flip
@@ -115,7 +121,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls    <- Ref.make(Chunk.empty[SpawnCall])
-          harness  <- GrokHarness.make(GrokConfig.cli, recording(body, 0, calls), dead)
+          harness  <- GrokHarness.make(GrokConfig.cli, recording(body, 0, calls), dead, sandbox = ShellSandbox.missing)
           root     <- workspace
           id       <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           streamed <- harness.prompt(id, Prompt("hello")).runCollect
@@ -135,7 +141,12 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls     <- Ref.make(Chunk.empty[SpawnCall])
-          harness   <- GrokHarness.make(GrokConfig.cli, recording(deniedTurn, 0, calls), dead)
+          harness   <- GrokHarness.make(
+            GrokConfig.cli,
+            recording(deniedTurn, 0, calls),
+            dead,
+            sandbox = ShellSandbox.missing,
+          )
           root      <- workspace
           denied    <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           stopped   <- harness.prompt(denied, Prompt("go")).runCollect
@@ -168,7 +179,7 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead)
+          harness <- GrokHarness.make(GrokConfig.cli, recording(ndjson, 0, calls), dead, sandbox = ShellSandbox.missing)
           root    <- workspace
           id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed, Some(ModelKey("grok-4.7")))
           _       <- harness.prompt(id, Prompt("hello")).runCollect
@@ -189,7 +200,12 @@ object CliHarnessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           calls   <- Ref.make(Chunk.empty[SpawnCall])
-          harness <- GrokHarness.make(GrokConfig.cli, recording("not-json", 0, calls), dead)
+          harness <- GrokHarness.make(
+            GrokConfig.cli,
+            recording("not-json", 0, calls),
+            dead,
+            sandbox = ShellSandbox.missing,
+          )
           root    <- workspace
           id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           failed  <- harness.prompt(id, Prompt("hello")).runCollect.flip

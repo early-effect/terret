@@ -49,7 +49,14 @@ object McpSessionSpec extends ZIOSpecDefault:
           _       <- stub[RpcPipe](_.read)(ZIO.succeed(None))
           _       <- stub[RpcPipe](_.write(any[Json]))(ZIO.unit)
           _       <- stub[RpcPipe](_.close)(ZIO.unit)
-          harness <- GrokHarness.make(GrokConfig.stdio, idle, acp, mcp = policy, catalog = catalog)
+          harness <- GrokHarness.make(
+            GrokConfig.stdio,
+            idle,
+            acp,
+            mcp = policy,
+            catalog = catalog,
+            sandbox = ShellSandbox.missing,
+          )
           root    <- workspace
           failed  <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed).exit
           called  <- opened.get
@@ -91,7 +98,14 @@ object McpSessionSpec extends ZIOSpecDefault:
       _       <- stub[RpcPipe](_.read)(pull(pending))
       _       <- stub[RpcPipe](_.write(any[Json]))(json => written.update(_ :+ json))
       _       <- stub[RpcPipe](_.close)(ZIO.unit)
-      harness <- GrokHarness.make(GrokConfig.stdio, idle, acp, mcp = policy, catalog = catalog)
+      harness <- GrokHarness.make(
+        GrokConfig.stdio,
+        idle,
+        acp,
+        mcp = policy,
+        catalog = catalog,
+        sandbox = ShellSandbox.missing,
+      )
       root    <- workspace
       id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
       _       <- harness.resume(id).runDrain

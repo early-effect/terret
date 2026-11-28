@@ -391,7 +391,7 @@ object GrokHarness:
       journalBound: JournalBound = JournalBound.default,
       readRoots: Chunk[Workspace] = Chunk.empty,
       files: FileRoots = FileRoots.live,
-      sandbox: ShellSandbox = ShellSandbox.live,
+      sandbox: ShellSandbox,
   ): ZIO[Scope, Nothing, GrokHarness] =
     for
       scope     <- ZIO.scope
@@ -428,7 +428,7 @@ object GrokHarness:
       milestones: MilestoneSink = MilestoneSink.discard,
       journal: JournalBound = JournalBound.default,
       readRoots: Chunk[Workspace] = Chunk.empty,
-  ): ZLayer[Scope, Nothing, Harness] =
+  ): ZLayer[Scope, SandboxError, Harness] =
     val services = ZLayer.succeed(config) ++ Spawner.layer
     (services ++ (services >>> AcpOpen.layer) ++ ShellSandbox.layer) >>> ZLayer.scoped {
       for
