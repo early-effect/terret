@@ -20,11 +20,18 @@ object AcpTerminal:
         Some(name)
       case _ => None
 
-  /** Grok sends `/bin/bash -lc <script>`. Login bash reads profiles outside the jail. The script stays one argument. */
-  def execArgv(command: String, args: Chunk[String]): Chunk[String] =
-    peel(command, args) match
-      case Some(script) => Chunk("/bin/sh", "-c", script)
-      case None         => command +: args
+  /** Grok sends `/bin/bash -lc <script>`, sometimes as one string. Login bash reads profiles outside the jail.
+    * The script stays one argument of `/bin/sh -c`. A wrapper that is not exactly one script is refused, not split,
+    * and the script is never interpolated into another string. A login flag that is not that one script is refused,
+    * so the login shell is not started.
+    */
+  def execArgv(command: String, args: Chunk[String]): Option[Chunk[String]] =
+    val chosen =
+      peel(command, args) match
+        case Some(script)                          => Some(Chunk("/bin/sh", "-c", script))
+        case None if refusesWrapper(command, args) => None
+        case None                                  => Some(command +: args)
+    chosen.filterNot(argv => argv.exists(_.exists(_ == '\u0000')))
 
   /** The text the visible-write scan sees. Peeled to the script when that is what will run. */
   def commandText(command: String, args: Chunk[String]): String =
@@ -68,12 +75,15 @@ object AcpTerminal:
               scope.writeRoots,
               cwdOf(scope, request.cwd),
             )
-            scope.terminals
-              .create(execArgv(request.command, request.args), bounds, request.limit)
-              .foldZIO(
-                err => reject(pipe, requestId, err.explain("run_terminal_command")),
-                id => ok(pipe, requestId, Json.Obj("terminalId" -> Json.Str(id))),
-              )
+            execArgv(request.command, request.args) match
+              case None => reject(pipe, requestId, "run_terminal_command is not an argument vector")
+              case Some(argv) =>
+                scope.terminals
+                  .create(argv, bounds, request.limit)
+                  .foldZIO(
+                    err => reject(pipe, requestId, err.explain("run_terminal_command")),
+                    id => ok(pipe, requestId, Json.Obj("terminalId" -> Json.Str(id))),
+                  )
         }
 
   private def output(
@@ -225,12 +235,108 @@ object AcpTerminal:
     Json.Obj(withExit*)
 
   private def peel(command: String, args: Chunk[String]): Option[String] =
-    if !loginShell(command) then None
+    splitPeel(command, args).orElse(if args.isEmpty then joinedPeel(command) else None)
+
+  private def splitPeel(command: String, args: Chunk[String]): Option[String] =
+    if !loginShell(command) || command.exists(_.isWhitespace) then None
     else
       (args.lift(0), args.lift(1), args.lift(2), args.length) match
-        case (Some("-lc"), Some(script), None, 2)             => Some(script)
-        case (Some("-l"), Some("-c"), Some(script), 3)        => Some(script)
-        case _                                                 => None
+        case (Some("-lc"), Some(script), None, 2)      => Some(script)
+        case (Some("-l"), Some("-c"), Some(script), 3) => Some(script)
+        case _                                         => None
+
+  private def joinedPeel(command: String): Option[String] =
+    oneToken(command.trim) match
+      case Some((exe, rest)) if loginShell(exe) => flagsThenScript(skipBlank(rest))
+      case _                                    => None
+
+  private def wrappedShell(command: String): Boolean =
+    oneToken(command.trim) match
+      case Some((exe, rest)) => loginShell(exe) && rest.exists(ch => !isBlank(ch))
+      case None              => false
+
+  private def refusesWrapper(command: String, args: Chunk[String]): Boolean =
+    wrappedShell(command) || loginWrapper(command, args)
+
+  /** `-l` reads the login profiles. Anything except the one peeled script stays unstarted. */
+  private def loginWrapper(command: String, args: Chunk[String]): Boolean =
+    loginShell(command) && !command.exists(_.isWhitespace) && args.headOption.exists(isLoginFlag)
+
+  private def isLoginFlag(flag: String): Boolean =
+    flag == "--login" || (flag.startsWith("-") && !flag.startsWith("--") && flag.contains('l'))
+
+  private def flagsThenScript(rest: String): Option[String] =
+    oneToken(rest) match
+      case Some(("-lc", after)) => onlyWord(after)
+      case Some(("-l", after))  =>
+        oneToken(skipBlank(after)) match
+          case Some(("-c", script)) => onlyWord(script)
+          case _                    => None
+      case _ => None
+
+  private def onlyWord(raw: String): Option[String] =
+    oneToken(skipBlank(raw)) match
+      case Some((word, rest)) if rest.forall(isBlank) => Some(word)
+      case _                                          => None
+
+  private def oneToken(raw: String): Option[(String, String)] =
+    val text = skipBlank(raw)
+    if text.isEmpty then None
+    else
+      val acc = new StringBuilder
+      text.charAt(0) match
+        case '\'' => quoted(text, 1, '\'', acc)
+        case '"'  => quoted(text, 1, '"', acc)
+        case _    => bare(text, 0, acc)
+
+  private def quoted(raw: String, index: Int, mark: Char, acc: StringBuilder): Option[(String, String)] =
+    if index >= raw.length then None
+    else if mark == '\'' && startsWith(raw, index, "'\\''") then
+      acc.append('\'')
+      quoted(raw, index + 4, mark, acc)
+    else
+      val ch = raw.charAt(index)
+      if ch == mark then Some((acc.toString, raw.substring(index + 1)))
+      else if mark == '"' && ch == '\\' && index + 1 < raw.length then
+        val next = raw.charAt(index + 1)
+        if next == '\n' then quoted(raw, index + 2, mark, acc)
+        else if "\"\\$`".contains(next) then
+          acc.append(next)
+          quoted(raw, index + 2, mark, acc)
+        else
+          acc.append('\\')
+          acc.append(next)
+          quoted(raw, index + 2, mark, acc)
+      else
+        acc.append(ch)
+        quoted(raw, index + 1, mark, acc)
+
+  private def bare(raw: String, index: Int, acc: StringBuilder): Option[(String, String)] =
+    if index >= raw.length || isBlank(raw.charAt(index)) then
+      val word = acc.toString
+      if bareWord(word) then Some((word, raw.substring(index))) else None
+    else
+      val ch = raw.charAt(index)
+      if ch == '\'' || ch == '"' || ch == '\\' then None
+      else
+        acc.append(ch)
+        bare(raw, index + 1, acc)
+
+  private def bareWord(text: String): Boolean =
+    text.nonEmpty && text.forall(bareChar)
+
+  private def bareChar(ch: Char): Boolean =
+    ch.isLetterOrDigit || ch == '_' || ch == '@' || ch == '%' || ch == '+' || ch == '=' || ch == ':' || ch == ',' ||
+      ch == '.' || ch == '/' || ch == '-'
+
+  private def skipBlank(raw: String): String =
+    raw.dropWhile(isBlank)
+
+  private def isBlank(ch: Char): Boolean =
+    ch == ' ' || ch == '\t' || ch == '\n'
+
+  private def startsWith(raw: String, index: Int, token: String): Boolean =
+    index + token.length <= raw.length && raw.regionMatches(index, token, 0, token.length)
 
   private def loginShell(command: String): Boolean =
     val slash = command.lastIndexOf('/')

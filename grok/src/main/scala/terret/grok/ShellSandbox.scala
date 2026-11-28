@@ -7,6 +7,9 @@ import zio.{Chunk, Fiber, IO, Promise, Ref, UIO, ZIO, ZLayer}
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, InvalidPathException, Path}
+
+import scala.jdk.CollectionConverters.*
+
 /** Why a confined command did not produce an exit code. */
 enum SandboxError:
   case Unavailable
@@ -69,6 +72,9 @@ object ShellSandbox:
   def available: Boolean =
     val mac = Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac"))
     mac && executable
+
+  def skipReason(present: Boolean): Option[String] =
+    if present then None else Some("sandbox-exec is missing")
 
   /** `sandbox-exec -p <profile> -- <argv>`. The profile is one element. Nothing is interpolated. */
   def confined(profile: String, argv: Chunk[String]): Chunk[String] =
@@ -143,14 +149,15 @@ object ShellSandbox:
           cwd     <- real(bounds.cwd)
           reads   <- ZIO.foreach(bounds.reads)(real)
           writes  <- ZIO.foreach(bounds.writes)(real)
-          systems <- systemReads
+          systems <- systemFiles
           text    <- ZIO.fromEither(
             SeatbeltProfile.render(
               SeatbeltPolicy(
-                dedup(reads ++ systems),
+                dedup(reads ++ systems.reads),
                 dedup(writes),
-                SeatbeltProfile.ancestors(cwd),
+                dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
                 bounds.network,
+                systems.links,
               )
             )
           )
@@ -164,18 +171,40 @@ object ShellSandbox:
         case None => ZIO.fail(SandboxError.BadPath(path.toString))
       }
 
-    private def systemReads: UIO[Chunk[String]] =
-      ZIO
-        .foreach(SystemReads) { raw =>
-          ZIO
-            .attemptBlocking {
-              val path = Path.of(raw)
-              try if Files.exists(path) then Some(path.toAbsolutePath.normalize.toString) else None
-              catch case _: IOException | _: SecurityException | _: InvalidPathException => None
-            }
-            .orDie
-        }
-        .map(found => dedup(found.flatten))
+    private def systemFiles: UIO[SystemFiles] =
+      ZIO.attemptBlocking(readSystemFiles).orDie
+
+    private def readSystemFiles: SystemFiles =
+      val reads = dedup(SystemReads.flatMap(existing))
+      val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, root) =>
+        Option(Path.of(root).getParent) match
+          case None => acc
+          case Some(parent) =>
+            val next = parentsOf(parent)
+            Reach(acc.ancestors ++ next.ancestors, acc.links ++ next.links)
+      }
+      SystemFiles(reads, dedup(reached.ancestors), dedup(reached.links))
+
+    private def existing(raw: String): Option[String] =
+      try
+        val path = Path.of(raw)
+        if Files.exists(path) then Some(path.toAbsolutePath.normalize.toString) else None
+      catch case _: IOException | _: SecurityException | _: InvalidPathException => None
+
+    // A subpath allow does not cover its parents, so lookup stops at the first missing one.
+    // readlink of a symlink parent is file-read-data. Metadata alone never reaches /var/select.
+    private def parentsOf(start: Path): Reach =
+      val text = start.toString
+      if text == "/" then Reach(Chunk.empty, Chunk.empty)
+      else
+        val above =
+          Option(start.getParent) match
+            case None         => Reach(Chunk.empty, Chunk.empty)
+            case Some(parent) => parentsOf(parent)
+        try
+          if Files.isSymbolicLink(start) then Reach(text +: above.ancestors, text +: above.links)
+          else Reach(text +: above.ancestors, above.links)
+        catch case _: IOException | _: SecurityException | _: InvalidPathException => above
 
     private def open(argv: Chunk[String], bounds: ShellBounds, combined: Boolean): IO[SandboxError, Process] =
       prepare(bounds).flatMap(ready => spawn(ready.text, argv, ready.cwd, combined))
@@ -183,7 +212,7 @@ object ShellSandbox:
     private def spawn(profile: String, argv: Chunk[String], cwd: Path, combined: Boolean): IO[SandboxError, Process] =
       ZIO
         .attemptBlockingInterrupt {
-          val builder = new ProcessBuilder(ShellSandbox.confined(profile, argv).toList*)
+          val builder = new ProcessBuilder(ShellSandbox.confined(profile, argv).toList.asJava)
           builder.directory(cwd.toFile)
           builder.redirectErrorStream(combined)
           val env  = builder.environment()
@@ -191,6 +220,10 @@ object ShellSandbox:
           env.clear()
           env.put("PATH", path)
           env.put("LANG", "C")
+          // Git exits fatal when a config file is denied. /dev/null keeps the host copies unopened.
+          env.put("GIT_CONFIG_NOSYSTEM", "1")
+          env.put("GIT_CONFIG_GLOBAL", "/dev/null")
+          env.put("GIT_CONFIG_SYSTEM", "/dev/null")
           val process = builder.start()
           close(process.getOutputStream)
           process
@@ -264,6 +297,10 @@ object ShellSandbox:
 
     private def dedup(paths: Chunk[String]): Chunk[String] =
       paths.foldLeft(Chunk.empty[String])((acc, path) => if acc.contains(path) then acc else acc :+ path)
+
+    private final case class SystemFiles(reads: Chunk[String], ancestors: Chunk[String], links: Chunk[String])
+
+    private final case class Reach(ancestors: Chunk[String], links: Chunk[String])
 
     private final case class Prepared(text: String, cwd: Path)
 

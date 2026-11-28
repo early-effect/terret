@@ -8,6 +8,7 @@ final case class SeatbeltPolicy(
     writes: Chunk[String],
     ancestors: Chunk[String],
     network: Boolean,
+    links: Chunk[String] = Chunk.empty,
 )
 
 object SeatbeltProfile:
@@ -16,12 +17,14 @@ object SeatbeltProfile:
       reads     <- each(policy.reads)
       writes    <- each(policy.writes)
       ancestors <- each(policy.ancestors)
+      links     <- each(policy.links)
     yield
       val body =
         preamble ++
           reads.map(quoted => s"(allow file-read* (subpath $quoted))") ++
           writes.map(quoted => s"(allow file-write* (subpath $quoted))") ++
           ancestors.map(quoted => s"(allow file-read-metadata (literal $quoted))") ++
+          links.map(quoted => s"(allow file-read-data (literal $quoted))") ++
           (if policy.network then Chunk("(allow network*)") else Chunk.empty)
       body.mkString("", "\n", "\n")
 
