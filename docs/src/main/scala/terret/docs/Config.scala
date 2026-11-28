@@ -5,6 +5,8 @@ import specular.*
 import terret.app.{
   AccessConfig,
   AccessConfigError,
+  KeyGate,
+  KeySource,
   Listen,
   ProcessConfig,
   ProcessError,
@@ -31,6 +33,8 @@ import terret.workspace.WorkspaceError
 import zio.{Chunk, ConfigProvider, Duration, ZIO}
 import zio.durationInt
 import zio.test.*
+
+import java.nio.file.Path
 
 /** Process config. Listener, policy, and the selected harness are separate facts. */
 object Config extends DocSpec:
@@ -59,12 +63,15 @@ not apply it. `gh` grants `gh` operations on the session workspace. Empty denies
 lists and views pull requests, issues, checks, and workflow runs. `write` creates and comments, and
 it merges when the caller names a method. `write` does not grant read. `read,write` grants both.
 A missing grant names itself. dsh does not apply it. `events.verification` is `Skip` or `Required`.
-The default is `Skip`, because the
-edge already rejects a request with no `x-terret-key`. `events.key` (`TERRET_EVENTS_KEY`) is optional.
-When it is set, that header must match it or the caller is not a principal. When it is unset, or
-empty, a presented non-empty `x-terret-key` is not a principal either. An absent or blank header stays
-unauthenticated, which is how local MCP keeps working. The id is `key:` plus the first 8 hex characters
-of the SHA-256 of the key. The key is not logged. `events.floor`, `events.default`, and `events.cap`
+The default is `Skip`. The caller is authenticated by `x-terret-key`. There is one key.
+`terret.key.file` is an absolute path of a mode 600 env file that sets `TERRET_KEY`.
+`terret.key.service` and `terret.key.account` name a login keychain item read with `security`.
+Set one source, not both. The secret is not an environment variable of the start script and it is
+not a config value. HTTP, including the local listener, refuses `/mcp` unless `x-terret-key` matches
+that key. The same match is the event subscriber's principal: `key:` plus the first 8 hex characters
+of the SHA-256. A missing source on HTTP logs the error and exits non-zero. Stdio has no headers:
+tool calls are not checked, and `events/subscribe` on that pipe stays forbidden. The key is not logged.
+`events.floor`, `events.default`, and `events.cap`
 are the webhook TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor
 is raised, an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
 `journal.limit` (`TERRET_JOURNAL_LIMIT`) is how many events one session log keeps. The default is 4096.
@@ -73,8 +80,9 @@ is rejected. `access.team` and `access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_
 on Cloudflare Access. Set both or neither. A port without both is rejected. The team value is a hostname
 such as `example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
 When both are set, the local listener (default `127.0.0.1:8080`) has no Access check and does not serve
-`GET /watch`. The tunnel listener on `127.0.0.1` and `access.port` (default 8081, `TERRET_ACCESS_PORT`)
-keeps the events-key check on `/mcp`. Every other tunnel path, including `GET /watch`, requires
+`GET /watch`. `/mcp` on that listener still requires `x-terret-key`. The tunnel listener on `127.0.0.1`
+and `access.port` (default 8081, `TERRET_ACCESS_PORT`) requires the same key on `/mcp`. Every other tunnel
+path, including `GET /watch`, requires
 `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against `https://<team>/cdn-cgi/access/certs`,
 for that audience, with issuer `https://<team>`, and not be expired. A missing token is rejected. There
 is no exemption for loopback or a Cloudflare header: cloudflared connects from 127.0.0.1, so point it at
@@ -231,7 +239,7 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
     exampleValue(ProcessConfig.load(base.copy(eventCap = Duration.Zero))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Events(EventPolicyError.Duration("cap"))))
     },
-    exampleValue(ProcessConfig.load(base).map(_.eventsKey)).assert { key =>
+    exampleValue(ProcessConfig.load(base).map(_.key)).assert { key =>
       assertTrue(key == Right(None))
     },
     exampleZIO {
@@ -239,18 +247,49 @@ A subscription whose deliveries are failing is left to expire. Restart waits use
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.events.key" -> "example-events-key")))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.key.file" -> "/var/terret/key.env")))
     }.assert { config =>
-      assertTrue(config.eventsKey.isDefined, !config.toString.contains("example-events-key"))
+      assertTrue(
+        config.key == Some(KeySource.File(Path.of("/var/terret/key.env"))),
+        !config.toString.contains("example-events-key"),
+      )
     },
     exampleZIO {
       ZIO
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.events.key" -> "")))
+        .withConfigProvider(ConfigProvider.fromMap(Map("terret.key.file" -> "")))
     }.assert { config =>
-      assertTrue(config.eventsKey.isEmpty)
+      assertTrue(config.key.isEmpty)
+    },
+    exampleZIO {
+      ZIO
+        .config(ProcessConfig.raw)
+        .mapError(ProcessError.Config(_))
+        .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
+        .withConfigProvider(ConfigProvider.fromMap(Map("TERRET_KEY" -> "example-events-key")))
+    }.assert { config =>
+      assertTrue(config.key.isEmpty, !config.toString.contains("example-events-key"))
+    },
+    exampleValue(ProcessConfig.load(base.copy(keyFile = Some("key.env")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.KeyPath))
+    },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(keyFile = Some("/var/terret/key.env"), keyService = Some("terret"), keyAccount = Some("mcp"))
+      )
+    ).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.KeyBoth))
+    },
+    exampleValue(ProcessConfig.load(base.copy(keyService = Some("terret")))).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.KeyPair))
+    },
+    exampleValue(KeyGate.ready(Listen.Http(WarpLocal.Host, WarpLocal.Port), None)).assert { ready =>
+      assertTrue(ready == Left(ProcessError.KeyMissing))
+    },
+    exampleValue(KeyGate.ready(Listen.Stdio, None)).assert { ready =>
+      assertTrue(ready == Right(None))
     },
     exampleValue(ProcessConfig.load(base).map(_.journal.limit)).assert { limit =>
       assertTrue(limit == Right(4096))

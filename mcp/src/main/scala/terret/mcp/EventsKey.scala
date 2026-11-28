@@ -7,8 +7,13 @@ import zio.{UIO, ZIO}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
-/** Optional `terret.events.key`. The secret stays out of `toString` and `hashCode`. */
+/** The one configured key. `toString` and `hashCode` do not reveal it. Stdio has no headers, so HTTP is what checks
+  * it.
+  */
 final class EventsKey private (private val raw: String):
+  def accepts(presented: String): Boolean =
+    presented.nonEmpty && EventsKey.same(raw, presented)
+
   override def equals(other: Any): Boolean =
     other match
       case key: EventsKey => EventsKey.same(raw, key.raw)
@@ -36,15 +41,15 @@ object EventsKey:
       case None      => None
       case Some(got) =>
         configured match
-          case Some(key) if same(key.raw, got) => Some(id(got))
-          case _                               => None
+          case Some(key) if key.accepts(got) => Some(id(got))
+          case _                             => None
 
   private def id(material: String): Principal =
     Principal(s"key:${hexPrefix(sha256(material))}")
 
-  /** Different lengths return before the bytes. */
+  /** Both sides are hashed first so a shorter header does not return early. */
   private def same(left: String, right: String): Boolean =
-    MessageDigest.isEqual(utf8(left), utf8(right))
+    MessageDigest.isEqual(sha256(left), sha256(right))
 
   private def sha256(text: String): Array[Byte] =
     MessageDigest.getInstance("SHA-256").digest(utf8(text))

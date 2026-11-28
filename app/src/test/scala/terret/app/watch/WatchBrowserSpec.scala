@@ -5,6 +5,7 @@ import heddle.route.Routes
 import heddle.server.Port
 import terret.Terret
 import terret.app.{AccessGate, AuthLog, Ingress}
+import terret.mcp.EventsKey
 import terret.config.TerretConfig
 import terret.event.{CallId, Event, PlanStep, ToolCall, ToolName, TurnOutcome}
 import zio.json.ast.Json
@@ -42,6 +43,11 @@ object WatchBrowserSpec extends ZIOSpecDefault:
     } @@ TestAspect.timeout(3.minutes) @@ TestAspect.withLiveClock,
   )
 
+  private def watchKey: ZIO[Any, Nothing, EventsKey] =
+    ZIO
+      .fromEither(EventsKey.from("watch-test-key").toRight(new IllegalArgumentException("watch key")))
+      .orDie
+
   private def drive: ZIO[Scope, Any, TestResult] =
     for
       scratch = repo.resolve("target/watch-e2e")
@@ -55,10 +61,11 @@ object WatchBrowserSpec extends ZIOSpecDefault:
       csrf    <- CsrfTokens.make
       steer   <- Steer.make(terret, Chunk(root))
       watch = WatchRoutes.routes(terret, streams, steer, csrf)
+      key <- watchKey
       bound <- ZIO.fromEither(Port.make(0))
       server <- Server
         .install(
-          Ingress.tunnel(Routes.empty, watch),
+          Ingress.tunnel(Routes.empty, watch, key),
           Server.Config.default.copy(host = "127.0.0.1", port = bound, http2 = false),
         )
         .provideSome[Scope](AccessGate.open ++ AuthLog.live)
@@ -82,10 +89,11 @@ object WatchBrowserSpec extends ZIOSpecDefault:
       csrf    <- CsrfTokens.make
       steer   <- Steer.make(terret, Chunk(root))
       watch = WatchRoutes.routes(terret, streams, steer, csrf)
+      key   <- watchKey
       bound <- ZIO.fromEither(Port.make(0))
       server <- Server
         .install(
-          Ingress.tunnel(Routes.empty, watch),
+          Ingress.tunnel(Routes.empty, watch, key),
           Server.Config.default.copy(host = "127.0.0.1", port = bound, http2 = false),
         )
         .provideSome[Scope](AccessGate.open ++ AuthLog.live)
