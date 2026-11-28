@@ -149,7 +149,8 @@ object ShellSandbox:
           cwd     <- real(bounds.cwd)
           reads   <- ZIO.foreach(bounds.reads)(real)
           writes  <- ZIO.foreach(bounds.writes)(real)
-          systems <- systemFiles
+          jdk     <- granted(FileRoots.home)
+          systems <- systemFiles(jdk)
           text    <- ZIO.fromEither(
             SeatbeltProfile.render(
               SeatbeltPolicy(
@@ -158,6 +159,7 @@ object ShellSandbox:
                 dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
                 bounds.network,
                 systems.links,
+                jdk,
               )
             )
           )
@@ -171,11 +173,23 @@ object ShellSandbox:
         case None => ZIO.fail(SandboxError.BadPath(path.toString))
       }
 
-    private def systemFiles: UIO[SystemFiles] =
-      ZIO.attemptBlocking(readSystemFiles).orDie
+    private def granted(home: Path): UIO[Chunk[String]] =
+      JdkGrant.decide(home).fold(noJdk, path => Chunk(path.text))
 
-    private def readSystemFiles: SystemFiles =
-      val reads = dedup(SystemReads.flatMap(existing))
+    private def noJdk(why: JdkRefuse): Chunk[String] =
+      why match
+        case JdkRefuse.Absent     => Chunk.empty
+        case JdkRefuse.Outside    => Chunk.empty
+        case JdkRefuse.Dangling   => Chunk.empty
+        case JdkRefuse.Loop       => Chunk.empty
+        case JdkRefuse.BadPath    => Chunk.empty
+        case JdkRefuse.Unreadable => Chunk.empty
+
+    private def systemFiles(jdk: Chunk[String]): UIO[SystemFiles] =
+      ZIO.attemptBlocking(readSystemFiles(jdk)).orDie
+
+    private def readSystemFiles(jdk: Chunk[String]): SystemFiles =
+      val reads = dedup(SystemReads.flatMap(existing) ++ jdk)
       val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, root) =>
         Option(Path.of(root).getParent) match
           case None => acc

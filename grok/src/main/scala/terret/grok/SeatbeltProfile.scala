@@ -9,19 +9,22 @@ final case class SeatbeltPolicy(
     ancestors: Chunk[String],
     network: Boolean,
     links: Chunk[String] = Chunk.empty,
+    executables: Chunk[String] = Chunk.empty,
 )
 
 object SeatbeltProfile:
   def render(policy: SeatbeltPolicy): Either[SandboxError, String] =
     for
-      reads     <- each(policy.reads)
-      writes    <- each(policy.writes)
-      ancestors <- each(policy.ancestors)
-      links     <- each(policy.links)
+      reads       <- each(policy.reads)
+      writes      <- each(policy.writes)
+      ancestors   <- each(policy.ancestors)
+      links       <- each(policy.links)
+      executables <- each(policy.executables)
     yield
       val body =
         preamble ++
           reads.map(quoted => s"(allow file-read* (subpath $quoted))") ++
+          executables.map(quoted => s"(allow file-map-executable (subpath $quoted))") ++
           writes.map(quoted => s"(allow file-write* (subpath $quoted))") ++
           ancestors.map(quoted => s"(allow file-read-metadata (literal $quoted))") ++
           links.map(quoted => s"(allow file-read-data (literal $quoted))") ++
