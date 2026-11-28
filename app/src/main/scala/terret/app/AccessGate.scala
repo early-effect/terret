@@ -85,7 +85,7 @@ object AccessGate:
 
   /** The tunnel listener, on every path except `/mcp`. A missing token is rejected. There is no localhost exemption:
     * cloudflared connects from 127.0.0.1, so an exemption would let every tunnel request through. The local listener
-    * does not install this, and `/mcp` keeps the events-key check.
+    * does not install this. `/mcp` requires the configured key and does not require this JWT.
     */
   def http: Middleware[AccessGate & AuthLog] =
     Middleware.interceptZIO { request =>

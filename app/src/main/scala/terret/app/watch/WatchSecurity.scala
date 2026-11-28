@@ -63,7 +63,7 @@ object WatchSecurity:
       case None        => "style-src 'self'"
     s"default-src 'self'; script-src 'self'; $style; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
-  /** `/mcp` keeps the events-key check. Every other tunnel path requires the Access JWT. */
+  /** `/mcp` is the key check. Every other tunnel path requires the Access JWT. */
   def mcp(request: Request): Boolean =
     request.path.segments.headOption.contains("mcp")
 

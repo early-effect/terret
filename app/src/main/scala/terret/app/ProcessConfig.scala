@@ -16,7 +16,7 @@ import terret.grok.{
   NetworkPolicy,
 }
 import terret.github.{GhAccess, GhGrantError}
-import terret.mcp.{EventPolicy, EventPolicyError, EventsKey}
+import terret.mcp.{EventPolicy, EventPolicyError}
 import terret.permission.{Ceiling, Permission, PermissionPolicy}
 import terret.transcript.{JournalBound, JournalBoundError}
 import terret.workspace.{Workspace, WorkspaceError}
@@ -40,7 +40,7 @@ final case class ProcessConfig(
     network: NetworkPolicy = NetworkPolicy.empty,
     gh: GhAccess = GhAccess.empty,
     events: EventPolicy = EventPolicy.terret,
-    eventsKey: Option[EventsKey] = None,
+    key: Option[KeySource] = None,
     grokConfig: Path,
     subscriptions: Path = Subscriptions.file,
     journal: JournalBound = JournalBound.default,
@@ -62,7 +62,6 @@ object ProcessConfig:
       floor: Duration,
       default: Duration,
       cap: Duration,
-      key: Option[String],
   )
 
   private val journalLimit: Config[Int] =
@@ -77,17 +76,30 @@ object ProcessConfig:
   private val accessPort: Config[Option[Int]] =
     Config.int("port").optional.nested("access")
 
+  private val keyFile: Config[Option[String]] =
+    Config.string("file").optional.nested("key")
+
+  private val keyService: Config[Option[String]] =
+    Config.string("service").optional.nested("key")
+
+  private val keyAccount: Config[Option[String]] =
+    Config.string("account").optional.nested("key")
+
   private final case class BoundRaw(
       journal: Int,
       team: Option[String],
       audience: Option[String],
       port: Option[Int],
+      keyFile: Option[String],
+      keyService: Option[String],
+      keyAccount: Option[String],
   )
 
   /** One value so the process config product stays inside what `Config.++` flattens. */
   private val boundRaw: Config[BoundRaw] =
-    (journalLimit ++ accessTeam ++ accessAudience ++ accessPort).map { (journal, team, audience, port) =>
-      BoundRaw(journal, team, audience, port)
+    (journalLimit ++ accessTeam ++ accessAudience ++ accessPort ++ keyFile ++ keyService ++ keyAccount).map {
+      (journal, team, audience, port, file, service, account) =>
+        BoundRaw(journal, team, audience, port, file, service, account)
     }
 
   private final case class OptInRaw(mcp: Option[String], network: Option[String], gh: Option[String])
@@ -110,10 +122,9 @@ object ProcessConfig:
       Config.string("verification").withDefault(EventPolicy.name(EventPolicy.terret.verification)) ++
         Config.duration("floor").withDefault(EventPolicy.terret.floor) ++
         Config.duration("default").withDefault(EventPolicy.terret.default) ++
-        Config.duration("cap").withDefault(EventPolicy.terret.cap) ++
-        Config.string("key").optional
-    ).nested("events").map { (verification, floor, default, cap, key) =>
-      EventRaw(verification, floor, default, cap, key)
+        Config.duration("cap").withDefault(EventPolicy.terret.cap)
+    ).nested("events").map { (verification, floor, default, cap) =>
+      EventRaw(verification, floor, default, cap)
     }
 
   val raw: Config[Raw] =
@@ -186,7 +197,9 @@ object ProcessConfig:
           events.floor,
           events.default,
           events.cap,
-          events.key,
+          bound.keyFile,
+          bound.keyService,
+          bound.keyAccount,
           bound.journal,
           bound.team,
           bound.audience,
@@ -211,7 +224,7 @@ object ProcessConfig:
       grokConfig <- grokConfigOf(raw.grokConfig)
       journal    <- journalOf(raw.journalLimit)
       access     <- accessOf(raw.accessTeam, raw.accessAudience, raw.accessPort, listen)
-      eventsKey = raw.eventKey.flatMap(EventsKey.from)
+      key        <- KeySource.parse(raw.keyFile, raw.keyService, raw.keyAccount)
     yield ProcessConfig(
       listen,
       policy,
@@ -224,7 +237,7 @@ object ProcessConfig:
       network,
       gh,
       events,
-      eventsKey,
+      key,
       grokConfig,
       journal = journal,
       access = access,
@@ -384,7 +397,9 @@ object ProcessConfig:
       eventFloor: Duration = EventPolicy.terret.floor,
       eventDefault: Duration = EventPolicy.terret.default,
       eventCap: Duration = EventPolicy.terret.cap,
-      eventKey: Option[String] = None,
+      keyFile: Option[String] = None,
+      keyService: Option[String] = None,
+      keyAccount: Option[String] = None,
       journalLimit: Int = JournalBound.DefaultSize,
       accessTeam: Option[String] = None,
       accessAudience: Option[String] = None,
@@ -479,6 +494,11 @@ enum ProcessError:
   case Server(error: heddle.error.ServerError)
   case Stdio(cause: Throwable)
   case Config(error: zio.Config.Error)
+  case KeyMissing
+  case Key(error: KeyError)
+  case KeyBoth
+  case KeyPair
+  case KeyPath
 
   def render: String = this match
     case Listen(value)        => s"listen is http or stdio, got $value"
@@ -510,6 +530,12 @@ enum ProcessError:
     case Server(error)        => error.message
     case Stdio(cause)         => s"stdio ${cause.toString}"
     case Config(error)        => error.toString
+    case KeyMissing           =>
+      "HTTP needs a key: set terret.key.file to a mode 600 env file, or terret.key.service and terret.key.account"
+    case Key(error)           => error.render
+    case KeyBoth              => "set terret.key.file or the keychain item, not both"
+    case KeyPair              => "terret.key.service and terret.key.account are set together"
+    case KeyPath              => "terret.key.file must be an absolute path"
 
   private def journalMessage(error: JournalBoundError): String =
     error match

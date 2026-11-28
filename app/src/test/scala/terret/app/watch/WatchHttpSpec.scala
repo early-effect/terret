@@ -4,7 +4,8 @@ import heddle.http.{Body, Form, MediaType, Method, Request, Response}
 import heddle.route.{Handler, PathDsl, Routes}
 import slayer.*
 import terret.Terret
-import terret.app.{AccessGate, AuthLog}
+import terret.app.{AccessGate, AuthLog, Ingress}
+import terret.mcp.EventsKey
 import terret.config.TerretConfig
 import terret.hooks.Hooks
 import terret.memory.{InMemory, Script}
@@ -102,8 +103,9 @@ object WatchHttpSpec extends ZIOSpecDefault:
     test("the local listener does not serve a watch post") {
       for
         hits <- Ref.make(0)
+        key <- watchKey
         routes = IngressRoutes.counting(hits)
-        guarded = terret.app.Ingress.local(routes)
+        guarded = Ingress.local(routes, key)
         response <- guarded(sameSite("/watch/open")).provide(AccessGate.open, AuthLog.live)
         calls    <- hits.get
       yield assertTrue(response.status.code == 404, calls == 0)
@@ -111,8 +113,9 @@ object WatchHttpSpec extends ZIOSpecDefault:
     test("a non-json mutation does not reach the handler") {
       for
         hits <- Ref.make(0)
+        key <- watchKey
         routes = IngressRoutes.counting(hits)
-        guarded = terret.app.Ingress.local(routes)
+        guarded = Ingress.local(routes, key)
         response <- guarded(
           Request
             .post("/sessions/run", Body.text("{}", MediaType.Json))
@@ -122,6 +125,11 @@ object WatchHttpSpec extends ZIOSpecDefault:
       yield assertTrue(response.status.code == 415, calls == 0)
     },
   )
+
+  private def watchKey: ZIO[Any, Nothing, EventsKey] =
+    ZIO
+      .fromEither(EventsKey.from("watch-test-key").toRight(new IllegalArgumentException("watch key")))
+      .orDie
 
   private def posted(path: String): Request =
     Request

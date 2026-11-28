@@ -2,7 +2,7 @@ package terret.app
 
 import heddle.mcp.protocol.{ClientRequest, Message, Methods, ProtocolVersion, RequestId}
 import heddle.mcp.transport.Http
-import terret.mcp.{OpenJob, Opened, RunJob, SessionJob, StatusView, WireState}
+import terret.mcp.{EventsKey, OpenJob, Opened, RunJob, SessionJob, StatusView, WireState}
 import terret.memory.{InMemory, Script}
 import terret.model.ModelCatalog
 import terret.permission.{Permission, PermissionPolicy}
@@ -11,10 +11,11 @@ import zio.json.ast.Json
 import zio.json.*
 import zio.test.*
 import zio.durationInt
-import zio.{Chunk, ConfigProvider, Scope, ZIO, ZLayer}
+import zio.{Chunk, ConfigProvider, Exit, Scope, ZIO, ZLayer}
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.file.{Files, Path}
+import java.nio.file.attribute.PosixFilePermissions
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -215,20 +216,16 @@ object ProcessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
-          dir    <- ZIO.acquireRelease(
-            ZIO.attempt {
-              val root = Path.of("target")
-              Files.createDirectories(root)
-              Files.createTempDirectory(root, "process-subscriptions")
-            }
-          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          dir    <- scratch("process-subscriptions")
+          source <- keyFile(dir, "rw-------")
           config = ProcessConfig.local.copy(
             listen = Listen.Http("127.0.0.1", 0),
             subscriptions = dir.resolve("subscriptions.json"),
+            key = Some(source),
           )
           server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
-          status <- listed(port)
+          status <- listed(port, HttpSecret)
         yield assertTrue(
           status == Right(
             Set(
@@ -260,27 +257,31 @@ object ProcessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
-          dir    <- ZIO.acquireRelease(
-            ZIO.attempt {
-              val root = Path.of("target")
-              Files.createDirectories(root)
-              Files.createTempDirectory(root, "process-subscriptions")
-            }
-          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          dir    <- scratch("process-subscriptions")
+          source <- keyFile(dir, "rw-------")
           tunnel <- freePort
           access <- ZIO.fromEither(tunnelAccess(tunnel))
           config = ProcessConfig.local.copy(
             listen = Listen.Http("127.0.0.1", 0),
             subscriptions = dir.resolve("subscriptions.json"),
             access = Some(access),
+            key = Some(source),
           )
           server      <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           local       <- server.port
           open        <- sessions(local)
           denied      <- sessions(tunnel)
+          bareMcp <- exchange(
+            tunnel,
+            "POST",
+            "/mcp",
+            Some("{}"),
+            "Content-Type" -> "application/json",
+            "Accept"       -> "application/json",
+          )
           localWatch  <- exchange(local, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
           tunnelWatch <- exchange(tunnel, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
-          mcp         <- listed(tunnel)
+          mcp         <- listed(tunnel, HttpSecret)
         yield assertTrue(
           open.status == 200,
           open.body.contains("["),
@@ -303,6 +304,9 @@ object ProcessSpec extends ZIOSpecDefault:
           tunnelWatch.headers.get("Content-Security-Policy").exists(_.contains("frame-ancestors 'none'")),
           tunnelWatch.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
           tunnelWatch.headers.get("Access-Control-Allow-Origin").isEmpty,
+          bareMcp.status == 401,
+          bareMcp.body.contains("access denied"),
+          !bareMcp.body.contains(HttpSecret),
           mcp == Right(
             Set(
               "open",
@@ -333,13 +337,8 @@ object ProcessSpec extends ZIOSpecDefault:
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
-          dir    <- ZIO.acquireRelease(
-            ZIO.attempt {
-              val root = Path.of("target")
-              Files.createDirectories(root)
-              Files.createTempDirectory(root, "process-subscriptions")
-            }
-          )(root => ZIO.attempt(deleteTree(root)).ignore)
+          dir    <- scratch("process-subscriptions")
+          source <- keyFile(dir, "rw-------")
           space <- ZIO.acquireRelease(
             ZIO.attempt {
               val root = Path.of("target")
@@ -350,6 +349,7 @@ object ProcessSpec extends ZIOSpecDefault:
           config = ProcessConfig.local.copy(
             listen = Listen.Http("127.0.0.1", 0),
             subscriptions = dir.resolve("subscriptions.json"),
+            key = Some(source),
           )
           server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
@@ -400,6 +400,102 @@ object ProcessSpec extends ZIOSpecDefault:
             case WireState.Ended(_)                 => true
             case WireState.Open | WireState.Running => false
           ),
+        )
+      }
+    },
+    test("HTTP refuses to bind when no key is configured") {
+      ZIO.scoped {
+        for
+          memory <- InMemory.make(Script.echo)
+          dir    <- scratch("process-subscriptions")
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+          )
+          failed <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty)).exit
+        yield assertTrue(
+          failed == Exit.fail(ProcessError.KeyMissing),
+          ProcessError.KeyMissing.render.contains("terret.key.file"),
+          !ProcessError.KeyMissing.render.contains("TERRET_EVENTS_KEY"),
+          !ProcessError.KeyMissing.render.contains(HttpSecret),
+        )
+      }
+    },
+    test("a world-readable key file refuses HTTP startup") {
+      ZIO.scoped {
+        for
+          memory <- InMemory.make(Script.echo)
+          dir    <- scratch("process-subscriptions")
+          source <- keyFile(dir, "rw-r--r--")
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+            key = Some(source),
+          )
+          failed <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty)).exit
+        yield assertTrue(
+          failed == Exit.fail(ProcessError.Key(KeyError.Exposed)),
+          ProcessError.Key(KeyError.Exposed).render == "key file must be mode 600",
+          !ProcessError.Key(KeyError.Exposed).render.contains(HttpSecret),
+        )
+      }
+    },
+    test("HTTP mcp requires the configured key and a cross-site post stays forbidden") {
+      ZIO.scoped {
+        for
+          memory <- InMemory.make(Script.echo)
+          dir    <- scratch("process-subscriptions")
+          source <- keyFile(dir, "rw-------")
+          config = ProcessConfig.local.copy(
+            listen = Listen.Http("127.0.0.1", 0),
+            subscriptions = dir.resolve("subscriptions.json"),
+            key = Some(source),
+          )
+          server  <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          port    <- server.port
+          missing <- mcpPost(port, None)
+          wrong   <- mcpPost(port, Some(WrongSecret))
+          opened  <- exchange(port, "GET", "/mcp", None, EventsKey.Header -> HttpSecret)
+          closed  <- exchange(port, "GET", "/mcp", None)
+          removed <- exchange(
+            port,
+            "DELETE",
+            "/mcp",
+            None,
+            "Content-Type"   -> "application/json",
+            EventsKey.Header -> HttpSecret,
+          )
+          kept <- exchange(port, "DELETE", "/mcp", None, "Content-Type" -> "application/json")
+          tools   <- listed(port, HttpSecret)
+          crossed <- exchange(
+            port,
+            "POST",
+            "/mcp",
+            Some("{}"),
+            "Content-Type"   -> "application/json",
+            "Accept"         -> "application/json",
+            EventsKey.Header -> HttpSecret,
+            "Origin"         -> "https://evil.example",
+            "Sec-Fetch-Site" -> "cross-site",
+          )
+        yield assertTrue(
+          missing.status == 401,
+          wrong.status == 401,
+          missing.body == wrong.body,
+          missing.body.contains("access denied"),
+          !missing.body.contains(HttpSecret),
+          !missing.body.contains(WrongSecret),
+          !wrong.body.contains(HttpSecret),
+          closed.status == 401,
+          opened.status == 400,
+          !opened.body.contains(HttpSecret),
+          kept.status == 401,
+          removed.status == 200,
+          !removed.body.contains(HttpSecret),
+          tools.isRight,
+          crossed.status == 403,
+          crossed.body.contains("access denied"),
+          !crossed.body.contains(HttpSecret),
         )
       }
     },
@@ -516,7 +612,34 @@ object ProcessSpec extends ZIOSpecDefault:
       }
     }
 
-  private def listed(port: Int): ZIO[Any, Throwable, Either[String, Set[String]]] =
+  private val HttpSecret  = "terret-http-key"
+  private val WrongSecret = "terret-http-kez"
+
+  private def scratch(prefix: String): ZIO[Scope, Throwable, Path] =
+    ZIO.acquireRelease(
+      ZIO.attempt {
+        val root = Path.of("target")
+        Files.createDirectories(root)
+        Files.createTempDirectory(root, prefix)
+      }
+    )(root => ZIO.attempt(deleteTree(root)).ignore)
+
+  private def keyFile(dir: Path, mode: String): ZIO[Any, Throwable, KeySource] =
+    ZIO.attempt {
+      val path = dir.resolve("key.env")
+      Files.writeString(path, s"TERRET_KEY=$HttpSecret\n")
+      Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(mode))
+      KeySource.File(path)
+    }
+
+  private def mcpPost(port: Int, key: Option[String]): ZIO[Any, Throwable, HttpText] =
+    val headers = List(
+      "Content-Type" -> "application/json",
+      "Accept"       -> "application/json",
+    ) ++ key.map(EventsKey.Header -> _)
+    exchange(port, "POST", "/mcp", Some("{}"), headers*)
+
+  private def listed(port: Int, key: String): ZIO[Any, Throwable, Either[String, Set[String]]] =
     ZIO.scoped:
       ZIO
         .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
@@ -527,6 +650,7 @@ object ProcessSpec extends ZIOSpecDefault:
               .newBuilder(URI.create(s"http://127.0.0.1:$port/mcp"))
               .header("Content-Type", "application/json")
               .header("Accept", "application/json")
+              .header(EventsKey.Header, key)
               .header(Http.ProtocolHeader, ProtocolVersion.Current.value)
               .header(Http.MethodHeader, Methods.ListTools)
               .POST(HttpRequest.BodyPublishers.ofString(tool.json.toJson))
