@@ -9,14 +9,18 @@ import java.nio.charset.StandardCharsets
 import java.security.spec.RSAPublicKeySpec
 import java.security.{KeyFactory, PublicKey, Signature}
 import java.time.Instant
-import java.util.Base64
+import java.util.{Base64, Locale}
 import scala.util.Try
 
-/** Checks a Cloudflare Access JWT: RS256 against the team keys, then issuer, audience, expiry, then the owner email. A
-  * missing or different email is rejected. A service token, which carries `common_name` and no email, is rejected.
-  * `common_name` is not read.
+/** Checks a Cloudflare Access JWT: RS256 against the team keys, then issuer, audience, and expiry. Optional `nbf` and
+  * `iat` are then bounded by `ClockSkewSeconds`. The owner email is matched after that, ignoring case. A missing or
+  * different email is rejected. A service token, which carries `common_name` and no email, is rejected. `common_name`
+  * is not read.
   */
 object AccessJwt:
+  /** Seconds `nbf` and `iat` may sit ahead of now. Further ahead is rejected. A missing claim is allowed. */
+  val ClockSkewSeconds: Long = 60
+
   final case class RsaKey(kid: Option[String], publicKey: PublicKey)
 
   /** Issuer for a team hostname, such as `https://example.cloudflareaccess.com`. */
@@ -53,6 +57,8 @@ object AccessJwt:
         _       <- audienceOf(payload, audience)
         exp     <- epoch(payload, "exp")
         _       <- if now.isBefore(Instant.ofEpochSecond(exp)) then Right(()) else Left(AccessError.Rejected)
+        _       <- futureBound(payload, "nbf", now)
+        _       <- futureBound(payload, "iat", now)
         _       <- ownerOf(payload, owner)
       yield ()
 
@@ -99,8 +105,22 @@ object AccessJwt:
 
   private def ownerOf(payload: Json.Obj, owner: OwnerEmail): Either[AccessError, Unit] =
     optional(payload, "email") match
-      case Some(found) if found == owner.value => Right(())
-      case _                                   => Left(AccessError.Rejected)
+      case Some(found) if mailbox(found) == mailbox(owner.value) => Right(())
+      case _                                                     => Left(AccessError.Rejected)
+
+  /** `Locale.ROOT` so case folding does not follow the JVM default locale. The whole address is folded. */
+  private def mailbox(raw: String): String =
+    raw.toLowerCase(Locale.ROOT)
+
+  /** A missing claim is allowed. A present claim must be an epoch second no further ahead than the skew. */
+  private def futureBound(payload: Json.Obj, name: String, now: Instant): Either[AccessError, Unit] =
+    payload.get(name) match
+      case None    => Right(())
+      case Some(_) =>
+        epoch(payload, name).flatMap { seconds =>
+          if seconds <= now.getEpochSecond + ClockSkewSeconds then Right(())
+          else Left(AccessError.Rejected)
+        }
 
   private def audienceOf(payload: Json.Obj, expected: String): Either[AccessError, Unit] =
     payload.get("aud") match

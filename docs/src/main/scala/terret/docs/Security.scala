@@ -34,8 +34,10 @@ that listener still requires `x-terret-key`. The tunnel listener (`127.0.0.1:808
 `terret.access.port`, `TERRET_ACCESS_PORT`) requires the same key on `/mcp`. Every other tunnel
 path, including `GET /watch`, requires a `Cf-Access-Jwt-Assertion` (RS256, the team certs at
 `https://<team>/cdn-cgi/access/certs`, the audience, issuer `https://<team>`, and not expired).
-The `email` claim must equal `terret.access.owner`. A service-token JWT (`common_name` and no
-email) is rejected. There is no exemption for loopback or a Cloudflare header.
+When `nbf` or `iat` is present it must be an epoch second at most 60 seconds ahead of now. A
+missing `nbf` or `iat` is allowed. The `email` claim must match `terret.access.owner` ignoring
+case, on the whole address. A service-token JWT (`common_name` and no email) is rejected. There
+is no exemption for loopback or a Cloudflare header.
 Point cloudflared at the tunnel port, not 8080.
 
 `GET /watch` reads the feed. Steering is POST on the tunnel listener: `POST /watch/{id}/run`,

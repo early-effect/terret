@@ -35,7 +35,7 @@ object Audience:
   extension (audience: Audience) def value: String = audience
 end Audience
 
-/** The mailbox the Access JWT `email` claim must equal. `common_name` is not this identity.
+/** The mailbox the Access JWT `email` claim must match, ignoring case. `common_name` is not this identity.
   */
 opaque type OwnerEmail = String
 
@@ -73,6 +73,7 @@ object OwnerEmail:
       case first :: rest =>
         val last = lastOf(rest, first)
         first.isLetterOrDigit && last.isLetterOrDigit && raw.forall(char => char.isLetterOrDigit || extra(char))
+  end shaped
 end OwnerEmail
 
 /** `port` is the tunnel listener. It is not the local MCP port. */
