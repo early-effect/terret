@@ -2,13 +2,11 @@ package terret.grok
 
 import terret.permission.{Ceiling, Permission}
 import terret.workspace.Workspace
-import zio.{Chunk, Fiber, IO, Promise, Ref, UIO, ZIO, ZLayer}
+import zio.{Chunk, Fiber, IO, Promise, Ref, Scope, UIO, ZIO, ZLayer}
 
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, InvalidPathException, Path}
-import java.util.concurrent.atomic.AtomicReference
-
 import scala.jdk.CollectionConverters.*
 
 /** Why a confined command did not produce an exit code. */
@@ -72,20 +70,31 @@ trait ShellSandbox:
   def run(argv: Chunk[String], bounds: ShellBounds): IO[SandboxError, SandboxOutput]
   def start(argv: Chunk[String], bounds: ShellBounds, limit: Int): IO[SandboxError, SandboxHandle]
 
-  /** Removes the session temp directory. A sandbox that has no directory succeeds. */
-  def shutdown: UIO[Unit] = ZIO.unit
-
 object ShellSandbox:
   val OutputCap: Int = 1000000
 
-  val live: ShellSandbox    = Live(FileRoots.home)
   val ready: ShellSandbox   = Ready
   val missing: ShellSandbox = Missing
 
-  private[grok] def atHome(home: Path): ShellSandbox = Live(home)
+  /** One sandbox and its temp directory. The directory is removed when the scope closes. */
+  def make(home: Path): ZIO[Scope, SandboxError, ShellSandbox] =
+    ZIO.acquireRelease(openTemp)(path => SessionTemp.remove(Path.of(path.text))).flatMap { temp =>
+      Ref.make(Noted.empty).map(noted => Live(home, temp, noted))
+    }
 
-  val layer: ZLayer[Any, Nothing, ShellSandbox] =
-    ZLayer.succeed(live)
+  val layer: ZLayer[Any, SandboxError, ShellSandbox] =
+    ZLayer.scoped(make(FileRoots.home))
+
+  private def openTemp: IO[SandboxError, AbsPath] =
+    SessionTemp.openDefault.flatMap { made =>
+      ZIO
+        .fromEither(AbsPath.from(made.toString))
+        .mapError {
+          case AbsPathError.NotAbsolute => SandboxError.BadPath(made.toString)
+          case AbsPathError.Illegal     => SandboxError.BadPath(made.toString)
+        }
+        .tapError(_ => SessionTemp.remove(made))
+    }
 
   def available: Boolean =
     val mac = Option(System.getProperty("os.name")).exists(_.toLowerCase.contains("mac"))
@@ -226,15 +235,12 @@ object ShellSandbox:
 
   private final case class Reach(ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
 
-  private final class Live(home: => Path) extends ShellSandbox:
-    private val grants   = new AtomicReference[Option[HostGrants]](None)
-    private val tempCell = new AtomicReference[Option[AbsPath]](None)
+  private final case class Noted(jdk: Option[String], sbt: Option[String], caches: Chunk[String])
 
-    override def shutdown: UIO[Unit] =
-      tempCell.getAndSet(None) match
-        case Some(dir) => SessionTemp.remove(Path.of(dir.text))
-        case None      => ZIO.unit
+  private object Noted:
+    val empty: Noted = Noted(None, None, Chunk.empty)
 
+  private final class Live(home: Path, temp: AbsPath, noted: Ref[Noted]) extends ShellSandbox:
     def profile(bounds: ShellBounds): IO[SandboxError, String] =
       prepare(bounds).map(_.text)
 
@@ -265,7 +271,6 @@ object ShellSandbox:
           reads  <- ZIO.foreach(bounds.reads)(real)
           writes <- ZIO.foreach(bounds.writes)(real)
           host   <- hostGrants
-          temp   <- sessionTemp
           policy <- assembled(reads, writes, cwd, bounds, host, temp)
         yield Prepared(SeatbeltProfile.render(policy), Path.of(cwd.text), temp)
 
@@ -308,53 +313,37 @@ object ShellSandbox:
       }
 
     private def hostGrants: UIO[HostGrants] =
-      grants.get match
-        case Some(cached) => ZIO.succeed(cached)
-        case None         =>
-          loadGrants.flatMap { fresh =>
-            if grants.compareAndSet(None, Some(fresh)) then ZIO.succeed(fresh)
-            else
-              grants.get match
-                case Some(kept) => ZIO.succeed(kept)
-                case None       => ZIO.succeed(fresh)
-          }
-
-    private def loadGrants: UIO[HostGrants] =
       for
-        jdk    <- noted(JdkGrant.decide(home), _.explain)
-        sbt    <- noted(SbtGrant.decide(home), _.explainSbt)
-        caches <- CacheDir.decide(home)
-      yield HostGrants(jdk, sbt, caches)
+        jdk    <- tool(JdkGrant.decide(home), _.explain)
+        sbt    <- tool(SbtGrant.decide(home), _.explainSbt)
+        looked <- CacheDir.survey(home)
+        _      <- publish(jdk._2, sbt._2, looked._2)
+      yield HostGrants(jdk._1, sbt._1, looked._1)
 
-    private def noted(got: IO[JdkRefuse, Granted], explain: JdkRefuse => String): UIO[Option[Granted]] =
+    private def tool(
+        got: IO[JdkRefuse, Granted],
+        explain: JdkRefuse => String,
+    ): UIO[(Option[Granted], Option[String])] =
       got.foldZIO(
         {
-          case JdkRefuse.Absent => ZIO.succeed(None)
-          case why              => ZIO.logInfo(explain(why)).as(None)
+          case JdkRefuse.Absent => ZIO.succeed((None, None))
+          case why              => ZIO.succeed((None, Some(explain(why))))
         },
-        grant => ZIO.succeed(Some(grant)),
+        grant => ZIO.succeed((Some(grant), None)),
       )
 
-    private def sessionTemp: IO[SandboxError, AbsPath] =
-      tempCell.get match
-        case Some(dir) => ZIO.succeed(dir)
-        case None      =>
-          SessionTemp.openDefault.flatMap { made =>
-            AbsPath.from(made.toString) match
-              case Right(abs)                     => keepTemp(abs)
-              case Left(AbsPathError.NotAbsolute) =>
-                SessionTemp.remove(made) *> ZIO.fail(SandboxError.BadPath(made.toString))
-              case Left(AbsPathError.Illegal)     =>
-                SessionTemp.remove(made) *> ZIO.fail(SandboxError.BadPath(made.toString))
-          }
+    private def publish(jdk: Option[String], sbt: Option[String], caches: Chunk[String]): UIO[Unit] =
+      val next = Noted(jdk, sbt, caches)
+      noted.modify { prev =>
+        val lines =
+          fresh(prev.jdk, next.jdk) ++ fresh(prev.sbt, next.sbt) ++ next.caches.filterNot(prev.caches.contains)
+        (lines, next)
+      }.flatMap(lines => ZIO.foreachDiscard(lines)(ZIO.logInfo(_)))
 
-    private def keepTemp(abs: AbsPath): IO[SandboxError, AbsPath] =
-      if tempCell.compareAndSet(None, Some(abs)) then ZIO.succeed(abs)
-      else
-        SessionTemp.remove(Path.of(abs.text)) *>
-          (tempCell.get match
-            case Some(kept) => ZIO.succeed(kept)
-            case None       => ZIO.fail(SandboxError.Unavailable))
+    private def fresh(prev: Option[String], next: Option[String]): Chunk[String] =
+      next match
+        case Some(line) if !prev.contains(line) => Chunk(line)
+        case _                                   => Chunk.empty
 
     private def open(argv: Chunk[String], bounds: ShellBounds, combined: Boolean): IO[SandboxError, Process] =
       prepare(bounds).flatMap(ready => spawn(ready.text, argv, ready.cwd, ready.temp, combined))
@@ -381,7 +370,8 @@ object ShellSandbox:
           env.put("GIT_CONFIG_GLOBAL", "/dev/null")
           env.put("GIT_CONFIG_SYSTEM", "/dev/null")
           env.put("TMPDIR", temp.text)
-          env.put("JAVA_TOOL_OPTIONS", "-Djava.io.tmpdir=" + temp.text)
+          // The JVM splits JAVA_TOOL_OPTIONS on whitespace. Quotes keep a temp path that contains a space.
+          env.put("JAVA_TOOL_OPTIONS", s"""-Djava.io.tmpdir="${temp.text}"""")
           val process = builder.start()
           close(process.getOutputStream)
           process

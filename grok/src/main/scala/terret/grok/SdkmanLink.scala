@@ -10,8 +10,8 @@ enum LinkBound:
   /** Strictly inside the resolved `candidates/<name>` directory. */
   case UnderBoundary
 
-  /** Strictly inside home. The target may sit outside `candidates/<name>`. */
-  case UnderHome
+  /** Strictly inside a real `home/sdks`, or strictly inside `candidates/<name>`. `sdks` itself is refused. */
+  case UnderSdks
 
 /** Shared walk for an SDKMAN `candidates/<name>/current` link. */
 object SdkmanLink:
@@ -45,11 +45,25 @@ object SdkmanLink:
       candidates: Path,
       target: Path,
   ): Either[JdkRefuse, Unit] =
-    val parent =
-      bound match
-        case LinkBound.UnderBoundary => candidates
-        case LinkBound.UnderHome     => home
-    within(parent, target)
+    bound match
+      case LinkBound.UnderBoundary => within(candidates, target)
+      case LinkBound.UnderSdks     =>
+        within(candidates, target) match
+          case Right(_) => Right(())
+          case Left(_)  => underSdks(home, target)
+
+  /** `sdks` is a real directory, not a symlink, and `target` is strictly inside it. Anything else is outside. */
+  private def underSdks(home: Path, target: Path): Either[JdkRefuse, Unit] =
+    val lexical = home.resolve("sdks")
+    val checked =
+      for
+        _        <- present(lexical)
+        resolved <- realpath(lexical, Set.empty)
+        _        <- unmoved(lexical, resolved)
+        _        <- directory(resolved)
+        _        <- within(resolved, target)
+      yield ()
+    checked.left.map(_ => JdkRefuse.Outside)
 
   private def candidateDir(home: Path, name: String): Either[JdkRefuse, Path] =
     val lexical = home.resolve(".sdkman").resolve("candidates").resolve(name)

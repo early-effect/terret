@@ -5,7 +5,7 @@ import zio.test.*
 import zio.{Chunk, ZIO}
 
 import java.io.IOException
-import java.nio.file.{Files, LinkOption, Path}
+import java.nio.file.{Files, Path}
 
 object CacheDirSpec extends ZIOSpecDefault:
   def spec = suite("build cache grant")(
@@ -88,7 +88,20 @@ object CacheDirSpec extends ZIOSpecDefault:
                 off.contains(s"(deny file-read* (literal \"$secret\"))"),
                 off.contains(s"(deny file-read* (literal \"$guard\"))"),
                 off.contains(s"(deny file-read* (literal \"$creds\"))"),
-                denyFollows(off, s"(allow file-read* (subpath \"$root\"))", s"(deny file-read* (literal \"$secret\"))"),
+                off.contains(s"(deny file-write* (literal \"$secret\"))"),
+                off.contains(s"(deny file-write* (literal \"$guard\"))"),
+                off.contains(s"(deny file-write* (literal \"$creds\"))"),
+                on.contains(s"(deny file-write* (literal \"$secret\"))"),
+                denyFollows(
+                  off,
+                  s"(allow file-read* (subpath \"$root\"))",
+                  s"(deny file-read* (literal \"$secret\"))",
+                ),
+                denyFollows(
+                  on,
+                  s"(allow file-write* (subpath \"$root\"))",
+                  s"(deny file-write* (literal \"$secret\"))",
+                ),
                 !off.contains("(allow network*)"),
               )
             case _ => assertTrue(false)
@@ -133,97 +146,98 @@ object CacheDirSpec extends ZIOSpecDefault:
     },
     suite("macos sandbox")(
       test("a cache directory is writable and a sibling cache is denied") {
-        withYard[SandboxError, TestResult] { yard =>
-          ZIO.scoped {
-            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
-            for
-              tree   <- cacheTree(yard.home)
-              bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk(tree.work), network = false, writable = true)
-              roots   <- CacheDir.decide(yard.home)
-              text    <- sandbox.profile(bounds)
-              wrote   <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
-              sibling <- sandbox.run(Chunk("/usr/bin/touch", tree.other.toString), bounds)
-              exists  <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
-              leaked  <- ZIO.attemptBlocking(Files.exists(tree.other)).orDie
-            yield
-              roots.find(_.root.text.endsWith("/Library/Caches/Coursier")) match
-                case None       => assertTrue(false)
-                case Some(root) =>
-                  val parent = root.root.text.stripSuffix("/Coursier")
-                  val lines  = text.split('\n')
-                  assertTrue(
-                    wrote.code == 0,
-                    exists,
-                    TestHome.denied(sibling),
-                    !leaked,
-                    lines.contains(s"(allow file-read* (subpath \"${root.root.text}\"))"),
-                    lines.contains(s"(allow file-write* (subpath \"${root.root.text}\"))"),
-                    !lines.contains(s"(allow file-read* (subpath \"$parent\"))"),
-                    !lines.contains(s"(allow file-write* (subpath \"$parent\"))"),
-                    !lines.contains(s"(allow file-write* (subpath \"${parent.stripSuffix("/Caches")}\"))"),
-                  )
-          }
-          }
-        }
+        withYard[SandboxError, TestResult]: yard =>
+          ZIO.scoped:
+            ShellSandbox.make(yard.home).flatMap: sandbox =>
+              for
+                tree    <- cacheTree(yard.home)
+                bounds  = ShellBounds(
+                  tree.work,
+                  Chunk(tree.work),
+                  Chunk(tree.work),
+                  network = false,
+                  writable = true,
+                )
+                roots   <- CacheDir.decide(yard.home)
+                text    <- sandbox.profile(bounds)
+                wrote   <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
+                sibling <- sandbox.run(Chunk("/usr/bin/touch", tree.other.toString), bounds)
+                exists  <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
+                leaked  <- ZIO.attemptBlocking(Files.exists(tree.other)).orDie
+              yield
+                roots.find(_.root.text.endsWith("/Library/Caches/Coursier")) match
+                  case None       => assertTrue(false)
+                  case Some(root) =>
+                    val parent = root.root.text.stripSuffix("/Coursier")
+                    val lines  = text.split('\n')
+                    assertTrue(
+                      wrote.code == 0,
+                      exists,
+                      TestHome.denied(sibling),
+                      !leaked,
+                      lines.contains(s"(allow file-read* (subpath \"${root.root.text}\"))"),
+                      lines.contains(s"(allow file-write* (subpath \"${root.root.text}\"))"),
+                      !lines.contains(s"(allow file-read* (subpath \"$parent\"))"),
+                      !lines.contains(s"(allow file-write* (subpath \"$parent\"))"),
+                      !lines.contains(s"(allow file-write* (subpath \"${parent.stripSuffix("/Caches")}\"))"),
+                    )
       } @@ TestAspect.timeout(30.seconds),
       test("a cache write is denied without WriteWorkspace") {
-        withYard[SandboxError, TestResult] { yard =>
-          ZIO.scoped {
-            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
-            for
-              tree   <- cacheTree(yard.home)
-              bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
-              text   <- sandbox.profile(bounds)
-              wrote  <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
-              exists <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
-            yield
-              val lines = text.split('\n')
-              assertTrue(
-                TestHome.denied(wrote),
-                !exists,
-                lines.contains(s"(allow file-read* (subpath \"${tree.root.toString}\"))"),
-                !lines.exists(line => line.startsWith("(allow file-write* (subpath") && line.contains("Coursier")),
-              )
-          }
-          }
-        }
+        withYard[SandboxError, TestResult]: yard =>
+          ZIO.scoped:
+            ShellSandbox.make(yard.home).flatMap: sandbox =>
+              for
+                tree   <- cacheTree(yard.home)
+                bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
+                text   <- sandbox.profile(bounds)
+                wrote  <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
+                exists <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
+              yield
+                val lines = text.split('\n')
+                assertTrue(
+                  TestHome.denied(wrote),
+                  !exists,
+                  lines.contains(s"(allow file-read* (subpath \"${tree.root.toString}\"))"),
+                  !lines.exists(line => line.startsWith("(allow file-write* (subpath") && line.contains("Coursier")),
+                )
       } @@ TestAspect.timeout(30.seconds),
       test("maven settings and ivy credentials are not readable") {
-        withYard[SandboxError, TestResult] { yard =>
-          ZIO.scoped {
-            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
-            for
-              _ <- TestHome.lay {
-                val m2 = yard.home.resolve(".m2")
-                Files.createDirectories(m2)
-                Files.writeString(m2.resolve("settings.xml"), "secret")
-                Files.writeString(m2.resolve("note"), "plain")
-                val ivy = yard.home.resolve(".ivy2")
-                Files.createDirectories(ivy)
-                Files.writeString(ivy.resolve(".credentials"), "secret")
-                Files.writeString(ivy.resolve("note"), "plain")
-              }
-              work    <- ZIO.attemptBlocking(Files.createDirectories(yard.home.resolve("work"))).orDie
-              bounds  = ShellBounds(work, Chunk(work), Chunk.empty, network = false, writable = false)
-              m2      = yard.home.resolve(".m2")
-              ivy     = yard.home.resolve(".ivy2")
-              note    <- sandbox.run(Chunk("/bin/cat", m2.resolve("note").toString), bounds)
-              hidden  <- sandbox.run(Chunk("/bin/cat", m2.resolve("settings.xml").toString), bounds)
-              ivyNote <- sandbox.run(Chunk("/bin/cat", ivy.resolve("note").toString), bounds)
-              creds   <- sandbox.run(Chunk("/bin/cat", ivy.resolve(".credentials").toString), bounds)
-            yield assertTrue(
-              note.code == 0,
-              note.stdout == "plain",
-              TestHome.denied(hidden),
-              !hidden.stdout.contains("secret"),
-              ivyNote.code == 0,
-              ivyNote.stdout == "plain",
-              TestHome.denied(creds),
-              !creds.stdout.contains("secret"),
-            )
-          }
-          }
-        }
+        withYard[SandboxError, TestResult]: yard =>
+          ZIO.scoped:
+            ShellSandbox.make(yard.home).flatMap: sandbox =>
+              for
+                _       <- laySecrets(yard.home)
+                work    <- ZIO.attemptBlocking(Files.createDirectories(yard.home.resolve("work"))).orDie
+                bounds   = ShellBounds(work, Chunk(work), Chunk.empty, network = false, writable = false)
+                m2       = yard.home.resolve(".m2")
+                ivy      = yard.home.resolve(".ivy2")
+                note    <- sandbox.run(Chunk("/bin/cat", m2.resolve("note").toString), bounds)
+                hidden  <- sandbox.run(Chunk("/bin/cat", m2.resolve("settings.xml").toString), bounds)
+                ivyNote <- sandbox.run(Chunk("/bin/cat", ivy.resolve("note").toString), bounds)
+                creds   <- sandbox.run(Chunk("/bin/cat", ivy.resolve(".credentials").toString), bounds)
+              yield assertTrue(
+                note.code == 0,
+                note.stdout == "plain",
+                TestHome.denied(hidden),
+                !hidden.stdout.contains("secret"),
+                ivyNote.code == 0,
+                ivyNote.stdout == "plain",
+                TestHome.denied(creds),
+                !creds.stdout.contains("secret"),
+              )
+      } @@ TestAspect.timeout(30.seconds),
+      test("maven settings cannot be overwritten when the cache is writable") {
+        withYard[SandboxError, TestResult]: yard =>
+          ZIO.scoped:
+            ShellSandbox.make(yard.home).flatMap: sandbox =>
+              for
+                _      <- laySecrets(yard.home)
+                work   <- ZIO.attemptBlocking(Files.createDirectories(yard.home.resolve("work"))).orDie
+                bounds  = ShellBounds(work, Chunk(work), Chunk(work), network = false, writable = true)
+                target  = yard.home.resolve(".m2").resolve("settings.xml")
+                wrote  <- sandbox.run(Chunk("/bin/sh", "-c", "printf pwned > \"$1\"", "sh", target.toString), bounds)
+                body   <- ZIO.attemptBlocking(Files.readString(target)).orDie
+              yield assertTrue(TestHome.denied(wrote), body == "secret")
       } @@ TestAspect.timeout(30.seconds),
     ).when(macPresent),
   )
@@ -236,6 +250,18 @@ object CacheDirSpec extends ZIOSpecDefault:
   private final case class Yard(root: Path, home: Path)
 
   private final case class CacheTree(work: Path, root: Path, marker: Path, other: Path)
+
+  private def laySecrets(home: Path): ZIO[Any, Nothing, Unit] =
+    TestHome.lay {
+      val m2 = home.resolve(".m2")
+      Files.createDirectories(m2)
+      Files.writeString(m2.resolve("settings.xml"), "secret")
+      Files.writeString(m2.resolve("note"), "plain")
+      val ivy = home.resolve(".ivy2")
+      Files.createDirectories(ivy)
+      Files.writeString(ivy.resolve(".credentials"), "secret")
+      Files.writeString(ivy.resolve("note"), "plain")
+    }
 
   private def cacheTree(home: Path): ZIO[Any, Nothing, CacheTree] =
     ZIO
@@ -282,7 +308,7 @@ object CacheDirSpec extends ZIOSpecDefault:
     TestHome.scratch("cache-grant").flatMap { root =>
       ZIO
         .attemptBlocking {
-          val home = Files.createDirectories(root.resolve("home")).toRealPath(LinkOption.NOFOLLOW_LINKS)
+          val home = Files.createDirectories(root.resolve("home")).toRealPath()
           Yard(root, home)
         }
         .refineToOrDie[IOException]

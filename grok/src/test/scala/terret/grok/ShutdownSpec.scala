@@ -38,7 +38,7 @@ object ShutdownSpec extends ZIOSpecDefault:
           _       <- stub[RpcPipe](_.read)(pull(pending))
           _       <- stub[RpcPipe](_.write(any[Json]))(json => record(trace, json))
           _       <- stub[RpcPipe](_.close)(trace.update(_ :+ "close"))
-          harness <- GrokHarness.make(GrokConfig.stdio, spawner, acp)
+          harness <- GrokHarness.make(GrokConfig.stdio, spawner, acp, sandbox = ShellSandbox.missing)
           root    <- ZIO.fromEither(Workspace.from("/work").left.map(TerretError.WorkspaceInvalid(_)))
           terret  <- Terret.make(harness, TerretConfig.closed, Hooks.identity)
           _       <- terret.open(root)

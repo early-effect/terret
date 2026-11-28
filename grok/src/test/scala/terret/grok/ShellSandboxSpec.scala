@@ -156,10 +156,26 @@ object ShellSandboxSpec extends ZIOSpecDefault:
         yield
           val caches = Chunk(CacheGrant(CacheDir.Maven, maven), CacheGrant(CacheDir.Ivy, ivy))
           val off    = renderPolicy(
-            work, caches, jdkRoot, jdkLink, sbtRoot, sbtLink, temp, writable = false, network = false,
+            work,
+            caches,
+            jdkRoot,
+            jdkLink,
+            sbtRoot,
+            sbtLink,
+            temp,
+            writable = false,
+            network = false,
           )
           val on     = renderPolicy(
-            work, caches, jdkRoot, jdkLink, sbtRoot, sbtLink, temp, writable = true, network = true,
+            work,
+            caches,
+            jdkRoot,
+            jdkLink,
+            sbtRoot,
+            sbtLink,
+            temp,
+            writable = true,
+            network = true,
           )
           val quiet  = off.split('\n')
           val open   = on.split('\n')
@@ -183,7 +199,12 @@ object ShellSandboxSpec extends ZIOSpecDefault:
             quiet.contains(denyRead(maven.text + "/settings.xml")),
             quiet.contains(denyRead(maven.text + "/settings-security.xml")),
             quiet.contains(denyRead(ivy.text + "/.credentials")),
+            quiet.contains(denyWrite(maven.text + "/settings.xml")),
+            quiet.contains(denyWrite(maven.text + "/settings-security.xml")),
+            quiet.contains(denyWrite(ivy.text + "/.credentials")),
+            open.contains(denyWrite(maven.text + "/settings.xml")),
             follows(quiet, readSub(maven.text), denyRead(maven.text + "/settings.xml")),
+            follows(open, writeSub(maven.text), denyWrite(maven.text + "/settings.xml")),
             !quiet.contains("(allow network*)"),
             open.contains("(allow network*)"),
             !quiet.exists(_.startsWith("(allow file-map-executable (subpath")),
@@ -214,13 +235,21 @@ object ShellSandboxSpec extends ZIOSpecDefault:
     },
     test("a hidden write outside the workspace does not land") {
       ZIO.scoped {
-        ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root)).flatMap(prove)
+        for
+          dirs    <- ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root))
+          sandbox <- ShellSandbox.make(FileRoots.home)
+          result  <- prove(dirs, sandbox)
+        yield result
       }
     } @@ TestAspect.timeout(30.seconds),
     suite("macos sandbox")(
       test("git --version, a quoted echo, and an outside write are separate argv") {
         ZIO.scoped {
-          ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root)).flatMap(separateArgv)
+          for
+            dirs    <- ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root))
+            sandbox <- ShellSandbox.make(FileRoots.home)
+            result  <- separateArgv(dirs, sandbox)
+          yield result
         }
       } @@ TestAspect.timeout(30.seconds),
     ).when(sandboxPresent),
@@ -231,29 +260,29 @@ object ShellSandboxSpec extends ZIOSpecDefault:
     ShellSandbox.skipReason(present).foreach(reason => System.err.println(s"SKIP macos sandbox: $reason"))
     present
 
-  private def separateArgv(dirs: Dirs) =
-    val script   = """printf %s 'a b"c'"""
-    val joined   = "/bin/bash -lc \"" + script.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-    val outside  = dirs.outside.resolve("hidden.txt")
-    val write    = "printf x > " + outside.toString
+  private def separateArgv(dirs: Dirs, sandbox: ShellSandbox) =
+    val script    = """printf %s 'a b"c'"""
+    val joined    = "/bin/bash -lc \"" + script.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    val outside   = dirs.outside.resolve("hidden.txt")
+    val write     = "printf x > " + outside.toString
     val writeLine = "/bin/bash -lc '" + write + "'"
-    val bounds = ShellBounds(
+    val bounds    = ShellBounds(
       dirs.workspace,
       Chunk(dirs.workspace),
       Chunk(dirs.workspace),
       network = false,
       writable = true,
     )
-    val echoArgv = AcpTerminal.execArgv(joined, Chunk.empty)
+    val echoArgv  = AcpTerminal.execArgv(joined, Chunk.empty)
     val writeArgv = AcpTerminal.execArgv(writeLine, Chunk.empty)
-    val ran =
+    val ran       =
       (echoArgv, writeArgv) match
         case (Some(echo), Some(redirect)) =>
           for
-            profile <- ShellSandbox.live.profile(bounds)
-            version <- ShellSandbox.live.run(Chunk("git", "--version"), bounds)
-            echoed  <- ShellSandbox.live.run(echo, bounds)
-            denied  <- ShellSandbox.live.run(redirect, bounds)
+            profile <- sandbox.profile(bounds)
+            version <- sandbox.run(Chunk("git", "--version"), bounds)
+            echoed  <- sandbox.run(echo, bounds)
+            denied  <- sandbox.run(redirect, bounds)
             gone    <- missing(outside)
           yield Some((profile, version, echoed, denied, gone, echo, redirect))
         case _ => ZIO.succeed(None)
@@ -275,18 +304,18 @@ object ShellSandboxSpec extends ZIOSpecDefault:
         )
     }
 
-  private def prove(dirs: Dirs) =
-    val script = """printf x > "$1""""
+  private def prove(dirs: Dirs, sandbox: ShellSandbox) =
+    val script      = """printf x > "$1""""
     val outsideFile = dirs.outside.resolve("hidden.txt")
     val argv        = Chunk("/bin/sh", "-c", script, "sh", outsideFile.toString)
     val shown       = s"/bin/sh -c ${shellQuote(script)} sh ${outsideFile.toString}"
     val readOnly    = ShellWrite.effect(shown) == ShellEffect.ReadOnly
     val body        =
-      if ShellSandbox.available then confined(dirs, script, argv)
-      else refused(argv, dirs.workspace, outsideFile)
+      if ShellSandbox.available then confined(dirs, sandbox, script, argv)
+      else refused(sandbox, argv, dirs.workspace, outsideFile)
     body.map(result => assertTrue(readOnly) && result)
 
-  private def confined(dirs: Dirs, script: String, outsideArgv: Chunk[String]) =
+  private def confined(dirs: Dirs, sandbox: ShellSandbox, script: String, outsideArgv: Chunk[String]) =
     val workspace   = dirs.workspace
     val outsideFile = dirs.outside.resolve("hidden.txt")
     val insideFile  = workspace.resolve("landed.txt")
@@ -294,48 +323,48 @@ object ShellSandboxSpec extends ZIOSpecDefault:
     val nest        = dirs.outside.resolve("nest")
     val through     = nest.resolve("hidden.txt")
     val link        = workspace.resolve("escape")
-    val withWrites =
+    val withWrites  =
       ShellBounds(workspace, Chunk(workspace), Chunk(workspace), network = false, writable = true)
-    val noWrites =
+    val noWrites    =
       ShellBounds(workspace, Chunk(workspace), Chunk.empty, network = false, writable = false)
     for
       _        <- write(dirs.outside.resolve("secret.txt"), "nope")
       _        <- write(workspace.resolve("note.txt"), "yes")
       _        <- ZIO.attemptBlocking(Files.createDirectories(nest)).orDie
       _        <- ZIO.attemptBlocking(Files.createSymbolicLink(link, nest)).orDie
-      closed   <- ShellSandbox.live.profile(withWrites)
-      opened   <- ShellSandbox.live.profile(withWrites.copy(network = true))
-      outside  <- ShellSandbox.live.run(outsideArgv, withWrites)
+      closed   <- sandbox.profile(withWrites)
+      opened   <- sandbox.profile(withWrites.copy(network = true))
+      outside  <- sandbox.run(outsideArgv, withWrites)
       gone     <- missing(outsideFile)
-      inside   <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", script, "sh", insideFile.toString), withWrites)
+      inside   <- sandbox.run(Chunk("/bin/sh", "-c", script, "sh", insideFile.toString), withWrites)
       landed   <- text(insideFile)
-      blocked  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", script, "sh", blockedFile.toString), noWrites)
+      blocked  <- sandbox.run(Chunk("/bin/sh", "-c", script, "sh", blockedFile.toString), noWrites)
       stayed   <- missing(blockedFile)
-      secret   <- ShellSandbox.live.run(Chunk("/bin/cat", dirs.outside.resolve("secret.txt").toString), withWrites)
-      note     <- ShellSandbox.live.run(Chunk("/bin/cat", workspace.resolve("note.txt").toString), withWrites)
-      linked   <- ShellSandbox.live.run(
+      secret   <- sandbox.run(Chunk("/bin/cat", dirs.outside.resolve("secret.txt").toString), withWrites)
+      note     <- sandbox.run(Chunk("/bin/cat", workspace.resolve("note.txt").toString), withWrites)
+      linked   <- sandbox.run(
                     Chunk("/bin/sh", "-c", script, "sh", link.resolve("hidden.txt").toString),
                     withWrites,
                   )
       linkGone <- missing(through)
-      lang     <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$LANG""""), noWrites)
-      home     <- ShellSandbox.live.run(
+      lang     <- sandbox.run(Chunk("/bin/sh", "-c", """printf %s "$LANG""""), noWrites)
+      home     <- sandbox.run(
                     Chunk("/bin/sh", "-c", """printf '%s\n%s' "$HOME" "$GIT_CONFIG_GLOBAL""""),
                     noWrites,
                   )
-      token    <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$GH_TOKEN""""), noWrites)
-      devNull  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", "printf x > /dev/null"), noWrites)
-      tempDir  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$TMPDIR""""), noWrites)
-      toolOpt  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$JAVA_TOOL_OPTIONS""""), noWrites)
-      touched  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """touch "$TMPDIR/ok""""), noWrites)
-      dir = Path.of(tempDir.stdout)
-      parent = Option(dir.getParent).getOrElse(dir)
-      sibling = parent.resolve("terret-sibling-denied")
-      sibTouch <- ShellSandbox.live.run(Chunk("/usr/bin/touch", sibling.toString), noWrites)
+      token    <- sandbox.run(Chunk("/bin/sh", "-c", """printf %s "$GH_TOKEN""""), noWrites)
+      devNull  <- sandbox.run(Chunk("/bin/sh", "-c", "printf x > /dev/null"), noWrites)
+      tempDir  <- sandbox.run(Chunk("/bin/sh", "-c", """printf %s "$TMPDIR""""), noWrites)
+      toolOpt  <- sandbox.run(Chunk("/bin/sh", "-c", """printf %s "$JAVA_TOOL_OPTIONS""""), noWrites)
+      touched  <- sandbox.run(Chunk("/bin/sh", "-c", """touch "$TMPDIR/ok""""), noWrites)
+      dir      = Path.of(tempDir.stdout)
+      parent   = Option(dir.getParent).getOrElse(dir)
+      sibling  = parent.resolve("terret-sibling-denied")
+      sibTouch <- sandbox.run(Chunk("/usr/bin/touch", sibling.toString), noWrites)
       okFile   <- ZIO.attemptBlocking(Files.exists(dir.resolve("ok"))).orDie
       sibFile  <- ZIO.attemptBlocking(Files.exists(sibling)).orDie
-      quiet    <- ShellSandbox.live.profile(noWrites)
-      handle   <- ShellSandbox.live.start(Chunk("/bin/sleep", "5"), noWrites, 1000)
+      quiet    <- sandbox.profile(noWrites)
+      handle   <- sandbox.start(Chunk("/bin/sleep", "5"), noWrites, 1000)
       _        <- handle.kill
       _        <- handle.awaitExit
     yield assertTrue(
@@ -358,7 +387,7 @@ object ShellSandboxSpec extends ZIOSpecDefault:
       quiet.contains("(allow file-write* (subpath \"" + tempDir.stdout + "\"))"),
       !quiet.split('\n').contains("(allow file-read* (subpath \"" + parent.toString + "\"))"),
       !quiet.split('\n').contains("(allow file-write* (subpath \"" + parent.toString + "\"))"),
-      toolOpt.stdout == "-Djava.io.tmpdir=" + tempDir.stdout,
+      toolOpt.stdout == s"""-Djava.io.tmpdir="${tempDir.stdout}"""",
       touched.code == 0,
       okFile,
       sibTouch.code != 0,
@@ -382,9 +411,9 @@ object ShellSandboxSpec extends ZIOSpecDefault:
       devNull.code == 0,
     )
 
-  private def refused(argv: Chunk[String], workspace: Path, outsideFile: Path) =
+  private def refused(sandbox: ShellSandbox, argv: Chunk[String], workspace: Path, outsideFile: Path) =
     val bounds = ShellBounds(workspace, Chunk(workspace), Chunk(workspace), network = false, writable = true)
-    ShellSandbox.live.run(argv, bounds).either.flatMap {
+    sandbox.run(argv, bounds).either.flatMap {
       case Left(SandboxError.Unavailable) => missing(outsideFile).map(gone => assertTrue(gone))
       case other                           => ZIO.succeed(assertTrue(other == Left(SandboxError.Unavailable)))
     }
@@ -452,6 +481,9 @@ object ShellSandboxSpec extends ZIOSpecDefault:
 
   private def denyRead(path: String): String =
     s"(deny file-read* (literal \"$path\"))"
+
+  private def denyWrite(path: String): String =
+    s"(deny file-write* (literal \"$path\"))"
 
   private def follows(lines: Array[String], earlier: String, later: String): Boolean =
     val left  = lines.indexOf(earlier)

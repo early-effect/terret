@@ -63,7 +63,7 @@ object HostSessionSpec extends ZIOSpecDefault:
       _       <- stub[RpcPipe](_.read)(pull(pending))
       _       <- stub[RpcPipe](_.write(any[Json]))(_ => ZIO.unit)
       _       <- stub[RpcPipe](_.close)(ZIO.unit)
-      harness <- GrokHarness.make(GrokConfig.stdio, idle, acp, hosts = hosts)
+      harness <- GrokHarness.make(GrokConfig.stdio, idle, acp, hosts = hosts, sandbox = ShellSandbox.missing)
       root    <- ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
       id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
       passed  <- seen.get

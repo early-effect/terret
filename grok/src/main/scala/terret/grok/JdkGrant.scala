@@ -16,7 +16,7 @@ enum JdkRefuse:
 
   def explain: String = text("jdk", "candidates/java")
 
-  def explainSbt: String = text("sbt", "home")
+  def explainSbt: String = text("sbt", "sdks")
 
   private def text(name: String, place: String): String =
     this match

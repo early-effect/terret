@@ -17,7 +17,12 @@ object WsHarnessSpec extends ZIOSpecDefault:
     test("an unbound socket fails before connecting") {
       ZIO.scoped {
         for
-          harness <- GrokHarness.make(GrokConfig.unbound, idle, AcpOpen.live(GrokConfig.unbound, idle))
+          harness <- GrokHarness.make(
+            GrokConfig.unbound,
+            idle,
+            AcpOpen.live(GrokConfig.unbound, idle),
+            sandbox = ShellSandbox.missing,
+          )
           root    <- ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
           failed  <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed).flip
         yield assertTrue(failed == HarnessFailure.Protocol(ProtocolFault.BindMissing))
@@ -34,7 +39,7 @@ object WsHarnessSpec extends ZIOSpecDefault:
                        new IllegalArgumentException("bind")
                      )
           config = GrokConfig.socket(bind)
-          harness <- GrokHarness.make(config, idle, AcpOpen.live(config, idle))
+          harness <- GrokHarness.make(config, idle, AcpOpen.live(config, idle), sandbox = ShellSandbox.missing)
           root    <- ZIO.fromEither(Workspace.from("/work")).orDieWith(_ => new IllegalArgumentException("workspace"))
           id      <- harness.open(root, Ceiling.closed, PermissionPolicy.Closed)
           seen    <- auth.get

@@ -27,7 +27,7 @@ object PermissionChoice:
       access: McpAccess = McpAccess.closed,
       hosts: NetworkPolicy = NetworkPolicy.empty,
       home: Path = FileRoots.home,
-      sandbox: ShellSandbox = ShellSandbox.live,
+      sandbox: ShellSandbox,
   ): UIO[PermissionAnswer] =
     val tool = toolOf(params)
     val kind = JsonFields.str(tool, "kind").getOrElse("")

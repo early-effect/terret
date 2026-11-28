@@ -70,9 +70,22 @@ object CacheDir:
     */
   def decide(home: Path): UIO[Chunk[CacheGrant]] =
     if !home.isAbsolute then ZIO.logWarning("cache home is not absolute").as(Chunk.empty)
-    else ZIO.foreach(allowlist)(one(home, _)).map(_.collect { case Some(grant) => grant })
+    else survey(home).map((grants, _) => grants)
 
-  private def one(home: Path, dir: CacheDir): UIO[Option[CacheGrant]] =
+  /** Grants, and the refusals that are not a missing directory. The caller decides when to log them. */
+  private[grok] def survey(home: Path): UIO[(Chunk[CacheGrant], Chunk[String])] =
+    if !home.isAbsolute then ZIO.succeed((Chunk.empty, Chunk("cache home is not absolute")))
+    else
+      ZIO.foreach(allowlist)(one(home, _)).map { rows =>
+        rows.foldLeft((Chunk.empty[CacheGrant], Chunk.empty[String])) { (acc, row) =>
+          (
+            row.grant.fold(acc._1)(acc._1 :+ _),
+            row.refusal.fold(acc._2)(acc._2 :+ _),
+          )
+        }
+      }
+
+  private def one(home: Path, dir: CacheDir): UIO[Look] =
     ZIO
       .attemptBlocking(inspect(home, dir))
       .refineOrDie {
@@ -81,11 +94,13 @@ object CacheDir:
       .flatMap(ZIO.fromEither)
       .foldZIO(
         {
-          case CacheSkip.Absent => ZIO.succeed(None)
-          case why              => ZIO.logWarning(why.explain(dir)).as(None)
+          case CacheSkip.Absent => ZIO.succeed(Look(None, None))
+          case why              => ZIO.succeed(Look(None, Some(why.explain(dir))))
         },
-        root => ZIO.succeed(Some(root)),
+        root => ZIO.succeed(Look(Some(root), None)),
       )
+
+  private final case class Look(grant: Option[CacheGrant], refusal: Option[String])
 
   private def inspect(home: Path, dir: CacheDir): Either[CacheSkip, CacheGrant] =
     for

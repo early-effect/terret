@@ -44,6 +44,7 @@ object SeatbeltProfile:
         policy.links.map(path => s"(allow file-read-data (literal ${quote(path)}))") ++
         // Last matching rule wins, so a literal deny has to follow the cache subpath allow.
         policy.denies.map(path => s"(deny file-read* (literal ${quote(path)}))") ++
+        policy.denies.map(path => s"(deny file-write* (literal ${quote(path)}))") ++
         (if policy.network then Chunk("(allow network*)") else Chunk.empty)
     body.mkString("", "\n", "\n")
 

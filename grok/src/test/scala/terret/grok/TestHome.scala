@@ -3,7 +3,7 @@ package terret.grok
 import zio.ZIO
 
 import java.io.IOException
-import java.nio.file.{Files, LinkOption, Path}
+import java.nio.file.{Files, Path}
 
 /** Absolute real scratch directory. `decide` refuses a relative home. */
 object TestHome:
@@ -13,7 +13,7 @@ object TestHome:
         val base = Path.of("target").toAbsolutePath
         Files.createDirectories(base)
         val made = Files.createTempDirectory(base, prefix)
-        made.toRealPath(LinkOption.NOFOLLOW_LINKS)
+        made.toRealPath()
       }
       .refineToOrDie[IOException]
 

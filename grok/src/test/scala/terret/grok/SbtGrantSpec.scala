@@ -32,6 +32,40 @@ object SbtGrantSpec extends ZIOSpecDefault:
           )
       }
     },
+    test("a target inside candidates/sbt is granted") {
+      withHome { home =>
+        for
+          version <- install(home, home.resolve(".sdkman").resolve("candidates").resolve("sbt").resolve("2"))
+          got     <- SbtGrant.decide(home)
+        yield assertTrue(got.root.text == version.toString)
+      }
+    },
+    test("a target under home but outside sdks is outside") {
+      withHome { home =>
+        TestHome.lay {
+          val notes = Files.createDirectories(home.resolve("notes"))
+          Files.createSymbolicLink(sbtDir(home).resolve("current"), notes)
+        } *> SbtGrant.decide(home).either.map(got => assertTrue(got == Left(JdkRefuse.Outside)))
+      }
+    },
+    test("a link to the sdks directory itself is outside") {
+      withHome { home =>
+        TestHome.lay {
+          val sdks = Files.createDirectories(home.resolve("sdks"))
+          Files.createSymbolicLink(sbtDir(home).resolve("current"), sdks)
+        } *> SbtGrant.decide(home).either.map(got => assertTrue(got == Left(JdkRefuse.Outside)))
+      }
+    },
+    test("sdks symlinked elsewhere inside home is outside") {
+      withHome { home =>
+        TestHome.lay {
+          val other   = Files.createDirectories(home.resolve("other-sdks"))
+          val version = Files.createDirectories(other.resolve("sbt-v"))
+          Files.createSymbolicLink(home.resolve("sdks"), other)
+          Files.createSymbolicLink(sbtDir(home).resolve("current"), version)
+        } *> SbtGrant.decide(home).either.map(got => assertTrue(got == Left(JdkRefuse.Outside)))
+      }
+    },
     test("a target outside home is outside") {
       withHome { home =>
         TestHome.lay {
@@ -52,18 +86,15 @@ object SbtGrantSpec extends ZIOSpecDefault:
     },
     suite("macos sandbox")(
       test("current/bin/tool runs, and a sibling under sdks is denied") {
-        withHome[SandboxError, TestResult] { home =>
-          ZIO.scoped {
-            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(home)))(_.shutdown).flatMap { sandbox =>
-            for
-              tree   <- toolTree(home)
-              bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
-              ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
-              sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
-            yield assertTrue(ran.code == 0, ran.stdout == "ok", TestHome.denied(sibling))
-          }
-          }
-        }
+        withHome[SandboxError, TestResult]: home =>
+          ZIO.scoped:
+            ShellSandbox.make(home).flatMap: sandbox =>
+              for
+                tree    <- toolTree(home)
+                bounds  = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
+                ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
+                sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
+              yield assertTrue(ran.code == 0, ran.stdout == "ok", TestHome.denied(sibling))
       } @@ TestAspect.timeout(30.seconds),
     ).when(macPresent),
   )

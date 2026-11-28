@@ -161,34 +161,31 @@ object JdkGrantSpec extends ZIOSpecDefault:
     },
     suite("macos sandbox")(
       test("current/bin/tool runs through the link, and a sibling read or a write is denied") {
-        withHome[SandboxError, TestResult] { home =>
-          ZIO.scoped {
-            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(home)))(_.shutdown).flatMap { sandbox =>
-            for
-              tree    <- toolTree(home)
-              bounds  = ShellBounds(
-                tree.work,
-                Chunk(tree.work),
-                Chunk(tree.work),
-                network = false,
-                writable = false,
+        withHome[SandboxError, TestResult]: home =>
+          ZIO.scoped:
+            ShellSandbox.make(home).flatMap: sandbox =>
+              for
+                tree    <- toolTree(home)
+                bounds  = ShellBounds(
+                  tree.work,
+                  Chunk(tree.work),
+                  Chunk(tree.work),
+                  network = false,
+                  writable = false,
+                )
+                ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
+                sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
+                etc     <- sandbox.run(Chunk("/bin/cat", tree.etc.toString), bounds)
+                wrote   <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
+                exists  <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
+              yield assertTrue(
+                ran.code == 0,
+                ran.stdout == "ok",
+                TestHome.denied(sibling),
+                TestHome.denied(etc),
+                TestHome.denied(wrote),
+                !exists,
               )
-              ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
-              sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
-              etc     <- sandbox.run(Chunk("/bin/cat", tree.etc.toString), bounds)
-              wrote   <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
-              exists  <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
-            yield assertTrue(
-              ran.code == 0,
-              ran.stdout == "ok",
-              TestHome.denied(sibling),
-              TestHome.denied(etc),
-              TestHome.denied(wrote),
-              !exists,
-            )
-          }
-          }
-        }
       } @@ TestAspect.timeout(30.seconds),
     ).when(macPresent),
   )
