@@ -7,20 +7,6 @@ import java.nio.file.{Files, InvalidPathException, LinkOption, Path}
 
 import scala.jdk.CollectionConverters.*
 
-/** An absolute path that can be quoted into a seatbelt profile. */
-opaque type AbsPath = String
-
-object AbsPath:
-  def from(raw: String): Either[JdkRefuse, AbsPath] =
-    if raw.startsWith("/") && raw.length > 1 && !raw.exists(illegal) then Right(raw)
-    else Left(JdkRefuse.BadPath)
-
-  extension (path: AbsPath) def text: String = path
-
-  private def illegal(ch: Char): Boolean =
-    ch < ' ' || ch == '\u007f' || ch == '"' || ch == '\\'
-end AbsPath
-
 /** Why `current` did not yield a JDK directory. */
 enum JdkRefuse:
   case Absent
@@ -29,23 +15,36 @@ enum JdkRefuse:
   case Loop
   case BadPath
   case Unreadable
+  case NotDirectory
+
+  def explain: String =
+    this match
+      case Absent       => "sdkman jdk absent"
+      case Outside      => "sdkman jdk outside candidates/java"
+      case Dangling     => "sdkman jdk link is dangling"
+      case Loop         => "sdkman jdk link loops"
+      case BadPath      => "sdkman jdk path is rejected"
+      case Unreadable   => "sdkman jdk path is unreadable"
+      case NotDirectory => "sdkman jdk is not a directory"
+
+/** The resolved JDK directory and the `current` symlink node. The link is not a subpath. */
+final case class Granted(root: AbsPath, link: AbsPath)
 
 /** The directory `current` resolves to, when that directory sits inside `.sdkman/candidates/java`.
   *
-  * `JdkGrant.decide(home)` grants `home/.sdkman/candidates/java/21` when `current` points at it.
-  * A link to `/`, the home directory, or anywhere else is refused. The link path itself is not granted.
+  * `JdkGrant.decide(home)` grants `home/.sdkman/candidates/java/21` when `current` points at it, and the
+  * literal path `candidates/java/current`. A link to `/`, the home directory, or anywhere else is refused.
   */
 object JdkGrant:
-  def decide(home: Path): IO[JdkRefuse, AbsPath] =
+  def decide(home: Path): IO[JdkRefuse, Granted] =
     ZIO
       .attemptBlocking(inspect(home))
-      .catchAll {
-        case _: IOException | _: SecurityException | _: InvalidPathException => ZIO.fail(JdkRefuse.Unreadable)
-        case defect => ZIO.die(defect)
+      .refineOrDie {
+        case _: IOException | _: SecurityException | _: InvalidPathException => JdkRefuse.Unreadable
       }
       .flatMap(ZIO.fromEither)
 
-  private def inspect(home: Path): Either[JdkRefuse, AbsPath] =
+  private def inspect(home: Path): Either[JdkRefuse, Granted] =
     if !home.isAbsolute then Left(JdkRefuse.BadPath)
     else
       for
@@ -55,18 +54,19 @@ object JdkGrant:
         current  <- Right(boundary.resolve("current"))
         _        <- present(current)
         target   <- realpath(current, Set.empty)
-        _        <- directory(target)
         _        <- placed(boundary, target)
-        path     <- AbsPath.from(target.toString)
-      yield path
+        _        <- directory(target)
+        root     <- abs(target)
+        link     <- abs(current)
+      yield Granted(root, link)
 
   private def boundary(home: Path): Either[JdkRefuse, Path] =
     val lexical = home.resolve(".sdkman").resolve("candidates").resolve("java")
     for
       _        <- present(lexical)
       resolved <- realpath(lexical, Set.empty)
-      _        <- directory(resolved)
       _        <- placed(home, resolved)
+      _        <- directory(resolved)
       _        <- same(lexical, resolved)
     yield resolved
 
@@ -84,19 +84,20 @@ object JdkGrant:
     text.startsWith(base + "/") && text.split('/').forall(part => part != ".." && part != ".")
 
   private def present(path: Path): Either[JdkRefuse, Unit] =
-    try
-      if Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path) then Right(())
-      else Left(JdkRefuse.Absent)
-    catch case _: IOException | _: SecurityException | _: InvalidPathException => Left(JdkRefuse.Unreadable)
+    if Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path) then Right(())
+    else Left(JdkRefuse.Absent)
 
   private def directory(path: Path): Either[JdkRefuse, Unit] =
-    try
-      if Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) then Right(())
-      else Left(JdkRefuse.Outside)
-    catch case _: IOException | _: SecurityException | _: InvalidPathException => Left(JdkRefuse.Unreadable)
+    if Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) then Right(())
+    else Left(JdkRefuse.NotDirectory)
 
-  // One component at a time. Normalizing `link/../jdk` first would follow `link` too late and
-  // could grant a local directory when `link` points at `/`.
+  private def abs(path: Path): Either[JdkRefuse, AbsPath] =
+    AbsPath.from(path.toString) match
+      case Right(value)                    => Right(value)
+      case Left(AbsPathError.NotAbsolute)  => Left(JdkRefuse.BadPath)
+      case Left(AbsPathError.Illegal)      => Left(JdkRefuse.BadPath)
+
+  // FileRoots.live.resolve normalizes before following links, and None hides a loop, a dangling target, and IO.
   private def realpath(start: Path, seen: Set[String]): Either[JdkRefuse, Path] =
     rooted(start).flatMap { abs =>
       val key = abs.toString
@@ -125,28 +126,19 @@ object JdkGrant:
       case Right(abs) =>
         val key = abs.toString
         if seen.contains(key) then Left(JdkRefuse.Loop)
-        else
-          try
-            if Files.isSymbolicLink(abs) then follow(abs, seen + key)
-            else if Files.exists(abs, LinkOption.NOFOLLOW_LINKS) then Right(abs)
-            else Left(JdkRefuse.Dangling)
-          catch case _: IOException | _: SecurityException | _: InvalidPathException =>
-            Left(JdkRefuse.Unreadable)
+        else if Files.isSymbolicLink(abs) then follow(abs, seen + key)
+        else if Files.exists(abs, LinkOption.NOFOLLOW_LINKS) then Right(abs)
+        else Left(JdkRefuse.Dangling)
 
   private def rooted(path: Path): Either[JdkRefuse, Path] =
-    try
-      val abs = path.toAbsolutePath
-      if abs.isAbsolute then Right(abs) else Left(JdkRefuse.BadPath)
-    catch case _: InvalidPathException => Left(JdkRefuse.BadPath)
+    val abs = path.toAbsolutePath
+    if abs.isAbsolute then Right(abs) else Left(JdkRefuse.BadPath)
 
   private def follow(link: Path, seen: Set[String]): Either[JdkRefuse, Path] =
-    try
-      val raw = Files.readSymbolicLink(link)
-      linked(link, raw) match
-        case Left(why)   => Left(why)
-        case Right(path) => realpath(path, seen)
-    catch case _: IOException | _: SecurityException | _: InvalidPathException =>
-      Left(JdkRefuse.Unreadable)
+    val raw = Files.readSymbolicLink(link)
+    linked(link, raw) match
+      case Left(why)   => Left(why)
+      case Right(path) => realpath(path, seen)
 
   private def linked(link: Path, raw: Path): Either[JdkRefuse, Path] =
     if raw.isAbsolute then Right(raw)

@@ -19,22 +19,31 @@ object ShellSandboxSpec extends ZIOSpecDefault:
 
   def spec = suite("shell sandbox")(
     test("a profile is deny-default, quotes paths, and opens the network only when granted") {
-      val nasty = """/work/(allow network*)"""
-      val off    = SeatbeltProfile.render(SeatbeltPolicy(Chunk(nasty), Chunk.empty, Chunk("/"), false))
-      val on     = SeatbeltProfile.render(SeatbeltPolicy(Chunk("/work"), Chunk("/work"), Chunk("/"), true))
-      val linked = SeatbeltProfile.render(
-        SeatbeltPolicy(Chunk("/var/select"), Chunk.empty, Chunk("/private", "/private/var"), false, Chunk("/var")),
-      )
-      val quote = SeatbeltProfile.quote("/work/a\"b\\c")
-      (off, on, linked) match
-        case (Right(closed), Right(opened), Right(reached)) =>
+      val built =
+        for
+          nasty   <- AbsPath.from("""/work/(allow network*)""")
+          work    <- AbsPath.from("/work")
+          root    <- AbsPath.from("/")
+          select  <- AbsPath.from("/var/select")
+          priv    <- AbsPath.from("/private")
+          privVar <- AbsPath.from("/private/var")
+          link    <- AbsPath.from("/var")
+          quoted  <- AbsPath.from("/work/a\"b\\c")
+        yield
+          val closed = SeatbeltProfile.render(SeatbeltPolicy(Chunk(nasty), Chunk.empty, Chunk(root), false))
+          val opened = SeatbeltProfile.render(SeatbeltPolicy(Chunk(work), Chunk(work), Chunk(root), true))
+          val reached = SeatbeltProfile.render(
+            SeatbeltPolicy(Chunk(select), Chunk.empty, Chunk(priv, privVar), false, Chunk(link)),
+          )
           assertTrue(
             closed.startsWith("(version 1)\n(deny default)\n"),
             closed.contains("(vnode-type 7)"),
             closed.contains("(allow file-read* (literal \"/\"))"),
+            closed.contains("(allow file-map-executable)"),
             closed.contains("\"/work/(allow network*)\""),
             !closed.split('\n').contains("(allow network*)"),
             !closed.contains("(allow file-write* (subpath"),
+            !closed.contains("(allow file-map-executable (subpath"),
             opened.split('\n').contains("(allow network*)"),
             opened.contains("(allow file-write* (subpath \"/work\"))"),
             reached.split('\n').contains("(allow file-read-data (literal \"/var\"))"),
@@ -42,11 +51,14 @@ object ShellSandboxSpec extends ZIOSpecDefault:
             reached.split('\n').contains("(allow file-read* (subpath \"/var/select\"))"),
             !reached.split('\n').contains("(allow file-read* (subpath \"/var\"))"),
             !reached.split('\n').contains("(allow file-read* (subpath \"/private\"))"),
-            SeatbeltProfile.quote("/work/\n(allow default)") == Left(SandboxError.BadPath("/work/\n(allow default)")),
-            SeatbeltProfile.quote("work") == Left(SandboxError.BadPath("work")),
-            quote == Right("\"/work/a\\\"b\\\\c\""),
+            AbsPath.from("/work/\n(allow default)") == Left(AbsPathError.Illegal),
+            AbsPath.from("work") == Left(AbsPathError.NotAbsolute),
+            SeatbeltProfile.quote(quoted) == "\"/work/a\\\"b\\\\c\"",
           )
-        case _ => assertTrue(false)
+      built match
+        case Right(result)                   => result
+        case Left(AbsPathError.NotAbsolute)  => assertTrue(false)
+        case Left(AbsPathError.Illegal)      => assertTrue(false)
     },
     test("the argument vector keeps the profile and the command as separate elements") {
       val profile = "(version 1)\n(deny default)\n"

@@ -1,34 +1,41 @@
 package terret.grok
 
+import zio.durationInt
 import zio.test.*
-import zio.{Chunk, ZIO}
+import zio.{Chunk, Trace, ZIO}
 
 import java.io.IOException
+import java.nio.file.attribute.PosixFilePermissions
 import java.nio.file.{Files, LinkOption, Path}
 
 import scala.jdk.CollectionConverters.*
 
 object JdkGrantSpec extends ZIOSpecDefault:
   def spec = suite("sdkman jdk grant")(
-    test("a directory inside candidates/java is granted, and the link path is not") {
+    test("a directory inside candidates/java is granted, and the link is only a literal") {
       withHome { home =>
         for
           version <- install(home, "25.0.1")
-          real    <- ZIO.attemptBlocking(version.toRealPath().toString).orDie
+          real    <- ZIO.attemptBlocking(version.toRealPath()).refineToOrDie[IOException]
           got     <- JdkGrant.decide(home)
-          text    <- ZIO.fromEither(profile(got))
         yield
-          val link  = current(home).toString
-          val lines = text.split('\n')
+          val root  = real.toString
+          val link  = real.resolveSibling("current").toString
+          val lines = profile(got).split('\n')
           assertTrue(
-            got.text == real,
-            lines.contains(s"(allow file-read* (subpath \"$real\"))"),
-            lines.contains(s"(allow file-map-executable (subpath \"$real\"))"),
-            lines.contains("(allow file-map-executable)"),
-            !lines.exists(line => line.contains("file-write") && line.contains(real)),
-            !text.contains(link),
+            got.root.text == root,
+            got.link.text == link,
+            lines.contains(s"(allow file-read* (subpath \"$root\"))"),
+            lines.contains(s"(allow file-read-metadata (literal \"$link\"))"),
+            lines.contains(s"(allow file-read-data (literal \"$link\"))"),
+            !lines.contains(s"(allow file-read* (subpath \"$link\"))"),
+            !lines.contains("(allow file-map-executable (subpath"),
+            !lines.exists(line => line.contains("file-write") && line.contains(root)),
           )
       }
+    },
+    test("a relative home is a bad path") {
+      JdkGrant.decide(Path.of("relative-home")).either.map(got => assertTrue(got == Left(JdkRefuse.BadPath)))
     },
     test("a target of / is outside") {
       refused(_.resolve("/"), JdkRefuse.Outside)
@@ -68,6 +75,35 @@ object JdkGrantSpec extends ZIOSpecDefault:
         } *> decided(home, JdkRefuse.Outside)
       }
     },
+    test("a file inside candidates/java is not a directory") {
+      withHome { home =>
+        lay {
+          val java = javaDir(home)
+          Files.writeString(java.resolve("note"), "x")
+          Files.createSymbolicLink(current(home), Path.of("note"))
+        } *> decided(home, JdkRefuse.NotDirectory)
+      }
+    },
+    test("candidates/java symlinked elsewhere inside home is outside") {
+      withHome { home =>
+        lay {
+          val other  = Files.createDirectories(home.resolve("other-java"))
+          val parent = home.resolve(".sdkman").resolve("candidates")
+          Files.createDirectories(parent)
+          Files.createSymbolicLink(parent.resolve("java"), other)
+        } *> decided(home, JdkRefuse.Outside)
+      }
+    },
+    test("a symlinked .sdkman fails closed") {
+      withHome { home =>
+        lay {
+          val real = Files.createDirectories(home.resolve("sdkman-real").resolve("candidates").resolve("java"))
+          Files.createDirectories(real.resolve("v1"))
+          Files.createSymbolicLink(real.resolve("current"), Path.of("v1"))
+          Files.createSymbolicLink(home.resolve(".sdkman"), home.resolve("sdkman-real"))
+        } *> decided(home, JdkRefuse.Outside)
+      }
+    },
     test("a link that steps out with .. is outside") {
       withHome { home =>
         lay {
@@ -102,22 +138,45 @@ object JdkGrantSpec extends ZIOSpecDefault:
         } *> decided(home, JdkRefuse.Loop)
       }
     },
-    test("a quote or a control character is rejected and not rendered") {
-      val quote   = """/sdk/java/25"x"""
-      val control = "/sdk/java/25\nx"
-      for
-        quoted  <- named("jdk\"25")
-        newline <- named("jdk\n25")
-      yield assertTrue(
-        AbsPath.from(quote) == Left(JdkRefuse.BadPath),
-        AbsPath.from(control) == Left(JdkRefuse.BadPath),
-        quoted == Left(JdkRefuse.BadPath),
-        newline == Left(JdkRefuse.BadPath),
-      )
+    test("a control character is rejected and not rendered") {
+      named("jdk\n25").map { got =>
+        assertTrue(
+          AbsPath.from("/sdk/java/25\nx") == Left(AbsPathError.Illegal),
+          got == Left(JdkRefuse.BadPath),
+        )
+      }
     },
+    test("current/bin/tool runs through the link, and a sibling read or a write is denied") {
+      withHome[SandboxError, TestResult] { home =>
+        for
+          tree    <- toolTree(home)
+          sandbox = ShellSandbox.atHome(home)
+          bounds  = ShellBounds(tree.work, Chunk(tree.work), Chunk(tree.work), false)
+          ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
+          sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
+          etc     <- sandbox.run(Chunk("/bin/cat", tree.etc.toString), bounds)
+          wrote   <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
+          exists  <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
+        yield assertTrue(
+          ran.code == 0,
+          ran.stdout == "ok",
+          denied(sibling),
+          denied(etc),
+          denied(wrote),
+          !exists,
+        )
+      }
+    } @@ macSeatbelt @@ TestAspect.timeout(30.seconds),
   )
 
-  private def named(name: String): ZIO[Any, Any, Either[JdkRefuse, AbsPath]] =
+  private val macSeatbelt: TestAspect[Nothing, Any, Nothing, Any] =
+    new TestAspect[Nothing, Any, Nothing, Any]:
+      def some[R >: Nothing <: Any, E >: Nothing <: Any](
+        spec: Spec[R, E]
+      )(implicit trace: Trace): Spec[R, E] =
+        spec.when(ShellSandbox.available)
+
+  private def named(name: String): ZIO[Any, IOException, Either[JdkRefuse, Granted]] =
     withHome { home =>
       lay {
         val java = javaDir(home)
@@ -137,10 +196,39 @@ object JdkGrantSpec extends ZIOSpecDefault:
   private def lay(prepare: => Unit): ZIO[Any, Nothing, Unit] =
     ZIO.attemptBlocking(prepare).orDie
 
-  private def profile(root: AbsPath): Either[SandboxError, String] =
+  private def profile(grant: Granted): String =
     SeatbeltProfile.render(
-      SeatbeltPolicy(Chunk(root.text), Chunk.empty, Chunk("/"), false, Chunk.empty, Chunk(root.text))
+      SeatbeltPolicy(Chunk(grant.root), Chunk.empty, Chunk(grant.link), false, Chunk(grant.link))
     )
+
+  private def denied(out: SandboxOutput): Boolean =
+    out.code != 0 &&
+      (out.stderr.contains("Operation not permitted") || out.stdout.contains("Operation not permitted"))
+
+  private final case class ToolTree(work: Path, bin: Path, sibling: Path, etc: Path, marker: Path)
+
+  private def toolTree(home: Path): ZIO[Any, Nothing, ToolTree] =
+    ZIO.attemptBlocking {
+      val java   = javaDir(home)
+      val binDir = java.resolve("v1").resolve("bin")
+      val tool   = binDir.resolve("tool")
+      Files.createDirectories(binDir)
+      Files.writeString(tool, "#!/bin/sh\nprintf ok\n")
+      Files.setPosixFilePermissions(tool, PosixFilePermissions.fromString("rwxr-xr-x"))
+      Files.createSymbolicLink(java.resolve("current"), Path.of("v1"))
+      val siblingDir = java.resolve("v2")
+      Files.createDirectories(siblingDir)
+      val sibling = siblingDir.resolve("hidden")
+      Files.writeString(sibling, "no")
+      val etcDir = home.resolve(".sdkman").resolve("etc")
+      Files.createDirectories(etcDir)
+      val note = etcDir.resolve("note")
+      Files.writeString(note, "no")
+      val work   = Files.createDirectories(home.resolve("work"))
+      val via    = java.resolve("current").resolve("bin").resolve("tool")
+      val marker = java.resolve("v1").resolve("new-file")
+      ToolTree(work, via, sibling, note, marker)
+    }.orDie
 
   private def point(home: Path, target: Path): ZIO[Any, Nothing, Unit] =
     lay {
@@ -163,7 +251,7 @@ object JdkGrantSpec extends ZIOSpecDefault:
   private def current(home: Path): Path =
     home.resolve(".sdkman").resolve("candidates").resolve("java").resolve("current")
 
-  private def withHome[A](use: Path => ZIO[Any, Any, A]): ZIO[Any, Any, A] =
+  private def withHome[E, A](use: Path => ZIO[Any, E, A]): ZIO[Any, E | IOException, A] =
     ZIO.scoped {
       ZIO.acquireRelease(scratch)(deleteTree).flatMap(use)
     }

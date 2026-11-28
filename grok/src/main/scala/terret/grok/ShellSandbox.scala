@@ -62,9 +62,11 @@ trait ShellSandbox:
 object ShellSandbox:
   val OutputCap: Int = 1000000
 
-  val live: ShellSandbox    = Live
+  val live: ShellSandbox    = Live(FileRoots.home)
   val ready: ShellSandbox   = Ready
   val missing: ShellSandbox = Missing
+
+  private[grok] def atHome(home: Path): ShellSandbox = Live(home)
 
   val layer: ZLayer[Any, Nothing, ShellSandbox] =
     ZLayer.succeed(live)
@@ -106,7 +108,7 @@ object ShellSandbox:
     def start(argv: Chunk[String], bounds: ShellBounds, limit: Int): IO[SandboxError, SandboxHandle] =
       ZIO.fail(SandboxError.Unavailable)
 
-  private object Live extends ShellSandbox:
+  private final class Live(home: => Path) extends ShellSandbox:
     private val SystemReads: Chunk[String] = Chunk(
       "/usr",
       "/bin",
@@ -149,60 +151,52 @@ object ShellSandbox:
           cwd     <- real(bounds.cwd)
           reads   <- ZIO.foreach(bounds.reads)(real)
           writes  <- ZIO.foreach(bounds.writes)(real)
-          jdk     <- granted(FileRoots.home)
+          jdk     <- granted(home)
           systems <- systemFiles(jdk)
-          text    <- ZIO.fromEither(
-            SeatbeltProfile.render(
-              SeatbeltPolicy(
-                dedup(reads ++ systems.reads),
-                dedup(writes),
-                dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
-                bounds.network,
-                systems.links,
-                jdk,
-              )
+          text = SeatbeltProfile.render(
+            SeatbeltPolicy(
+              dedup(reads ++ systems.reads),
+              dedup(writes),
+              dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
+              bounds.network,
+              systems.links,
             )
           )
-        yield Prepared(text, Path.of(cwd))
+        yield Prepared(text, Path.of(cwd.text))
 
-    private def real(path: Path): IO[SandboxError, String] =
+    private def real(path: Path): IO[SandboxError, AbsPath] =
       FileRoots.live.resolve(path).flatMap {
         case Some(found) =>
-          val text = found.toAbsolutePath.normalize.toString
-          if text.startsWith("/") then ZIO.succeed(text) else ZIO.fail(SandboxError.BadPath(text))
+          AbsPath.from(found.toAbsolutePath.normalize.toString) match
+            case Right(abs)                     => ZIO.succeed(abs)
+            case Left(AbsPathError.NotAbsolute) => ZIO.fail(SandboxError.BadPath(found.toString))
+            case Left(AbsPathError.Illegal)     => ZIO.fail(SandboxError.BadPath(found.toString))
         case None => ZIO.fail(SandboxError.BadPath(path.toString))
       }
 
-    private def granted(home: Path): UIO[Chunk[String]] =
-      JdkGrant.decide(home).fold(noJdk, path => Chunk(path.text))
+    private def granted(home: Path): UIO[Option[Granted]] =
+      JdkGrant.decide(home).foldZIO(why => ZIO.logWarning(why.explain).as(None), grant => ZIO.succeed(Some(grant)))
 
-    private def noJdk(why: JdkRefuse): Chunk[String] =
-      why match
-        case JdkRefuse.Absent     => Chunk.empty
-        case JdkRefuse.Outside    => Chunk.empty
-        case JdkRefuse.Dangling   => Chunk.empty
-        case JdkRefuse.Loop       => Chunk.empty
-        case JdkRefuse.BadPath    => Chunk.empty
-        case JdkRefuse.Unreadable => Chunk.empty
-
-    private def systemFiles(jdk: Chunk[String]): UIO[SystemFiles] =
+    private def systemFiles(jdk: Option[Granted]): UIO[SystemFiles] =
       ZIO.attemptBlocking(readSystemFiles(jdk)).orDie
 
-    private def readSystemFiles(jdk: Chunk[String]): SystemFiles =
-      val reads = dedup(SystemReads.flatMap(existing) ++ jdk)
-      val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, root) =>
-        Option(Path.of(root).getParent) match
+    private def readSystemFiles(jdk: Option[Granted]): SystemFiles =
+      val root  = jdk.fold(Chunk.empty[AbsPath])(grant => Chunk(grant.root))
+      val link  = jdk.fold(Chunk.empty[AbsPath])(grant => Chunk(grant.link))
+      val reads = dedup(SystemReads.flatMap(existing) ++ root)
+      val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, path) =>
+        Option(Path.of(path.text).getParent) match
           case None => acc
           case Some(parent) =>
             val next = parentsOf(parent)
             Reach(acc.ancestors ++ next.ancestors, acc.links ++ next.links)
       }
-      SystemFiles(reads, dedup(reached.ancestors), dedup(reached.links))
+      SystemFiles(reads, dedup(reached.ancestors ++ link), dedup(reached.links ++ link))
 
-    private def existing(raw: String): Option[String] =
+    private def existing(raw: String): Option[AbsPath] =
       try
         val path = Path.of(raw)
-        if Files.exists(path) then Some(path.toAbsolutePath.normalize.toString) else None
+        if Files.exists(path) then AbsPath.from(path.toAbsolutePath.normalize.toString).toOption else None
       catch case _: IOException | _: SecurityException | _: InvalidPathException => None
 
     // A subpath allow does not cover its parents, so lookup stops at the first missing one.
@@ -215,10 +209,16 @@ object ShellSandbox:
           Option(start.getParent) match
             case None         => Reach(Chunk.empty, Chunk.empty)
             case Some(parent) => parentsOf(parent)
-        try
-          if Files.isSymbolicLink(start) then Reach(text +: above.ancestors, text +: above.links)
-          else Reach(text +: above.ancestors, above.links)
-        catch case _: IOException | _: SecurityException | _: InvalidPathException => above
+        val linked =
+          try
+            if Files.isSymbolicLink(start) then Some(true) else Some(false)
+          catch case _: IOException | _: SecurityException | _: InvalidPathException => None
+        (linked, AbsPath.from(text)) match
+          case (Some(true), Right(path))          => Reach(path +: above.ancestors, path +: above.links)
+          case (Some(false), Right(path))         => Reach(path +: above.ancestors, above.links)
+          case (None, _)                           => above
+          case (_, Left(AbsPathError.NotAbsolute)) => above
+          case (_, Left(AbsPathError.Illegal))     => above
 
     private def open(argv: Chunk[String], bounds: ShellBounds, combined: Boolean): IO[SandboxError, Process] =
       prepare(bounds).flatMap(ready => spawn(ready.text, argv, ready.cwd, combined))
@@ -309,12 +309,12 @@ object ShellSandbox:
           case Some(next) => buffer.update(_.add(next, limit)) *> drain(in, buffer, limit)
         }
 
-    private def dedup(paths: Chunk[String]): Chunk[String] =
-      paths.foldLeft(Chunk.empty[String])((acc, path) => if acc.contains(path) then acc else acc :+ path)
+    private def dedup(paths: Chunk[AbsPath]): Chunk[AbsPath] =
+      paths.foldLeft(Chunk.empty[AbsPath])((acc, path) => if acc.contains(path) then acc else acc :+ path)
 
-    private final case class SystemFiles(reads: Chunk[String], ancestors: Chunk[String], links: Chunk[String])
+    private final case class SystemFiles(reads: Chunk[AbsPath], ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
 
-    private final case class Reach(ancestors: Chunk[String], links: Chunk[String])
+    private final case class Reach(ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
 
     private final case class Prepared(text: String, cwd: Path)
 
