@@ -20,11 +20,14 @@ object ShellSandboxSpec extends ZIOSpecDefault:
   def spec = suite("shell sandbox")(
     test("a profile is deny-default, quotes paths, and opens the network only when granted") {
       val nasty = """/work/(allow network*)"""
-      val off   = SeatbeltProfile.render(SeatbeltPolicy(Chunk(nasty), Chunk.empty, Chunk("/"), false))
-      val on    = SeatbeltProfile.render(SeatbeltPolicy(Chunk("/work"), Chunk("/work"), Chunk("/"), true))
+      val off    = SeatbeltProfile.render(SeatbeltPolicy(Chunk(nasty), Chunk.empty, Chunk("/"), false))
+      val on     = SeatbeltProfile.render(SeatbeltPolicy(Chunk("/work"), Chunk("/work"), Chunk("/"), true))
+      val linked = SeatbeltProfile.render(
+        SeatbeltPolicy(Chunk("/var/select"), Chunk.empty, Chunk("/private", "/private/var"), false, Chunk("/var")),
+      )
       val quote = SeatbeltProfile.quote("/work/a\"b\\c")
-      (off, on) match
-        case (Right(closed), Right(opened)) =>
+      (off, on, linked) match
+        case (Right(closed), Right(opened), Right(reached)) =>
           assertTrue(
             closed.startsWith("(version 1)\n(deny default)\n"),
             closed.contains("(vnode-type 7)"),
@@ -34,6 +37,11 @@ object ShellSandboxSpec extends ZIOSpecDefault:
             !closed.contains("(allow file-write* (subpath"),
             opened.split('\n').contains("(allow network*)"),
             opened.contains("(allow file-write* (subpath \"/work\"))"),
+            reached.split('\n').contains("(allow file-read-data (literal \"/var\"))"),
+            reached.split('\n').contains("(allow file-read-metadata (literal \"/private\"))"),
+            reached.split('\n').contains("(allow file-read* (subpath \"/var/select\"))"),
+            !reached.split('\n').contains("(allow file-read* (subpath \"/var\"))"),
+            !reached.split('\n').contains("(allow file-read* (subpath \"/private\"))"),
             SeatbeltProfile.quote("/work/\n(allow default)") == Left(SandboxError.BadPath("/work/\n(allow default)")),
             SeatbeltProfile.quote("work") == Left(SandboxError.BadPath("work")),
             quote == Right("\"/work/a\\\"b\\\\c\""),
@@ -47,10 +55,24 @@ object ShellSandboxSpec extends ZIOSpecDefault:
         ShellSandbox.confined(profile, command) ==
           Chunk("/usr/bin/sandbox-exec", "-p", profile, "--", "/bin/sh", "-c", "echo hi > /tmp/x"),
         AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "printf x > \"$1\"")) ==
-          Chunk("/bin/sh", "-c", "printf x > \"$1\""),
-        AcpTerminal.execArgv("/bin/cat", Chunk("/work/note")) == Chunk("/bin/cat", "/work/note"),
+          Some(Chunk("/bin/sh", "-c", "printf x > \"$1\"")),
+        AcpTerminal.execArgv("/bin/bash -lc 'printf %s \"a b\"'", Chunk.empty) ==
+          Some(Chunk("/bin/sh", "-c", "printf %s \"a b\"")),
+        AcpTerminal.execArgv("/bin/bash -lc 'a'\\''b'", Chunk.empty) == Some(Chunk("/bin/sh", "-c", "a'b")),
+        AcpTerminal.execArgv("/bin/bash -lc echo hi", Chunk.empty).isEmpty,
+        AcpTerminal.execArgv("/bin/bash -lc 'echo hi' extra", Chunk.empty).isEmpty,
+        AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "ok\u0000")).isEmpty,
+        AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "echo", "hi")).isEmpty,
+        AcpTerminal.execArgv("/bin/bash", Chunk("--login", "-c", "printf x")).isEmpty,
+        AcpTerminal.execArgv("/bin/bash", Chunk("--version")) == Some(Chunk("/bin/bash", "--version")),
+        AcpTerminal.execArgv("/bin/bash", Chunk("-c", "printf x")) == Some(Chunk("/bin/bash", "-c", "printf x")),
+        AcpTerminal.execArgv("/bin/cat", Chunk("/work/note")) == Some(Chunk("/bin/cat", "/work/note")),
         ShellWrite.effect(AcpTerminal.commandText("/bin/bash", Chunk("-lc", "echo hi > /tmp/x"))) ==
           ShellEffect.Writes(Chunk("/tmp/x")),
+        ShellWrite.effect(AcpTerminal.commandText("/bin/bash -lc 'echo hi > /tmp/x'", Chunk.empty)) ==
+          ShellEffect.Writes(Chunk("/tmp/x")),
+        ShellSandbox.skipReason(false) == Some("sandbox-exec is missing"),
+        ShellSandbox.skipReason(true).isEmpty,
         AcpTerminal.canon("x.ai/terminal/create").contains("terminal/create"),
         AcpTerminal.canon("_x.ai/terminal/kill").contains("terminal/kill"),
         AcpTerminal.canon("session/prompt").isEmpty,
@@ -111,7 +133,57 @@ object ShellSandboxSpec extends ZIOSpecDefault:
         ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root)).flatMap(prove)
       }
     } @@ TestAspect.timeout(30.seconds),
+    suite("macos sandbox")(
+      test("git --version, a quoted echo, and an outside write are separate argv") {
+        ZIO.scoped {
+          ZIO.acquireRelease(scratch)(dirs => deleteTree(dirs.root)).flatMap(separateArgv)
+        }
+      } @@ TestAspect.timeout(30.seconds),
+    ).when(sandboxPresent),
   )
+
+  private val sandboxPresent: Boolean =
+    val present = ShellSandbox.available
+    ShellSandbox.skipReason(present).foreach(reason => System.err.println(s"SKIP macos sandbox: $reason"))
+    present
+
+  private def separateArgv(dirs: Dirs) =
+    val script   = """printf %s 'a b"c'"""
+    val joined   = "/bin/bash -lc \"" + script.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    val outside  = dirs.outside.resolve("hidden.txt")
+    val write    = "printf x > " + outside.toString
+    val writeLine = "/bin/bash -lc '" + write + "'"
+    val bounds   = ShellBounds(dirs.workspace, Chunk(dirs.workspace), Chunk(dirs.workspace), network = false)
+    val echoArgv = AcpTerminal.execArgv(joined, Chunk.empty)
+    val writeArgv = AcpTerminal.execArgv(writeLine, Chunk.empty)
+    val ran =
+      (echoArgv, writeArgv) match
+        case (Some(echo), Some(redirect)) =>
+          for
+            profile <- ShellSandbox.live.profile(bounds)
+            version <- ShellSandbox.live.run(Chunk("git", "--version"), bounds)
+            echoed  <- ShellSandbox.live.run(echo, bounds)
+            denied  <- ShellSandbox.live.run(redirect, bounds)
+            gone    <- missing(outside)
+          yield Some((profile, version, echoed, denied, gone, echo, redirect))
+        case _ => ZIO.succeed(None)
+    ran.map {
+      case None => assertTrue(echoArgv.isDefined, writeArgv.isDefined)
+      case Some((profile, version, echoed, denied, gone, echo, redirect)) =>
+        assertTrue(
+          echo == Chunk("/bin/sh", "-c", script),
+          !echo.exists(_.contains("/bin/bash -lc")),
+          redirect == Chunk("/bin/sh", "-c", write),
+          !profile.contains(script),
+          !profile.contains(write),
+          version.code == 0,
+          version.stdout.contains("git version"),
+          echoed.code == 0,
+          echoed.stdout == "a b\"c",
+          denied.code != 0,
+          gone,
+        )
+    }
 
   private def prove(dirs: Dirs) =
     val script = """printf x > "$1""""
@@ -155,7 +227,10 @@ object ShellSandboxSpec extends ZIOSpecDefault:
                   )
       linkGone <- missing(through)
       lang     <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$LANG""""), noWrites)
-      home     <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$HOME""""), noWrites)
+      home     <- ShellSandbox.live.run(
+                    Chunk("/bin/sh", "-c", """printf '%s\n%s' "$HOME" "$GIT_CONFIG_GLOBAL""""),
+                    noWrites,
+                  )
       token    <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", """printf %s "$GH_TOKEN""""), noWrites)
       devNull  <- ShellSandbox.live.run(Chunk("/bin/sh", "-c", "printf x > /dev/null"), noWrites)
       handle   <- ShellSandbox.live.start(Chunk("/bin/sleep", "5"), noWrites, 1000)
@@ -168,6 +243,11 @@ object ShellSandboxSpec extends ZIOSpecDefault:
       closed.contains("(deny default)"),
       closed.contains("(vnode-type 7)"),
       closed.contains("(allow file-read* (literal \"/\"))"),
+      closed.split('\n').contains("(allow file-read-data (literal \"/var\"))"),
+      !closed.split('\n').contains("(allow file-read* (subpath \"/var\"))"),
+      !closed.split('\n').contains("(allow file-read* (subpath \"/private\"))"),
+      !closed.split('\n').contains("(allow file-read* (subpath \"/tmp\"))"),
+      !closed.split('\n').contains("(allow file-read* (subpath \"/private/tmp\"))"),
       outside.code != 0,
       gone,
       inside.code == 0,
@@ -182,7 +262,7 @@ object ShellSandboxSpec extends ZIOSpecDefault:
       linkGone,
       lang.stdout == "C",
       lang.code == 0,
-      home.stdout.isEmpty,
+      home.stdout == "\n/dev/null",
       token.stdout.isEmpty,
       devNull.code == 0,
     )

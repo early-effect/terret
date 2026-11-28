@@ -157,6 +157,71 @@ object AcpHarnessSpec extends ZIOSpecDefault:
         argv == Chunk((Chunk("/bin/sh", "-c", script), 1000)),
       )).provide(stubbed[ShellSandbox])
     },
+    test("terminal/create peels a joined bash -lc line into separate argv") {
+      val script  = "printf %s \"a b\""
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
+      val frames  = handshake ++ Chunk(
+        Wire.request(
+          Json.Str("term-joined"),
+          "x.ai/terminal/create",
+          Json.Obj("command" -> Json.Str(s"/bin/bash -lc '$script'")),
+        ),
+        ok(3, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+      )
+      (for
+        seen <- Ref.make(Chunk.empty[Chunk[String]])
+        _    <- stub[ShellSandbox](_.profile(any[ShellBounds]))(ZIO.succeed("(version 1)\n(deny default)\n"))
+        _    <- stub[ShellSandbox](_.start(any[Chunk[String]], any[ShellBounds], any[Int])) {
+          (argv: Chunk[String], _: ShellBounds, _: Int) =>
+            seen.update(_ :+ argv).as(idleTerminal)
+        }
+        sandbox <- ZIO.service[ShellSandbox]
+        answered <- drive(frames, sandbox = sandbox) { (harness, record) =>
+          turn(harness, record, ceiling).map { (_, got) =>
+            got.payloads.exists(terminalId)
+          }
+        }
+        argv <- seen.get
+      yield assertTrue(
+        answered,
+        argv == Chunk(Chunk("/bin/sh", "-c", script)),
+      )).provide(stubbed[ShellSandbox])
+    },
+    test("a login bash argv that is not one script does not start") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val frames  = handshake ++ Chunk(
+        Wire.request(
+          Json.Str("term-login"),
+          "terminal/create",
+          Json.Obj(
+            "command" -> Json.Str("/bin/bash"),
+            "args"    -> Json.Arr(Json.Str("-lc"), Json.Str("echo"), Json.Str("hi")),
+          ),
+        ),
+        ok(3, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+      )
+      drive(frames) { (harness, seen) =>
+        turn(harness, seen, ceiling).map { (_, record) =>
+          assertTrue(record.payloads.exists(hasCode(_, Wire.invalidParams)))
+        }
+      }
+    },
+    test("a joined bash line that is not one script does not start") {
+      val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.WriteWorkspace, Permission.RunCommands))
+      val frames  = handshake ++ Chunk(
+        Wire.request(
+          Json.Str("term-split"),
+          "terminal/create",
+          Json.Obj("command" -> Json.Str("/bin/bash -lc echo hi")),
+        ),
+        ok(3, Json.Obj("stopReason" -> Json.Str("end_turn"))),
+      )
+      drive(frames) { (harness, seen) =>
+        turn(harness, seen, ceiling).map { (_, record) =>
+          assertTrue(record.payloads.exists(hasCode(_, Wire.invalidParams)))
+        }
+      }
+    },
     test("terminal/create without a command is invalid params") {
       val ceiling = Ceiling(Set(Permission.ReadWorkspace, Permission.RunCommands))
       val frames  = handshake ++ Chunk(
