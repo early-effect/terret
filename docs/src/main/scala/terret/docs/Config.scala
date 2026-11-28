@@ -112,7 +112,7 @@ logged. `TERRET_KEY` in the process environment is not a source.
 | `journal.limit` | `TERRET_JOURNAL_LIMIT` | 4096 | How many events one session log keeps. Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit is rejected. |
 | `access.team` | `TERRET_ACCESS_TEAM` | unset | Cloudflare Access team hostname such as `example.cloudflareaccess.com`, with no scheme and no path. Set team, audience, and owner, or none of them. A port without all three is rejected. |
 | `access.audience` | `TERRET_ACCESS_AUDIENCE` | unset | The Access application's tag. |
-| `access.owner` | `TERRET_ACCESS_OWNER` | unset | Email address the Access JWT `email` claim must equal. A service token is not this identity. |
+| `access.owner` | `TERRET_ACCESS_OWNER` | unset | Email address the Access JWT `email` claim must match, ignoring case. A service token is not this identity. |
 | `access.port` | `TERRET_ACCESS_PORT` | 8081 | Tunnel listener port on `127.0.0.1`. The same port as the local listener is rejected. |
 
 When team, audience, and owner are set, the local listener (default `127.0.0.1:8080`) has no
@@ -120,7 +120,9 @@ Access check and does not serve `GET /watch`. `/mcp` on that listener still requ
 `x-terret-key`. The tunnel listener requires the same key on `/mcp`. Every other tunnel path,
 including `GET /watch`, requires `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against
 `https://<team>/cdn-cgi/access/certs`, for that audience, with issuer `https://<team>`, and not
-be expired. The `email` claim must equal `terret.access.owner`. A service-token JWT (`common_name`
+be expired. When `nbf` or `iat` is present it must be an epoch second at most 60 seconds ahead of
+now. A missing `nbf` or `iat` is allowed. The `email` claim must match `terret.access.owner`
+ignoring case. A service-token JWT (`common_name`
 and no email) is rejected. A missing token is rejected. There is no exemption for loopback or a
 Cloudflare header: cloudflared connects from 127.0.0.1, so point it at the tunnel port, not 8080.
 `GET /watch` reads the feed. Steering is POST on that tunnel listener (`run`, `cancel`, `resume`,

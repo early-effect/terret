@@ -68,6 +68,80 @@ object AccessGateSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("nbf beyond the skew is rejected, and a past or in-skew nbf is accepted") {
+      material.map { keys =>
+        val exp   = when.plusSeconds(3600).getEpochSecond
+        val now   = when.getEpochSecond
+        val skew  = AccessJwt.ClockSkewSeconds
+        val ahead = skew + 1
+        assertTrue(
+          timed(keys, exp, nbf = Some(seconds(now + ahead))) == Left(AccessError.Rejected),
+          timed(keys, exp, nbf = Some(seconds(now + skew))) == Right(()),
+          timed(keys, exp, nbf = Some(seconds(now - 30))) == Right(()),
+          timed(keys, exp, nbf = Some(seconds(now + 1))) == Right(()),
+        )
+      }
+    },
+    test("iat beyond the skew is rejected, and a past or in-skew iat is accepted") {
+      material.map { keys =>
+        val exp   = when.plusSeconds(3600).getEpochSecond
+        val now   = when.getEpochSecond
+        val skew  = AccessJwt.ClockSkewSeconds
+        val ahead = skew + 1
+        assertTrue(
+          timed(keys, exp, iat = Some(seconds(now + ahead))) == Left(AccessError.Rejected),
+          timed(keys, exp, iat = Some(seconds(now + skew))) == Right(()),
+          timed(keys, exp, iat = Some(seconds(now - 30))) == Right(()),
+          timed(keys, exp, iat = Some(seconds(now + 1))) == Right(()),
+        )
+      }
+    },
+    test("a non-integer nbf or iat is malformed") {
+      material.map { keys =>
+        val exp = when.plusSeconds(3600).getEpochSecond
+        assertTrue(
+          timed(keys, exp, nbf = Some(Json.Num(BigDecimal("1.5")))) == Left(AccessError.Malformed),
+          timed(keys, exp, iat = Some(Json.Str("1"))) == Left(AccessError.Malformed),
+        )
+      }
+    },
+    test("the owner email matches when only the case differs") {
+      material.map { keys =>
+        val exp        = when.plusSeconds(60).getEpochSecond
+        val local      = addressed(keys, exp, "Owner@example.com")
+        val domain     = addressed(keys, exp, "owner@Example.com")
+        val both       = addressed(keys, exp, "Owner@Example.COM")
+        val configured = addressedTo(keys, exp, "owner@example.com", "Owner@Example.COM")
+        assertTrue(
+          local == Right(()),
+          domain == Right(()),
+          both == Right(()),
+          configured == Right(()),
+        )
+      }
+    },
+    test("expiry and a bad issuer still fail when nbf, iat, and the email are acceptable") {
+      material.map { keys =>
+        val exp     = when.plusSeconds(3600).getEpochSecond
+        val stamp   = Some(seconds(when.getEpochSecond))
+        val late    = Instant.ofEpochSecond(exp)
+        val foreign = jwt(
+          keys.signing,
+          Some(Kid),
+          Json.Str(Aud),
+          exp,
+          "https://evil.example",
+          nbf = stamp,
+          iat = stamp,
+        )
+        val expired = jwt(keys.signing, Some(Kid), Json.Str(Aud), exp, nbf = stamp, iat = stamp)
+        assertTrue(
+          check(foreign, keys.loaded, Aud, when) == Left(AccessError.Rejected),
+          check(expired, keys.loaded, Aud, late) == Left(AccessError.Rejected),
+          check(tamper(expired), keys.loaded, Aud, when) == Left(AccessError.Rejected),
+        )
+      }
+    },
     test("a missing token is rejected, with or without a cloudflare header") {
       for
         _      <- TestClock.setTime(when)
@@ -280,6 +354,34 @@ object AccessGateSpec extends ZIOSpecDefault:
       case Right(owner) =>
         AccessJwt.verify(raw, keys, audience, Iss, owner, now)
 
+  private def timed(
+      keys: Material,
+      exp: Long,
+      nbf: Option[Json] = None,
+      iat: Option[Json] = None,
+  ): Either[AccessError, Unit] =
+    check(
+      jwt(keys.signing, Some(Kid), Json.Str(Aud), exp, nbf = nbf, iat = iat),
+      keys.loaded,
+      Aud,
+      when,
+    )
+
+  private def addressed(keys: Material, exp: Long, email: String): Either[AccessError, Unit] =
+    addressedTo(keys, exp, email, Owner)
+
+  private def addressedTo(
+      keys: Material,
+      exp: Long,
+      email: String,
+      owner: String,
+  ): Either[AccessError, Unit] =
+    (jwt(keys.signing, Some(Kid), Json.Str(Aud), exp, email = Some(email)), OwnerEmail.from(owner)) match
+      case (Right(raw), Right(who)) => AccessJwt.verify(raw, keys.loaded, Aud, Iss, who, when)
+      case _                        => Left(AccessError.Malformed)
+
+  private def seconds(value: Long): Json = Json.Num(BigDecimal(value))
+
   /** Flips one signature character. The owner email is unchanged, and the signature check still fails.
     */
   private def tamper(token: Either[String, String]): Either[String, String] =
@@ -315,13 +417,15 @@ object AccessGateSpec extends ZIOSpecDefault:
       iss: String = Iss,
       email: Option[String] = Some(Owner),
       commonName: Option[String] = None,
+      nbf: Option[Json] = None,
+      iat: Option[Json] = None,
   ): Either[String, String] =
     Try {
       val header = kid match
         case Some(id) =>
           Json.Obj("alg" -> Json.Str("RS256"), "kid" -> Json.Str(id))
         case None => Json.Obj("alg" -> Json.Str("RS256"))
-      val payload = claims(aud, exp, iss, email, commonName)
+      val payload = claims(aud, exp, iss, email, commonName, nbf, iat)
       val encoded = s"${url(header.toJson)}.${url(payload.toJson)}"
       val signer  = Signature.getInstance("SHA256withRSA")
       signer.initSign(key)
@@ -335,6 +439,8 @@ object AccessGateSpec extends ZIOSpecDefault:
       iss: String,
       email: Option[String],
       commonName: Option[String],
+      nbf: Option[Json],
+      iat: Option[Json],
   ): Json.Obj =
     val base = Chunk[(String, Json)](
       "aud" -> aud,
@@ -343,7 +449,9 @@ object AccessGateSpec extends ZIOSpecDefault:
     )
     val withEmail =
       email.fold(base)(value => base :+ ("email" -> Json.Str(value)))
-    val fields = commonName.fold(withEmail)(value => withEmail :+ ("common_name" -> Json.Str(value)))
+    val withNbf = nbf.fold(withEmail)(value => withEmail :+ ("nbf" -> value))
+    val withIat = iat.fold(withNbf)(value => withNbf :+ ("iat" -> value))
+    val fields  = commonName.fold(withIat)(value => withIat :+ ("common_name" -> Json.Str(value)))
     Json.Obj(fields*)
 
   private def unsigned(value: BigInteger): String =
