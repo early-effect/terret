@@ -40,72 +40,102 @@ import java.nio.file.Path
 object Config extends DocSpec:
   def doc = page("Config")(
     md"""
-Keys live under `terret`. `listen` is `http` or `stdio`. `policy` is `Closed`, `Inherit`, or
-`Clamp`. `Clamp` reads `allow` as permission names. `Closed` and `Inherit` ignore `allow`.
+Keys live under `terret`. A dotted key is also an environment variable: `terret.journal.limit`
+is `TERRET_JOURNAL_LIMIT`. Nothing in this config is a secret. The secret itself is not a
+config value and is not an environment variable of the start script.
 
-`harness` is `grok` or `dsh`. The default is `grok`. An unset `command` follows the harness.
-`profile` belongs to dsh and defaults to `headless`. A profile on grok is rejected. `transport`
-(`Cli`, `AcpStdio`, or `AcpWebSocket`), `approval` (`Ask` or `Always`), and the bind triple belong
-to grok. Setting them on dsh is rejected. `Ask` is the default. Under `Closed` or `Clamp`, an omitted
-transport is `AcpStdio`, and an explicit `Cli` is rejected. `Inherit` keeps `Cli`. `readRoots` and
-`writeRoots` are optional comma-separated lists of absolute paths. `readRoots` grants reads besides
-the session workspace. `writeRoots` grants writes besides the session workspace. Both default to
-empty. A read root does not grant writes, and a write root does not grant reads. The shell is not
+## Listen and harness
+
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `listen` | `TERRET_LISTEN` | `http` | `http` or `stdio`. |
+| `host` | `TERRET_HOST` | `127.0.0.1` | HTTP bind host. |
+| `port` | `TERRET_PORT` | `8080` | HTTP bind port. |
+| `harness` | `TERRET_HARNESS` | `grok` | `grok` or `dsh`. |
+| `command` | `TERRET_COMMAND` | the harness name | An unset command follows the harness. |
+| `profile` | `TERRET_PROFILE` | `headless` on dsh | Belongs to dsh. A profile on grok is rejected. |
+| `transport` | `TERRET_TRANSPORT` | see below | `Cli`, `AcpStdio`, or `AcpWebSocket`. Belongs to grok. Setting it on dsh is rejected. |
+| `approval` | `TERRET_APPROVAL` | `Ask` | `Ask` or `Always`. Belongs to grok. |
+| `bindHost`, `bindPort`, `bindSecret` | | unset | A socket transport needs all three. Bind fields on any other transport are rejected. The packaged process does not spawn `grok agent serve`. It connects to a serve the user already started. |
+
+Under `Closed` or `Clamp`, an omitted transport is `AcpStdio`, and an explicit `Cli` is rejected.
+`Inherit` keeps `Cli`. `Ask` is the default.
+
+An empty version is rejected. A relative root is rejected.
+
+## Policy and roots
+
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `policy` | `TERRET_POLICY` | `Closed` | `Closed`, `Inherit`, or `Clamp`. |
+| `allow` | `TERRET_ALLOW` | empty | Permission names for `Clamp`. `Closed` and `Inherit` ignore `allow`. |
+| `root` | `TERRET_ROOT` | unset | Optional absolute workspace root. A relative root is rejected. |
+| `readRoots` | | empty | Comma-separated absolute paths granted for reads besides the session workspace. |
+| `writeRoots` | | empty | Comma-separated absolute paths granted for writes besides the session workspace. |
+
+A read root does not grant writes, and a write root does not grant reads. The shell is not
 confined to those roots. When `RunCommands` is granted, the shell cwd is the workspace.
-A socket transport needs `bindHost`, `bindPort`, and `bindSecret`. Bind fields on any other transport
-are rejected. `mcp` is an opt-in grant for harness MCP calls. Empty denies them. `histos` grants
-every tool on that server. `histos:version` grants only `version`. dsh stores the value and does
-not pass servers. An allowed server comes from the workspace `.mcp.json`. `find` and `call` use
-that same grant. Empty returns no hits and hint `NoGrants`. A call also needs the server defined
-in `.mcp.json`. `network` is a host
-allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does
-not apply it. `gh` grants `gh` operations on the session workspace. Empty denies them. `read`
-lists and views pull requests, issues, checks, and workflow runs. `write` creates and comments, and
-it merges when the caller names a method. `write` does not grant read. `read,write` grants both.
-A missing grant names itself. dsh does not apply it. `events.verification` is `Skip` or `Required`.
-The default is `Skip`. The caller is authenticated by `x-terret-key`. There is one key.
-`terret.key.file` is an absolute path of a mode 600 env file that sets `TERRET_KEY`.
-`terret.key.service` and `terret.key.account` name a login keychain item read with `security`.
-Set one source, not both. The secret is not an environment variable of the start script and it is
-not a config value. HTTP, including the local listener, refuses `/mcp` unless `x-terret-key` matches
-that key. The same match is the event subscriber's principal: `key:` plus the first 8 hex characters
-of the SHA-256. A missing source on HTTP logs the error and exits non-zero. Stdio has no headers:
-tool calls are not checked, and `events/subscribe` on that pipe stays forbidden. The key is not logged.
-`events.floor`, `events.default`, and `events.cap`
-are the webhook TTL. They default to 1 minute, 2 hours, and 24 hours. A requested ttl below the floor
-is raised, an omitted ttl uses the default, and a longer one, including an unbounded ttl, is the cap.
-`journal.limit` (`TERRET_JOURNAL_LIMIT`) is how many events one session log keeps. The default is 4096.
-Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit
-is rejected. `access.team` and `access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`) turn
-on Cloudflare Access. Set both or neither. A port without both is rejected. The team value is a hostname
-such as `example.cloudflareaccess.com`, with no scheme and no path. The audience is the application's tag.
-When both are set, the local listener (default `127.0.0.1:8080`) has no Access check and does not serve
-`GET /watch`. `/mcp` on that listener still requires `x-terret-key`. The tunnel listener on `127.0.0.1`
-and `access.port` (default 8081, `TERRET_ACCESS_PORT`) requires the same key on `/mcp`. Every other tunnel
-path, including `GET /watch`, requires
-`Cf-Access-Jwt-Assertion`. The token must verify as RS256 against `https://<team>/cdn-cgi/access/certs`,
-for that audience, with issuer `https://<team>`, and not be expired. A missing token is rejected. There
-is no exemption for loopback or a Cloudflare header: cloudflared connects from 127.0.0.1, so point it at
-the tunnel port, not 8080. `GET /watch` reads the feed. Steering is POST on that tunnel listener
-(`run`, `cancel`, `resume`, and `open`). The same
-port as the local listener is rejected. Nothing in this config is a secret.
 
-`grok.config` (`TERRET_GROK_CONFIG`) is the file whose `[model.<name>]` tables name the models
-`open` may request. Absent, that file is `~/.grok/config.toml`. An empty path is rejected. Nested
-tables and the `[models]` settings table are not names. The file is read when `open` names a model.
+## Grants
 
-An empty version is rejected. A relative root is rejected. The packaged process does not spawn
-`grok agent serve`. It connects to a serve the user already started.
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `mcp` | `TERRET_MCP` | empty | Opt-in grant for harness MCP calls. Empty denies them. `histos` grants every tool on that server. `histos:version` grants only `version`. An allowed server comes from the workspace `.mcp.json` and is passed on ACP `session/new`. `find` and `call` use that same grant. Empty returns no hits and hint `NoGrants`. A call also needs the server defined in `.mcp.json`. dsh stores the value and does not pass servers. |
+| `network` | `TERRET_NETWORK` | empty | Host allowlist. Empty denies every host. `example.com` grants that host. dsh stores the value and does not apply it. |
+| `gh` | `TERRET_GH` | empty | Grants `gh` operations on the session workspace. Empty denies them. `read` lists and views pull requests, issues, checks, and workflow runs. `write` creates and comments, and it merges when the caller names a method. `write` does not grant read. `read,write` grants both. A missing grant names itself. dsh does not apply it. |
 
-`supervisor` is `launchd`, `foreground`, or `none`. `none` is the default: restart does not call a
-service manager. `launchd` reads `launchd.labels` and `launchd.plistDir`. There is no built-in job
-label. `foreground` reads `foreground.command`, one executable path. The server writes `pidFile`
-when it starts. Webhook subscriptions and ring heads are stored in `subscriptions.json` beside
-that file. A restart keeps each subscription that still restores, with the same id and cursor,
-and the next event is one past the saved head. A subscription that names a session this process
-does not hold, or that cannot be restored, is skipped and logged, and startup continues.
-A subscription whose deliveries are failing is left to expire. Restart waits use `restart.pace`,
-`restart.exit`, `restart.port`, and `restart.listen`.
+## Key
+
+There is one key. Set one source, not both.
+
+| Key | Env | Meaning |
+| --- | --- | --- |
+| `key.file` | `TERRET_KEY_FILE` | Absolute path of a mode 600 env file that sets `TERRET_KEY`. A relative path is rejected. |
+| `key.service` | `TERRET_KEY_SERVICE` | Login keychain service name, used with `key.account`. Read with `security`. |
+| `key.account` | `TERRET_KEY_ACCOUNT` | Login keychain account name, used with `key.service`. |
+
+HTTP, including the local listener, refuses `/mcp` unless `x-terret-key` matches that key. The
+same match is the event subscriber's principal: `key:` plus the first 8 hex characters of the
+SHA-256. A missing source on HTTP logs the error and exits non-zero. Stdio has no headers: tool
+calls are not checked, and `events/subscribe` on that pipe stays forbidden. The key is not
+logged. `TERRET_KEY` in the process environment is not a source.
+
+## Events, journal, and Access
+
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `events.verification` | `TERRET_EVENTS_VERIFICATION` | `Skip` | `Skip` or `Required`. The caller is authenticated by `x-terret-key`. |
+| `events.floor` | `TERRET_EVENTS_FLOOR` | 1 minute | Webhook TTL floor. A requested ttl below the floor is raised. |
+| `events.default` | `TERRET_EVENTS_DEFAULT` | 2 hours | Used when a ttl is omitted. |
+| `events.cap` | `TERRET_EVENTS_CAP` | 24 hours | A longer ttl, including an unbounded ttl, is the cap. |
+| `journal.limit` | `TERRET_JOURNAL_LIMIT` | 4096 | How many events one session log keeps. Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit is rejected. |
+| `access.team` | `TERRET_ACCESS_TEAM` | unset | Cloudflare Access team hostname such as `example.cloudflareaccess.com`, with no scheme and no path. Set both team and audience, or neither. A port without both is rejected. |
+| `access.audience` | `TERRET_ACCESS_AUDIENCE` | unset | The Access application's tag. |
+| `access.port` | `TERRET_ACCESS_PORT` | 8081 | Tunnel listener port on `127.0.0.1`. The same port as the local listener is rejected. |
+
+When both Access keys are set, the local listener (default `127.0.0.1:8080`) has no Access check
+and does not serve `GET /watch`. `/mcp` on that listener still requires `x-terret-key`. The
+tunnel listener requires the same key on `/mcp`. Every other tunnel path, including `GET /watch`,
+requires `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against
+`https://<team>/cdn-cgi/access/certs`, for that audience, with issuer `https://<team>`, and not
+be expired. A missing token is rejected. There is no exemption for loopback or a Cloudflare
+header: cloudflared connects from 127.0.0.1, so point it at the tunnel port, not 8080.
+`GET /watch` reads the feed. Steering is POST on that tunnel listener (`run`, `cancel`, `resume`,
+and `open`).
+
+## Models and supervisor
+
+| Key | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `grok.config` | `TERRET_GROK_CONFIG` | `~/.grok/config.toml` | The file whose `[model.<name>]` tables name the models `open` may request. An empty path is rejected. Nested tables and the `[models]` settings table are not names. The file is read when `open` names a model. |
+| `supervisor` | `TERRET_SUPERVISOR` | `none` | `launchd`, `foreground`, or `none`. `none` does not call a service manager. |
+| `launchd.labels` | `TERRET_LAUNCHD_LABELS` | unset | Comma-separated launchd job labels. There is no built-in job label. `launchd` also needs `launchd.plistDir`. |
+| `foreground.command` | | unset | One executable path for the `foreground` supervisor. |
+| `pidFile` | | the default pid path | Written when the server starts. `subscriptions.json` is stored beside it. |
+| `restart.pace`, `restart.exit`, `restart.port`, `restart.listen` | | 250 ms, 20 s, 20 s, 2 min | Restart waits. |
+
+Restart and launchd install steps are on the [Operations](operations.html) page. Milestone and
+activity events are on the [Events](events.html) page.
 """,
     exampleValue(ProcessConfig.local.harness).assert { harness =>
       assertTrue(harness == ProcessHarness.Grok(GrokConfig.stdio))

@@ -10,7 +10,17 @@ import java.nio.file.{Files, Path, StandardCopyOption}
 /** The site task forks this main on the docs test classpath. */
 object BuildSite extends DocsSite:
   private val guide: Vector[DocPage] =
-    Vector(Run.doc, Attach.doc, Jobs.doc, CeilingPage.doc, Config.doc, DshAdapter.doc)
+    Vector(
+      Run.doc,
+      Attach.doc,
+      Jobs.doc,
+      Events.doc,
+      CeilingPage.doc,
+      Security.doc,
+      Config.doc,
+      Operations.doc,
+      DshAdapter.doc,
+    )
 
   def pages: Vector[DocPage] = guide
 

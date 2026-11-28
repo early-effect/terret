@@ -9,14 +9,20 @@ import zio.{ConfigProvider, ZIO}
 object Attach extends DocSpec:
   def doc = page("Attach")(
     md"""
-The process listens on HTTP at `127.0.0.1`, port 8080, path `/mcp`. Warp's local agent reads
-`.warp/.mcp.json` in the project or in the home directory. The file names that URL.
+The process listens on HTTP at `127.0.0.1`, port 8080, path `/mcp`. `terret.app.Main` listens on
+HTTP by default. Point a host at `http://127.0.0.1:8080/mcp`.
 
-A bind on `0.0.0.0` or `::` is not an address a local client can open. The file uses
+HTTP, including the local listener, refuses `/mcp` unless header `x-terret-key` matches the
+configured key. There is one key. The [Config](config.html) page covers how to set it. A missing
+source on HTTP logs the error and exits non-zero.
+
+Warp's local agent reads `.warp/.mcp.json` in the project or in the home directory. The file names
+that URL. A bind on `0.0.0.0` or `::` is not an address a local client can open. The file uses
 `127.0.0.1` instead. An IPv6 address is written in brackets.
 
 Stdio is the other listen mode. The same jobs are on that pipe. HTTP is the attach path this
-page documents.
+page documents. Stdio has no headers: tool calls are not checked, and `events/subscribe` on that
+pipe stays forbidden.
 """,
     exampleZIO {
       ZIO

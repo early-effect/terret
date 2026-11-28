@@ -16,42 +16,23 @@ the way a heddle is a guide on a loom. It is not the host, and it is not the har
 
 A coding host speaks MCP. Cursor, Claude Code, Grok Bot, and Warp are hosts. A coding harness does
 not speak MCP. Grok Build and dsh are harnesses. Terret takes MCP in and talks to the harness
-through an adapter. The core never learns a harness's name. The jobs a host calls stay `open`,
-`run`, `status`, `resume`, `export`, `cancel`, `find`, `call`, and the gh tools. `find` searches the
-MCP catalog. The gh tools need `terret.gh`. Empty denies them. `read` and `write` are separate, and
-merge needs `write`.
-`call` runs one tool when `terret.mcp` grants that server or tool. `open` takes an optional `model`
-key from the grok config. A grok process terret spawns is started with `--model`, and the result
-reports the chosen model. `follow` is a subscription on that same API, not a job. A host listens
-with MCP `subscriptions/listen`, or opens
-`GET /sessions/{session}/events` as server-sent events. The event id is the log index. Send it back
-as `after` to continue strictly after that event. Closing the stream does not cancel the turn.
-heddle already owns HTTP and MCP, so Terret does not grow a second tool DSL. It is the outbound
-edge: one adapter per harness, then those same jobs promoted through heddle.
+through an adapter. The core never learns a harness's name.
 
-From this repository, `./histos test` proves the suites. `./histos run app` listens on
-`http://127.0.0.1:8080/mcp`. `./histos run app -- restart` stops the supervised process, waits
-until that process has exited and the port is free, starts it, and returns when the new server is
-listening. That command stays in the caller's session. `scripts/terret-restart` is the one a
-session under the launchd job can run: it detaches, unloads the job, polls until the port is free,
-starts it, and polls until it is listening. The supervisor is `TERRET_SUPERVISOR`: `launchd`,
-`foreground`, or `none`. `none` is the default and does not call a service manager.
+```mermaid
+flowchart LR
+  host["MCP host"] --> mcp["MCP inbound"]
+  mcp --> core["terret core"]
+  core --> adapter["adapter"]
+  adapter --> harness["harness"]
+  core -.-> sandbox["command sandbox"]
+```
 
-The default harness is Grok: command `grok`, transport `AcpStdio`,
-approval `Ask`. Nothing else is required. `Ask` under `Closed` or `Clamp` uses ACP stdio, because
-the CLI transport cannot answer a permission prompt. The ceiling removes every tool it does not
-grant, and terret answers the prompts that remain. A file tool stays inside the session workspace
-unless `readRoots` or `writeRoots` grants that path for that mode. `ReadWorkspace` never grants a
-write. The shell stays off unless `RunCommands` is granted. When it runs, its cwd is the workspace.
-A command terret starts is confined to that workspace and the configured roots. A shell write
-that the command line shows needs `RunCommands` and `WriteWorkspace`. A host that cannot
-sandbox refuses the command. A stop Grok cancels on its own is not a host cancel.
+From this repository, `./histos run app` listens on `http://127.0.0.1:8080/mcp`. Point a host at
+that URL with the `x-terret-key` header. The [Attach](attach.html) page covers how a host connects.
+Jobs, events, the permission ceiling, config, and operations are in the pages that follow.
 
-Warp's local agent reads `.warp/.mcp.json` in the project or the home directory. The file names that
-URL. A bind on `0.0.0.0` is written as `127.0.0.1`.
-
-Keys live under `terret`. `harness` `dsh` selects the dsh adapter and the command becomes `dsh`.
-`listen` `stdio` is the other pipe. The same jobs are on both.
+The default harness is Grok: command `grok`, transport `AcpStdio`, approval `Ask`. `harness` `dsh`
+selects the dsh adapter. `listen` `stdio` is the other pipe. The same jobs are on both.
 
 The coordinates are the latest stable, `<terret ship>`.
 

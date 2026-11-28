@@ -1,5 +1,41 @@
 # Terret
 
-Terret is the ring a rein passes through: the guide between a host and a harness, the way a heddle is a guide on a loom. Hosts speak MCP. Harnesses do not. Terret takes MCP in and talks to the harness through an adapter. The core stays harness-agnostic.
+Terret is the ring a rein passes through: an MCP server that lets coding hosts drive harnesses such as Grok Build and dsh, with a deny-by-default permission ceiling and confined commands.
 
-This tree has the core, the Grok Build adapter, the dsh headless adapter, MCP inbound, and a runnable process. The core is sessions, a permission ceiling, streamed events, and an in-memory harness. The Grok adapter speaks `grok -p`, ACP stdio, and WebSocket ACP. The dsh adapter speaks the headless `--json` stream. The process defaults to Grok. `harness` selects dsh. `terret.mcp` is an opt-in grant. Empty denies MCP calls from the harness. An allowed server from the workspace `.mcp.json` is passed on ACP `session/new`. `terret.network` is a host allowlist. Empty denies every host. `terret.readRoots` and `terret.writeRoots` are comma-separated absolute paths. Both default to empty. Reads and writes are granted separately, and `ReadWorkspace` never grants a write. File tools must resolve inside a granted root. The shell stays off unless `RunCommands` is granted. When it is, its cwd is the workspace. A command terret starts is confined to the workspace and the configured roots, and a host that cannot sandbox refuses it. Hosts call `open`, `run`, `status`, `resume`, `export`, `cancel`, `find`, `call`, and the gh tools. `terret.gh` is empty unless set. `read` and `write` are separate grants. The read tools are `gh_pr_list`, `gh_pr_view`, `gh_pr_checks`, `gh_issue_list`, `gh_issue_view`, and `gh_run_view`. The write tools are `gh_pr_create`, `gh_pr_comment`, `gh_pr_merge`, `gh_issue_create`, and `gh_issue_comment`. They run `gh` in the session workspace. A refusal names the missing grant. Merge needs `write` and is never the default. HTTP also serves `GET /sessions`, which lists each session and its state and is not an MCP tool. `find` searches the MCP catalog. `call` runs one tool when `terret.mcp` grants that server or tool. `open` takes an optional `model`. A name must be a `[model.<name>]` key in the grok config (`terret.grok.config`, default `~/.grok/config.toml`). Terret then starts a grok process it spawns with `--model`. An unknown name fails and lists the known keys. Omit `model` to keep grok's default. The open result reports the chosen model. `export` takes optional `after`, `milestones`, and `latest`. `milestones` returns only milestone events. `latest` returns the newest N. `cursor` stays the tail of the log, and the response includes the session `state`, so one call shows whether the caller is caught up. `follow` is a subscription on that same API, not a job. The SSE id is the journal index. `after` and `Last-Event-ID` continue strictly after that index, and `Last-Event-ID` wins when both are set. Closing the stream does not cancel the turn. `session.milestone` is the MCP event for those same milestones. `terret.events.verification` is `Skip` or `Required` and defaults to `Skip`. `terret.events.floor`, `terret.events.default`, and `terret.events.cap` bound that webhook's TTL and default to 1 minute, 2 hours, and 24 hours. There is one key. `terret.key.file` is an absolute path of a mode 600 env file that sets `TERRET_KEY`. `terret.key.service` and `terret.key.account` name a login keychain item read with `security`. Set one source, not both. The secret is not an environment variable of the start script. HTTP, including the local listener, refuses `/mcp` unless header `x-terret-key` matches that key. The same match is the event subscriber's principal, `key:` plus the first 8 hex characters of the SHA-256. A missing source on HTTP logs the error and exits non-zero. Stdio has no headers: tool calls are not checked, and `events/subscribe` on that pipe stays forbidden. The key is not logged. `session.milestone` is a turn, a commit, a push, a pull-request state, an error, or a wait. `session.activity` is the finer stream. Each fact has a stable id, a parent (`turn:<epoch>` or the tool call id), a kind, and the journal time. Tool output on the wire is the new suffix. `terret.journal.limit` (`TERRET_JOURNAL_LIMIT`) defaults to 4096 and drops the oldest entries without moving the indexes that remain. Each entry records the turn epoch and the time it was appended. `terret.access.team` and `terret.access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`) are both set or both omitted. When set, the local listener (default `127.0.0.1:8080`) has no Access check and does not serve `GET /watch`. `/mcp` on that listener requires `x-terret-key`. The tunnel listener (`127.0.0.1:8081`, `terret.access.port`, `TERRET_ACCESS_PORT`) requires the same key on `/mcp`. Every other tunnel path, including `GET /watch`, requires a `Cf-Access-Jwt-Assertion` (RS256, the team certs, the audience, issuer `https://<team>`, and not expired). There is no exemption for loopback or a Cloudflare header. Point cloudflared at the tunnel port, not 8080. `GET /watch` reads the feed. Steering is POST on the tunnel listener: `POST /watch/{id}/run`, `/cancel`, `/resume`, and `POST /watch/open`. The local listener does not serve them. Tokens and email addresses are replaced with `[redacted]` before an event leaves the process. `terret.app.Main` listens on HTTP by default. A local Warp agent attaches through `.warp/.mcp.json` at `http://127.0.0.1:8080/mcp`. `./histos run app` listens on `http://127.0.0.1:8080/mcp`. `./histos run app -- restart` stops the supervised process, waits until it has exited and the port is free, starts it, and returns when the new server is listening. That command stays in the caller's session, so a session under the launchd job dies with the job before the start. `scripts/terret-restart` detaches first, unloads the job, polls until the port is free, starts it, and polls until it is listening. Install it with `install -m 755 scripts/terret-restart ~/.local/bin/terret-restart`. `TERRET_SUPERVISOR` selects `launchd`, `foreground`, or `none` (the default, which does not call a service manager). Launchd job labels come from `TERRET_LAUNCHD_LABELS`. `./histos test` proves the docs. A push to `main` publishes the site at [earlyeffect.rocks/terret](https://www.earlyeffect.rocks/terret/). The install coordinate is the latest stable. The catalog names specular-histos, and the build turns that site service on. See [DESIGN.md](DESIGN.md) for the decisions and [ROADMAP.md](ROADMAP.md) for which phase is open.
+The name is from the rings on a harness that the reins pass through, the way a heddle is a guide on a loom. It is not the host, and it is not the harness.
+
+[Documentation](https://www.earlyeffect.rocks/terret/) · [CI](https://github.com/early-effect/terret/actions/workflows/ci.yml)
+
+## Why
+
+- Hosts speak MCP. Harnesses do not. Terret takes MCP in and talks to the harness through an adapter, so the core stays harness-agnostic.
+- Sessions, a permission ceiling, streamed events, and confined commands are built in.
+- Grok Build and dsh ship as adapters. The process defaults to Grok.
+
+## Quick start
+
+The install coordinate is the latest stable. From this repository:
+
+```sh
+./histos run app
+```
+
+That listens on `http://127.0.0.1:8080/mcp`. Point a host at that URL with the `x-terret-key` header. Key setup, the job catalog, events, the permission ceiling, and every config key are in the [docs](https://www.earlyeffect.rocks/terret/).
+
+## How it works
+
+```mermaid
+flowchart LR
+  host[MCP host] --> mcp[MCP inbound]
+  mcp --> core[terret core]
+  core --> adapter[adapter]
+  adapter --> harness[harness]
+  core -.-> sandbox[command sandbox]
+```
+
+## Learn more
+
+- [Docs site](https://www.earlyeffect.rocks/terret/): attach a host, jobs, events, the permission ceiling, config, and operations
+- [DESIGN.md](DESIGN.md): decisions
+- [ROADMAP.md](ROADMAP.md): which phase is open
+- [LICENSE](LICENSE): Apache License 2.0
