@@ -42,25 +42,32 @@ object CacheDirSpec extends ZIOSpecDefault:
           texts.find(_.endsWith("/.cache/coursier")) match
             case None           => assertTrue(false)
             case Some(coursier) =>
-              val parent = coursier.stripSuffix("/coursier")
-              val lines  = render(got, writable = true).split('\n')
+              val parent        = coursier.stripSuffix("/coursier")
+              val lines         = render(got, writable = true).split('\n')
+              val readCoursier  = s"(allow file-read* (subpath \"$coursier\"))"
+              val writeCoursier = s"(allow file-write* (subpath \"$coursier\"))"
+              val readParent    = s"(allow file-read* (subpath \"$parent\"))"
+              val writeParent   = s"(allow file-write* (subpath \"$parent\"))"
               assertTrue(
                 texts.length == 7,
                 texts.exists(_.endsWith("/.cache/histos")),
                 texts.exists(_.endsWith("/.cache/sbt")),
                 !texts.exists(_.endsWith("/.cache/sbt/boot")),
+              ) && assertTrue(
                 texts.exists(_.endsWith("/Library/Caches/Coursier")),
                 texts.exists(_.endsWith("/.histos")),
                 texts.exists(_.endsWith("/.ivy2")),
                 texts.exists(_.endsWith("/.m2")),
+              ) && assertTrue(
                 !texts.exists(_.endsWith("/.cache")),
                 !texts.exists(_.endsWith("/Library")),
                 !texts.exists(_.endsWith("/Library/Caches")),
                 !texts.exists(_.endsWith("/Library/Caches/Other")),
-                lines.contains(s"(allow file-read* (subpath \"$coursier\"))"),
-                lines.contains(s"(allow file-write* (subpath \"$coursier\"))"),
-                !lines.contains(s"(allow file-read* (subpath \"$parent\"))"),
-                !lines.contains(s"(allow file-write* (subpath \"$parent\"))"),
+              ) && assertTrue(
+                lines.contains(readCoursier),
+                lines.contains(writeCoursier),
+                !lines.contains(readParent),
+                !lines.contains(writeParent),
               )
         }
       }
@@ -75,35 +82,38 @@ object CacheDirSpec extends ZIOSpecDefault:
           val ivy   = got.find(_.dir == CacheDir.Ivy)
           (maven, ivy) match
             case (Some(m2), Some(ivyDir)) =>
-              val root   = m2.root.text
-              val secret = root + "/settings.xml"
-              val guard  = root + "/settings-security.xml"
-              val creds  = ivyDir.root.text + "/.credentials"
-              val off    = render(got, writable = false).split('\n')
-              val on     = render(got, writable = true).split('\n')
+              val root         = m2.root.text
+              val secret       = root + "/settings.xml"
+              val guard        = root + "/settings-security.xml"
+              val creds        = ivyDir.root.text + "/.credentials"
+              val off          = render(got, writable = false).split('\n')
+              val on           = render(got, writable = true).split('\n')
+              val allowRead    = s"(allow file-read* (subpath \"$root\"))"
+              val allowWrite   = s"(allow file-write* (subpath \"$root\"))"
+              val denyReadSec  = s"(deny file-read* (literal \"$secret\"))"
+              val denyReadGrd  = s"(deny file-read* (literal \"$guard\"))"
+              val denyReadCrd  = s"(deny file-read* (literal \"$creds\"))"
+              val denyWriteSec = s"(deny file-write* (literal \"$secret\"))"
+              val denyWriteGrd = s"(deny file-write* (literal \"$guard\"))"
+              val denyWriteCrd = s"(deny file-write* (literal \"$creds\"))"
+              val readDenies   = denyFollows(off, allowRead, denyReadSec)
+              val writeDenies  = denyFollows(on, allowWrite, denyWriteSec)
               assertTrue(
-                off.contains(s"(allow file-read* (subpath \"$root\"))"),
-                !off.contains(s"(allow file-write* (subpath \"$root\"))"),
-                on.contains(s"(allow file-write* (subpath \"$root\"))"),
-                off.contains(s"(deny file-read* (literal \"$secret\"))"),
-                off.contains(s"(deny file-read* (literal \"$guard\"))"),
-                off.contains(s"(deny file-read* (literal \"$creds\"))"),
-                off.contains(s"(deny file-write* (literal \"$secret\"))"),
-                off.contains(s"(deny file-write* (literal \"$guard\"))"),
-                off.contains(s"(deny file-write* (literal \"$creds\"))"),
-                on.contains(s"(deny file-write* (literal \"$secret\"))"),
-                denyFollows(
-                  off,
-                  s"(allow file-read* (subpath \"$root\"))",
-                  s"(deny file-read* (literal \"$secret\"))",
-                ),
-                denyFollows(
-                  on,
-                  s"(allow file-write* (subpath \"$root\"))",
-                  s"(deny file-write* (literal \"$secret\"))",
-                ),
-                !off.contains("(allow network*)"),
-              )
+                off.contains(allowRead),
+                !off.contains(allowWrite),
+                on.contains(allowWrite),
+                off.contains(denyReadSec),
+              ) && assertTrue(
+                off.contains(denyReadGrd),
+                off.contains(denyReadCrd),
+                off.contains(denyWriteSec),
+                off.contains(denyWriteGrd),
+              ) && assertTrue(
+                off.contains(denyWriteCrd),
+                on.contains(denyWriteSec),
+                readDenies,
+                writeDenies,
+              ) && assertTrue(!off.contains("(allow network*)"))
             case _ => assertTrue(false)
         }
       }
@@ -168,19 +178,25 @@ object CacheDirSpec extends ZIOSpecDefault:
                 roots.find(_.root.text.endsWith("/Library/Caches/Coursier")) match
                   case None       => assertTrue(false)
                   case Some(root) =>
-                    val parent = root.root.text.stripSuffix("/Coursier")
-                    val lines  = text.split('\n')
+                    val parent      = root.root.text.stripSuffix("/Coursier")
+                    val library     = parent.stripSuffix("/Caches")
+                    val lines       = text.split('\n')
+                    val readRoot    = s"(allow file-read* (subpath \"${root.root.text}\"))"
+                    val writeRoot   = s"(allow file-write* (subpath \"${root.root.text}\"))"
+                    val readParent  = s"(allow file-read* (subpath \"$parent\"))"
+                    val writeParent = s"(allow file-write* (subpath \"$parent\"))"
+                    val writeLib    = s"(allow file-write* (subpath \"$library\"))"
                     assertTrue(
                       wrote.code == 0,
                       exists,
                       TestHome.denied(sibling),
                       !leaked,
-                      lines.contains(s"(allow file-read* (subpath \"${root.root.text}\"))"),
-                      lines.contains(s"(allow file-write* (subpath \"${root.root.text}\"))"),
-                      !lines.contains(s"(allow file-read* (subpath \"$parent\"))"),
-                      !lines.contains(s"(allow file-write* (subpath \"$parent\"))"),
-                      !lines.contains(s"(allow file-write* (subpath \"${parent.stripSuffix("/Caches")}\"))"),
-                    )
+                    ) && assertTrue(
+                      lines.contains(readRoot),
+                      lines.contains(writeRoot),
+                      !lines.contains(readParent),
+                      !lines.contains(writeParent),
+                    ) && assertTrue(!lines.contains(writeLib))
       } @@ TestAspect.timeout(30.seconds),
       test("a cache write is denied without WriteWorkspace") {
         withYard[SandboxError, TestResult]: yard =>
@@ -193,13 +209,11 @@ object CacheDirSpec extends ZIOSpecDefault:
                 wrote  <- sandbox.run(Chunk("/usr/bin/touch", tree.marker.toString), bounds)
                 exists <- ZIO.attemptBlocking(Files.exists(tree.marker)).orDie
               yield
-                val lines = text.split('\n')
-                assertTrue(
-                  TestHome.denied(wrote),
-                  !exists,
-                  lines.contains(s"(allow file-read* (subpath \"${tree.root.toString}\"))"),
-                  !lines.exists(line => line.startsWith("(allow file-write* (subpath") && line.contains("Coursier")),
-                )
+                val lines    = text.split('\n')
+                val readRoot = s"(allow file-read* (subpath \"${tree.root.toString}\"))"
+                val starts   = "(allow file-write* (subpath"
+                val writes   = lines.exists(line => line.startsWith(starts) && line.contains("Coursier"))
+                assertTrue(TestHome.denied(wrote), !exists, lines.contains(readRoot), !writes)
       } @@ TestAspect.timeout(30.seconds),
       test("maven settings and ivy credentials are not readable") {
         withYard[SandboxError, TestResult]: yard =>
@@ -220,6 +234,7 @@ object CacheDirSpec extends ZIOSpecDefault:
                 note.stdout == "plain",
                 TestHome.denied(hidden),
                 !hidden.stdout.contains("secret"),
+              ) && assertTrue(
                 ivyNote.code == 0,
                 ivyNote.stdout == "plain",
                 TestHome.denied(creds),

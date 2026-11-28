@@ -36,60 +36,80 @@ object ShellSandboxSpec extends ZIOSpecDefault:
           val reached = SeatbeltProfile.render(
             SeatbeltPolicy(Chunk(select), Chunk.empty, Chunk(priv, privVar), false, Chunk(link)),
           )
-          assertTrue(
-            closed.startsWith("(version 1)\n(deny default)\n"),
-            closed.contains("(vnode-type 7)"),
-            closed.contains("(allow file-read* (literal \"/\"))"),
-            closed.contains("(allow file-map-executable)"),
-            closed.contains("\"/work/(allow network*)\""),
-            !closed.split('\n').contains("(allow network*)"),
-            !closed.contains("(allow file-write* (subpath"),
-            !closed.contains("(allow file-map-executable (subpath"),
-            opened.split('\n').contains("(allow network*)"),
-            opened.contains("(allow file-write* (subpath \"/work\"))"),
-            reached.split('\n').contains("(allow file-read-data (literal \"/var\"))"),
-            reached.split('\n').contains("(allow file-read-metadata (literal \"/private\"))"),
-            reached.split('\n').contains("(allow file-read* (subpath \"/var/select\"))"),
-            !reached.split('\n').contains("(allow file-read* (subpath \"/var\"))"),
-            !reached.split('\n').contains("(allow file-read* (subpath \"/private\"))"),
-            AbsPath.from("/work/\n(allow default)") == Left(AbsPathError.Illegal),
-            AbsPath.from("work") == Left(AbsPathError.NotAbsolute),
-            SeatbeltProfile.quote(quoted) == "\"/work/a\\\"b\\\\c\"",
-          )
+          val seen    =
+            val closedLines  = closed.split('\n')
+            val openedLines  = opened.split('\n')
+            val reachedLines = reached.split('\n')
+            val newline      = AbsPath.from("/work/\n(allow default)")
+            val relative     = AbsPath.from("work")
+            val quotedPath   = SeatbeltProfile.quote(quoted)
+            assertTrue(
+              closed.startsWith("(version 1)\n(deny default)\n"),
+              closed.contains("(vnode-type 7)"),
+              closed.contains("(allow file-read* (literal \"/\"))"),
+              closed.contains("(allow file-map-executable)"),
+            ) && assertTrue(
+              closed.contains("\"/work/(allow network*)\""),
+              !closedLines.contains("(allow network*)"),
+              !closed.contains("(allow file-write* (subpath"),
+              !closed.contains("(allow file-map-executable (subpath"),
+            ) && assertTrue(
+              openedLines.contains("(allow network*)"),
+              opened.contains("(allow file-write* (subpath \"/work\"))"),
+              reachedLines.contains("(allow file-read-data (literal \"/var\"))"),
+              reachedLines.contains("(allow file-read-metadata (literal \"/private\"))"),
+            ) && assertTrue(
+              reachedLines.contains("(allow file-read* (subpath \"/var/select\"))"),
+              !reachedLines.contains("(allow file-read* (subpath \"/var\"))"),
+              !reachedLines.contains("(allow file-read* (subpath \"/private\"))"),
+              newline == Left(AbsPathError.Illegal),
+            ) && assertTrue(relative == Left(AbsPathError.NotAbsolute), quotedPath == "\"/work/a\\\"b\\\\c\"")
+          seen
       built match
         case Right(result)                  => result
         case Left(AbsPathError.NotAbsolute) => assertTrue(false)
         case Left(AbsPathError.Illegal)     => assertTrue(false)
     },
     test("the argument vector keeps the profile and the command as separate elements") {
-      val profile = "(version 1)\n(deny default)\n"
-      val command = Chunk("/bin/sh", "-c", "echo hi > /tmp/x")
-      assertTrue(
-        ShellSandbox.confined(profile, command) ==
-          Chunk("/usr/bin/sandbox-exec", "-p", profile, "--", "/bin/sh", "-c", "echo hi > /tmp/x"),
-        AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "printf x > \"$1\"")) ==
-          Some(Chunk("/bin/sh", "-c", "printf x > \"$1\"")),
-        AcpTerminal.execArgv("/bin/bash -lc 'printf %s \"a b\"'", Chunk.empty) ==
-          Some(Chunk("/bin/sh", "-c", "printf %s \"a b\"")),
-        AcpTerminal.execArgv("/bin/bash -lc 'a'\\''b'", Chunk.empty) == Some(Chunk("/bin/sh", "-c", "a'b")),
-        AcpTerminal.execArgv("/bin/bash -lc echo hi", Chunk.empty).isEmpty,
-        AcpTerminal.execArgv("/bin/bash -lc 'echo hi' extra", Chunk.empty).isEmpty,
-        AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "ok\u0000")).isEmpty,
-        AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "echo", "hi")).isEmpty,
-        AcpTerminal.execArgv("/bin/bash", Chunk("--login", "-c", "printf x")).isEmpty,
-        AcpTerminal.execArgv("/bin/bash", Chunk("--version")) == Some(Chunk("/bin/bash", "--version")),
-        AcpTerminal.execArgv("/bin/bash", Chunk("-c", "printf x")) == Some(Chunk("/bin/bash", "-c", "printf x")),
-        AcpTerminal.execArgv("/bin/cat", Chunk("/work/note")) == Some(Chunk("/bin/cat", "/work/note")),
-        ShellWrite.effect(AcpTerminal.commandText("/bin/bash", Chunk("-lc", "echo hi > /tmp/x"))) ==
-          ShellEffect.Writes(Chunk("/tmp/x")),
-        ShellWrite.effect(AcpTerminal.commandText("/bin/bash -lc 'echo hi > /tmp/x'", Chunk.empty)) ==
-          ShellEffect.Writes(Chunk("/tmp/x")),
-        ShellSandbox.skipReason(false) == Some("sandbox-exec is missing"),
-        ShellSandbox.skipReason(true).isEmpty,
-        AcpTerminal.canon("x.ai/terminal/create").contains("terminal/create"),
-        AcpTerminal.canon("_x.ai/terminal/kill").contains("terminal/kill"),
-        AcpTerminal.canon("session/prompt").isEmpty,
-      )
+      val profile     = "(version 1)\n(deny default)\n"
+      val command     = Chunk("/bin/sh", "-c", "echo hi > /tmp/x")
+      val confined    = ShellSandbox.confined(profile, command)
+      val confinedTo  = Chunk("/usr/bin/sandbox-exec", "-p", profile, "--", "/bin/sh", "-c", "echo hi > /tmp/x")
+      val quotedArg   = AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "printf x > \"$1\""))
+      val quotedWant  = Some(Chunk("/bin/sh", "-c", "printf x > \"$1\""))
+      val spacedArg   = AcpTerminal.execArgv("/bin/bash -lc 'printf %s \"a b\"'", Chunk.empty)
+      val spacedWant  = Some(Chunk("/bin/sh", "-c", "printf %s \"a b\""))
+      val aposArg     = AcpTerminal.execArgv("/bin/bash -lc 'a'\\''b'", Chunk.empty)
+      val aposWant    = Some(Chunk("/bin/sh", "-c", "a'b"))
+      val bareEcho    = AcpTerminal.execArgv("/bin/bash -lc echo hi", Chunk.empty)
+      val extraArg    = AcpTerminal.execArgv("/bin/bash -lc 'echo hi' extra", Chunk.empty)
+      val nulArg      = AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "ok\u0000"))
+      val manyArg     = AcpTerminal.execArgv("/bin/bash", Chunk("-lc", "echo", "hi"))
+      val loginArg    = AcpTerminal.execArgv("/bin/bash", Chunk("--login", "-c", "printf x"))
+      val versionArg  = AcpTerminal.execArgv("/bin/bash", Chunk("--version"))
+      val versionWant = Some(Chunk("/bin/bash", "--version"))
+      val dashCArg    = AcpTerminal.execArgv("/bin/bash", Chunk("-c", "printf x"))
+      val dashCWant   = Some(Chunk("/bin/bash", "-c", "printf x"))
+      val catArg      = AcpTerminal.execArgv("/bin/cat", Chunk("/work/note"))
+      val catWant     = Some(Chunk("/bin/cat", "/work/note"))
+      val writeOnce   = ShellWrite.effect(AcpTerminal.commandText("/bin/bash", Chunk("-lc", "echo hi > /tmp/x")))
+      val writeJoin   = ShellWrite.effect(AcpTerminal.commandText("/bin/bash -lc 'echo hi > /tmp/x'", Chunk.empty))
+      val writes      = ShellEffect.Writes(Chunk("/tmp/x"))
+      val missing     = ShellSandbox.skipReason(false)
+      val present     = ShellSandbox.skipReason(true)
+      val create      = AcpTerminal.canon("x.ai/terminal/create")
+      val kill        = AcpTerminal.canon("_x.ai/terminal/kill")
+      val prompt      = AcpTerminal.canon("session/prompt")
+      assertTrue(confined == confinedTo, quotedArg == quotedWant, spacedArg == spacedWant, aposArg == aposWant) &&
+        assertTrue(bareEcho.isEmpty, extraArg.isEmpty, nulArg.isEmpty, manyArg.isEmpty) &&
+        assertTrue(loginArg.isEmpty, versionArg == versionWant, dashCArg == dashCWant, catArg == catWant) &&
+        assertTrue(
+          writeOnce == writes,
+          writeJoin == writes,
+          missing == Some("sandbox-exec is missing"),
+          present.isEmpty,
+        ) &&
+        assertTrue(create.contains("terminal/create"), kill.contains("terminal/kill"), prompt.isEmpty)
     },
     test("the profile request carries the ceiling's roots and network grant") {
       val version = shell("./histos --version")
@@ -179,36 +199,68 @@ object ShellSandboxSpec extends ZIOSpecDefault:
           )
           val quiet  = off.split('\n')
           val open   = on.split('\n')
-          assertTrue(
-            quiet.contains(readSub(jdkRoot.text)),
-            quiet.contains(meta(jdkLink.text)),
-            quiet.contains(data(jdkLink.text)),
-            quiet.contains(readSub(sbtRoot.text)),
-            quiet.contains(meta(sbtLink.text)),
-            quiet.contains(data(sbtLink.text)),
-            !quiet.contains(readSub(sdks.text)),
-            quiet.contains(readSub(maven.text)),
-            !quiet.contains(writeSub(maven.text)),
-            !quiet.contains(writeSub(jdkRoot.text)),
-            !quiet.contains(writeSub(sbtRoot.text)),
-            open.contains(writeSub(maven.text)),
-            quiet.contains(readSub(temp.text)),
-            quiet.contains(writeSub(temp.text)),
-            !quiet.contains(readSub("/terret-policy/tmp")),
-            !quiet.contains(writeSub("/terret-policy/tmp")),
-            quiet.contains(denyRead(maven.text + "/settings.xml")),
-            quiet.contains(denyRead(maven.text + "/settings-security.xml")),
-            quiet.contains(denyRead(ivy.text + "/.credentials")),
-            quiet.contains(denyWrite(maven.text + "/settings.xml")),
-            quiet.contains(denyWrite(maven.text + "/settings-security.xml")),
-            quiet.contains(denyWrite(ivy.text + "/.credentials")),
-            open.contains(denyWrite(maven.text + "/settings.xml")),
-            follows(quiet, readSub(maven.text), denyRead(maven.text + "/settings.xml")),
-            follows(open, writeSub(maven.text), denyWrite(maven.text + "/settings.xml")),
-            !quiet.contains("(allow network*)"),
-            open.contains("(allow network*)"),
-            !quiet.exists(_.startsWith("(allow file-map-executable (subpath")),
-          )
+          val seen   =
+            val jdkRead       = readSub(jdkRoot.text)
+            val jdkMeta       = meta(jdkLink.text)
+            val jdkData       = data(jdkLink.text)
+            val sbtRead       = readSub(sbtRoot.text)
+            val sbtMeta       = meta(sbtLink.text)
+            val sbtData       = data(sbtLink.text)
+            val sdksRead      = readSub(sdks.text)
+            val mavenRead     = readSub(maven.text)
+            val mavenWrite    = writeSub(maven.text)
+            val jdkWrite      = writeSub(jdkRoot.text)
+            val sbtWrite      = writeSub(sbtRoot.text)
+            val tempRead      = readSub(temp.text)
+            val tempWrite     = writeSub(temp.text)
+            val parentRead    = readSub("/terret-policy/tmp")
+            val parentWrite   = writeSub("/terret-policy/tmp")
+            val settingsRead  = denyRead(maven.text + "/settings.xml")
+            val guardRead     = denyRead(maven.text + "/settings-security.xml")
+            val credsRead     = denyRead(ivy.text + "/.credentials")
+            val settingsWrite = denyWrite(maven.text + "/settings.xml")
+            val guardWrite    = denyWrite(maven.text + "/settings-security.xml")
+            val credsWrite    = denyWrite(ivy.text + "/.credentials")
+            val readOrdered   = follows(quiet, mavenRead, settingsRead)
+            val writeOrdered  = follows(open, mavenWrite, settingsWrite)
+            val noMapSubpath  = !quiet.exists(_.startsWith("(allow file-map-executable (subpath"))
+            assertTrue(
+              quiet.contains(jdkRead),
+              quiet.contains(jdkMeta),
+              quiet.contains(jdkData),
+              quiet.contains(sbtRead),
+            ) && assertTrue(
+              quiet.contains(sbtMeta),
+              quiet.contains(sbtData),
+              !quiet.contains(sdksRead),
+              quiet.contains(mavenRead),
+            ) && assertTrue(
+              !quiet.contains(mavenWrite),
+              !quiet.contains(jdkWrite),
+              !quiet.contains(sbtWrite),
+              open.contains(mavenWrite),
+            ) && assertTrue(
+              quiet.contains(tempRead),
+              quiet.contains(tempWrite),
+              !quiet.contains(parentRead),
+              !quiet.contains(parentWrite),
+            ) && assertTrue(
+              quiet.contains(settingsRead),
+              quiet.contains(guardRead),
+              quiet.contains(credsRead),
+              quiet.contains(settingsWrite),
+            ) && assertTrue(
+              quiet.contains(guardWrite),
+              quiet.contains(credsWrite),
+              open.contains(settingsWrite),
+              readOrdered,
+            ) && assertTrue(
+              writeOrdered,
+              !quiet.contains("(allow network*)"),
+              open.contains("(allow network*)"),
+              noMapSubpath,
+            )
+          seen
       built match
         case Right(result)                  => result
         case Left(AbsPathError.NotAbsolute) => assertTrue(false)
@@ -289,19 +341,17 @@ object ShellSandboxSpec extends ZIOSpecDefault:
     ran.map {
       case None => assertTrue(echoArgv.isDefined, writeArgv.isDefined)
       case Some((profile, version, echoed, denied, gone, echo, redirect)) =>
-        assertTrue(
-          echo == Chunk("/bin/sh", "-c", script),
-          !echo.exists(_.contains("/bin/bash -lc")),
-          redirect == Chunk("/bin/sh", "-c", write),
-          !profile.contains(script),
-          !profile.contains(write),
-          version.code == 0,
-          version.stdout.contains("git version"),
-          echoed.code == 0,
-          echoed.stdout == "a b\"c",
-          denied.code != 0,
-          gone,
-        )
+        val echoSh     = echo == Chunk("/bin/sh", "-c", script)
+        val echoBash   = echo.exists(_.contains("/bin/bash -lc"))
+        val redirectSh = redirect == Chunk("/bin/sh", "-c", write)
+        assertTrue(echoSh, !echoBash, redirectSh, !profile.contains(script)) &&
+          assertTrue(
+            !profile.contains(write),
+            version.code == 0,
+            version.stdout.contains("git version"),
+            echoed.code == 0,
+          ) &&
+          assertTrue(echoed.stdout == "a b\"c", denied.code != 0, gone)
     }
 
   private def prove(dirs: Dirs, sandbox: ShellSandbox) =
@@ -367,49 +417,66 @@ object ShellSandboxSpec extends ZIOSpecDefault:
       handle   <- sandbox.start(Chunk("/bin/sleep", "5"), noWrites, 1000)
       _        <- handle.kill
       _        <- handle.awaitExit
-    yield assertTrue(
-      !closed.contains(outsideFile.toString),
-      !closed.split('\n').contains("(allow network*)"),
-      opened.split('\n').contains("(allow network*)"),
-      closed.contains("(deny default)"),
-      closed.contains("(vnode-type 7)"),
-      closed.contains("(allow file-read* (literal \"/\"))"),
-      closed.split('\n').contains("(allow file-read-data (literal \"/var\"))"),
-      !closed.split('\n').contains("(allow file-read* (subpath \"/var\"))"),
-      !closed.split('\n').contains("(allow file-read* (subpath \"/private\"))"),
-      !closed.split('\n').contains("(allow file-read* (subpath \"/tmp\"))"),
-      !closed.split('\n').contains("(allow file-read* (subpath \"/private/tmp\"))"),
-      !closed.split('\n').contains("(allow file-read* (subpath \"/var/folders\"))"),
-      !closed.split('\n').contains("(allow file-write* (subpath \"/var/folders\"))"),
-      tempDir.code == 0,
-      tempDir.stdout.nonEmpty,
-      quiet.contains("(allow file-read* (subpath \"" + tempDir.stdout + "\"))"),
-      quiet.contains("(allow file-write* (subpath \"" + tempDir.stdout + "\"))"),
-      !quiet.split('\n').contains("(allow file-read* (subpath \"" + parent.toString + "\"))"),
-      !quiet.split('\n').contains("(allow file-write* (subpath \"" + parent.toString + "\"))"),
-      toolOpt.stdout == s"""-Djava.io.tmpdir="${tempDir.stdout}"""",
-      touched.code == 0,
-      okFile,
-      sibTouch.code != 0,
-      !sibFile,
-      outside.code != 0,
-      gone,
-      inside.code == 0,
-      landed == "x",
-      blocked.code != 0,
-      stayed,
-      !secret.stdout.contains("nope"),
-      secret.code != 0,
-      note.stdout.contains("yes"),
-      note.code == 0,
-      linked.code != 0,
-      linkGone,
-      lang.stdout == "C",
-      lang.code == 0,
-      home.stdout == "\n/dev/null",
-      token.stdout.isEmpty,
-      devNull.code == 0,
-    )
+    yield
+      val closedLn = closed.split('\n')
+      val openedLn = opened.split('\n')
+      val quietLn  = quiet.split('\n')
+      val tmpRead  = "(allow file-read* (subpath \"" + tempDir.stdout + "\"))"
+      val tmpWrite = "(allow file-write* (subpath \"" + tempDir.stdout + "\"))"
+      val parRead  = "(allow file-read* (subpath \"" + parent.toString + "\"))"
+      val parWrite = "(allow file-write* (subpath \"" + parent.toString + "\"))"
+      val jvmTmp   = s"""-Djava.io.tmpdir="${tempDir.stdout}""""
+      assertTrue(
+        !closed.contains(outsideFile.toString),
+        !closedLn.contains("(allow network*)"),
+        openedLn.contains("(allow network*)"),
+        closed.contains("(deny default)"),
+      ) && assertTrue(
+        closed.contains("(vnode-type 7)"),
+        closed.contains("(allow file-read* (literal \"/\"))"),
+        closedLn.contains("(allow file-read-data (literal \"/var\"))"),
+        !closedLn.contains("(allow file-read* (subpath \"/var\"))"),
+      ) && assertTrue(
+        !closedLn.contains("(allow file-read* (subpath \"/private\"))"),
+        !closedLn.contains("(allow file-read* (subpath \"/tmp\"))"),
+        !closedLn.contains("(allow file-read* (subpath \"/private/tmp\"))"),
+        !closedLn.contains("(allow file-read* (subpath \"/var/folders\"))"),
+      ) && assertTrue(
+        !closedLn.contains("(allow file-write* (subpath \"/var/folders\"))"),
+        tempDir.code == 0,
+        tempDir.stdout.nonEmpty,
+        quiet.contains(tmpRead),
+      ) && assertTrue(
+        quiet.contains(tmpWrite),
+        !quietLn.contains(parRead),
+        !quietLn.contains(parWrite),
+        toolOpt.stdout == jvmTmp,
+      ) && assertTrue(
+        touched.code == 0,
+        okFile,
+        sibTouch.code != 0,
+        !sibFile,
+      ) && assertTrue(
+        outside.code != 0,
+        gone,
+        inside.code == 0,
+        landed == "x",
+      ) && assertTrue(
+        blocked.code != 0,
+        stayed,
+        !secret.stdout.contains("nope"),
+        secret.code != 0,
+      ) && assertTrue(
+        note.stdout.contains("yes"),
+        note.code == 0,
+        linked.code != 0,
+        linkGone,
+      ) && assertTrue(
+        lang.stdout == "C",
+        lang.code == 0,
+        home.stdout == "\n/dev/null",
+        token.stdout.isEmpty,
+      ) && assertTrue(devNull.code == 0)
 
   private def refused(sandbox: ShellSandbox, argv: Chunk[String], workspace: Path, outsideFile: Path) =
     val bounds = ShellBounds(workspace, Chunk(workspace), Chunk(workspace), network = false, writable = true)
