@@ -12,7 +12,10 @@ import java.time.Instant
 import java.util.Base64
 import scala.util.Try
 
-/** Checks a Cloudflare Access JWT: RS256 against the team keys, then issuer, audience, and expiry. */
+/** Checks a Cloudflare Access JWT: RS256 against the team keys, then issuer, audience, expiry, then the owner email. A
+  * missing or different email is rejected. A service token, which carries `common_name` and no email, is rejected.
+  * `common_name` is not read.
+  */
 object AccessJwt:
   final case class RsaKey(kid: Option[String], publicKey: PublicKey)
 
@@ -31,6 +34,7 @@ object AccessJwt:
       keys: Chunk[RsaKey],
       audience: String,
       issuer: String,
+      owner: OwnerEmail,
       now: Instant,
   ): Either[AccessError, Unit] =
     val parts = token.split("\\.", -1)
@@ -49,6 +53,7 @@ object AccessJwt:
         _       <- audienceOf(payload, audience)
         exp     <- epoch(payload, "exp")
         _       <- if now.isBefore(Instant.ofEpochSecond(exp)) then Right(()) else Left(AccessError.Rejected)
+        _       <- ownerOf(payload, owner)
       yield ()
 
   def keys(json: String): Either[AccessError, Chunk[RsaKey]] =
@@ -92,6 +97,11 @@ object AccessJwt:
           case key :: Nil => Right(key)
           case _          => Left(AccessError.UnknownKid)
 
+  private def ownerOf(payload: Json.Obj, owner: OwnerEmail): Either[AccessError, Unit] =
+    optional(payload, "email") match
+      case Some(found) if found == owner.value => Right(())
+      case _                                   => Left(AccessError.Rejected)
+
   private def audienceOf(payload: Json.Obj, expected: String): Either[AccessError, Unit] =
     payload.get("aud") match
       case Some(Json.Str(value)) if value == expected                                    => Right(())
@@ -132,7 +142,10 @@ object AccessJwt:
   private def digest(raw: String): String =
     Try {
       val md = java.security.MessageDigest.getInstance("SHA-256")
-      md.digest(raw.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").take(8).mkString
+      md.digest(raw.getBytes(StandardCharsets.UTF_8))
+        .map(byte => f"${byte & 0xff}%02x")
+        .take(8)
+        .mkString
     }.getOrElse("anonymous")
 
   private def b64(raw: String): Either[AccessError, Array[Byte]] =
@@ -140,8 +153,13 @@ object AccessJwt:
     val padded     = normalized + ("=" * ((4 - normalized.length % 4) % 4))
     Try(Base64.getDecoder.decode(padded)).toEither.left.map(_ => AccessError.Malformed)
 
-  private final case class Jwk(kty: String, kid: Option[String], n: String, e: String, alg: Option[String] = None)
-      derives JsonDecoder
+  private final case class Jwk(
+      kty: String,
+      kid: Option[String],
+      n: String,
+      e: String,
+      alg: Option[String] = None,
+  ) derives JsonDecoder
 
   private final case class Jwks(keys: Chunk[Jwk]) derives JsonDecoder
 end AccessJwt

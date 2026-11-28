@@ -36,7 +36,8 @@ import zio.test.*
 
 import java.nio.file.Path
 
-/** Process config. Listener, policy, and the selected harness are separate facts. */
+/** Process config. Listener, policy, and the selected harness are separate facts.
+  */
 object Config extends DocSpec:
   def doc = page("Config")(
     md"""
@@ -109,17 +110,19 @@ logged. `TERRET_KEY` in the process environment is not a source.
 | `events.default` | `TERRET_EVENTS_DEFAULT` | 2 hours | Used when a ttl is omitted. |
 | `events.cap` | `TERRET_EVENTS_CAP` | 24 hours | A longer ttl, including an unbounded ttl, is the cap. |
 | `journal.limit` | `TERRET_JOURNAL_LIMIT` | 4096 | How many events one session log keeps. Past that, the oldest entries drop and the indexes that remain do not move. Zero or a negative limit is rejected. |
-| `access.team` | `TERRET_ACCESS_TEAM` | unset | Cloudflare Access team hostname such as `example.cloudflareaccess.com`, with no scheme and no path. Set both team and audience, or neither. A port without both is rejected. |
+| `access.team` | `TERRET_ACCESS_TEAM` | unset | Cloudflare Access team hostname such as `example.cloudflareaccess.com`, with no scheme and no path. Set team, audience, and owner, or none of them. A port without all three is rejected. |
 | `access.audience` | `TERRET_ACCESS_AUDIENCE` | unset | The Access application's tag. |
+| `access.owner` | `TERRET_ACCESS_OWNER` | unset | Email address the Access JWT `email` claim must equal. A service token is not this identity. |
 | `access.port` | `TERRET_ACCESS_PORT` | 8081 | Tunnel listener port on `127.0.0.1`. The same port as the local listener is rejected. |
 
-When both Access keys are set, the local listener (default `127.0.0.1:8080`) has no Access check
-and does not serve `GET /watch`. `/mcp` on that listener still requires `x-terret-key`. The
-tunnel listener requires the same key on `/mcp`. Every other tunnel path, including `GET /watch`,
-requires `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against
+When team, audience, and owner are set, the local listener (default `127.0.0.1:8080`) has no
+Access check and does not serve `GET /watch`. `/mcp` on that listener still requires
+`x-terret-key`. The tunnel listener requires the same key on `/mcp`. Every other tunnel path,
+including `GET /watch`, requires `Cf-Access-Jwt-Assertion`. The token must verify as RS256 against
 `https://<team>/cdn-cgi/access/certs`, for that audience, with issuer `https://<team>`, and not
-be expired. A missing token is rejected. There is no exemption for loopback or a Cloudflare
-header: cloudflared connects from 127.0.0.1, so point it at the tunnel port, not 8080.
+be expired. The `email` claim must equal `terret.access.owner`. A service-token JWT (`common_name`
+and no email) is rejected. A missing token is rejected. There is no exemption for loopback or a
+Cloudflare header: cloudflared connects from 127.0.0.1, so point it at the tunnel port, not 8080.
 `GET /watch` reads the feed. Steering is POST on that tunnel listener (`run`, `cancel`, `resume`,
 and `open`).
 
@@ -144,66 +147,123 @@ activity events are on the [Events](events.html) page.
       assertTrue(transport == GrokTransport.AcpStdio)
     },
     exampleValue(GrokConfig.unbound).assert { grok =>
-      assertTrue(grok.transport == GrokTransport.AcpWebSocket, grok.bind.isEmpty)
+      assertTrue(
+        grok.transport == GrokTransport.AcpWebSocket,
+        grok.bind.isEmpty,
+      )
     },
-    exampleValue(AcpBind.make("127.0.0.1", 6767, "secret").map(GrokConfig.socket)).assert { built =>
+    exampleValue(
+      AcpBind.make("127.0.0.1", 6767, "secret").map(GrokConfig.socket)
+    ).assert { built =>
       assertTrue(built.map(_.transport) == Right(GrokTransport.AcpWebSocket))
     },
-    exampleValue(ProcessConfig.load(base.copy(listen = "stdio")).map(_.listen)).assert { listen =>
-      assertTrue(listen == Right(Listen.Stdio))
-    },
+    exampleValue(ProcessConfig.load(base.copy(listen = "stdio")).map(_.listen))
+      .assert { listen =>
+        assertTrue(listen == Right(Listen.Stdio))
+      },
     exampleValue(ProcessConfig.load(base.copy(version = ""))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Version))
     },
     exampleValue(ProcessConfig.load(base.copy(root = Some("work")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
+      assertTrue(
+        loaded == Left(
+          ProcessError.Workspace(WorkspaceError.Relative("work"))
+        )
+      )
     },
-    exampleValue(ProcessConfig.load(base.copy(transport = Some("AcpWebSocket")))).assert { loaded =>
+    exampleValue(
+      ProcessConfig.load(base.copy(transport = Some("AcpWebSocket")))
+    ).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.BindIncomplete))
     },
     exampleValue(
       ProcessConfig
-        .load(base.copy(harness = "dsh", command = None, profile = None, transport = None, approval = None))
+        .load(
+          base.copy(
+            harness = "dsh",
+            command = None,
+            profile = None,
+            transport = None,
+            approval = None,
+          )
+        )
         .map(_.harness)
     ).assert { harness =>
       assertTrue(harness == Right(ProcessHarness.Dsh(DshConfig.headless)))
     },
-    exampleValue(ProcessConfig.load(base.copy(profile = Some("headless")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.ProfileUnexpected))
-    },
+    exampleValue(ProcessConfig.load(base.copy(profile = Some("headless"))))
+      .assert { loaded =>
+        assertTrue(loaded == Left(ProcessError.ProfileUnexpected))
+      },
     exampleValue(ProcessConfig.load(base.copy(harness = "dsh"))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.GrokKeys))
     },
-    exampleValue(ProcessConfig.load(base.copy(transport = Some("Cli")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.CliAsk))
-    },
-    exampleValue(ProcessConfig.load(base.copy(writeRoots = Some("work")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
-    },
-    exampleValue(ProcessConfig.load(base.copy(readRoots = Some("work")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Workspace(WorkspaceError.Relative("work"))))
-    },
-    exampleValue(ProcessConfig.load(base.copy(mcp = Some("histos:version"))).map(_.mcp)).assert { policy =>
-      assertTrue(policy == Right(McpPolicy(Chunk(McpGrant("histos", Some(Set("version")))))))
+    exampleValue(ProcessConfig.load(base.copy(transport = Some("Cli"))))
+      .assert { loaded =>
+        assertTrue(loaded == Left(ProcessError.CliAsk))
+      },
+    exampleValue(ProcessConfig.load(base.copy(writeRoots = Some("work"))))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(
+            ProcessError.Workspace(WorkspaceError.Relative("work"))
+          )
+        )
+      },
+    exampleValue(ProcessConfig.load(base.copy(readRoots = Some("work"))))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(
+            ProcessError.Workspace(WorkspaceError.Relative("work"))
+          )
+        )
+      },
+    exampleValue(
+      ProcessConfig.load(base.copy(mcp = Some("histos:version"))).map(_.mcp)
+    ).assert { policy =>
+      assertTrue(
+        policy == Right(
+          McpPolicy(Chunk(McpGrant("histos", Some(Set("version")))))
+        )
+      )
     },
     exampleValue(ProcessConfig.load(base.copy(mcp = Some("histos:")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.McpGrant(McpGrantError.EmptyTool("histos"))))
+      assertTrue(
+        loaded == Left(
+          ProcessError.McpGrant(McpGrantError.EmptyTool("histos"))
+        )
+      )
     },
-    exampleValue(ProcessConfig.load(base.copy(network = Some("example.com"))).map(_.network)).assert { policy =>
+    exampleValue(
+      ProcessConfig
+        .load(base.copy(network = Some("example.com")))
+        .map(_.network)
+    ).assert { policy =>
       assertTrue(policy == Right(NetworkPolicy(Set("example.com"))))
     },
-    exampleValue(ProcessConfig.load(base.copy(network = Some("example.com,")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.NetworkGrant(NetworkGrantError.BadToken(""))))
-    },
-    exampleValue(ProcessConfig.load(base.copy(gh = Some("read"))).map(_.gh)).assert { access =>
-      assertTrue(access == Right(GhAccess(Set(GhGrant.Read))))
-    },
+    exampleValue(ProcessConfig.load(base.copy(network = Some("example.com,"))))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(
+            ProcessError.NetworkGrant(NetworkGrantError.BadToken(""))
+          )
+        )
+      },
+    exampleValue(ProcessConfig.load(base.copy(gh = Some("read"))).map(_.gh))
+      .assert { access =>
+        assertTrue(access == Right(GhAccess(Set(GhGrant.Read))))
+      },
     exampleValue(ProcessConfig.load(base.copy(gh = Some("merge")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.GhGrant(GhGrantError.BadToken("merge"))))
+      assertTrue(
+        loaded == Left(ProcessError.GhGrant(GhGrantError.BadToken("merge")))
+      )
     },
-    exampleValue(ProcessConfig.load(base.copy(grokConfig = Some("/var/terret/grok.toml"))).map(_.grokConfig)).assert {
-      path =>
-        assertTrue(path == Right(java.nio.file.Path.of("/var/terret/grok.toml")))
+    exampleValue(
+      ProcessConfig
+        .load(base.copy(grokConfig = Some("/var/terret/grok.toml")))
+        .map(_.grokConfig)
+    ).assert { path =>
+      assertTrue(path == Right(java.nio.file.Path.of("/var/terret/grok.toml")))
     },
     exampleValue(ProcessConfig.load(base.copy(grokConfig = Some("")))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.GrokConfigPath))
@@ -213,9 +273,15 @@ activity events are on the [Events](events.html) page.
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.grok.config" -> "/var/terret/grok.toml")))
+        .withConfigProvider(
+          ConfigProvider.fromMap(
+            Map("terret.grok.config" -> "/var/terret/grok.toml")
+          )
+        )
     }.assert { config =>
-      assertTrue(config.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"))
+      assertTrue(
+        config.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml")
+      )
     },
     exampleValue(ProcessConfig.load(base).map(_.events)).assert { events =>
       assertTrue(
@@ -243,7 +309,12 @@ activity events are on the [Events](events.html) page.
         )
     }.assert { config =>
       assertTrue(
-        config.events == EventPolicy(VerificationPolicy.Required, 2.minutes, 10.minutes, 45.minutes)
+        config.events == EventPolicy(
+          VerificationPolicy.Required,
+          2.minutes,
+          10.minutes,
+          45.minutes,
+        )
       )
     },
     exampleValue(
@@ -258,17 +329,34 @@ activity events are on the [Events](events.html) page.
         )
         .map(_.events)
     ).assert { events =>
-      assertTrue(events == Right(EventPolicy(VerificationPolicy.Required, 2.minutes, 10.minutes, 45.minutes)))
+      assertTrue(
+        events == Right(
+          EventPolicy(
+            VerificationPolicy.Required,
+            2.minutes,
+            10.minutes,
+            45.minutes,
+          )
+        )
+      )
     },
-    exampleValue(ProcessConfig.load(base.copy(eventVerification = "Ask"))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Events(EventPolicyError.Verification("Ask"))))
-    },
+    exampleValue(ProcessConfig.load(base.copy(eventVerification = "Ask")))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(
+            ProcessError.Events(EventPolicyError.Verification("Ask"))
+          )
+        )
+      },
     exampleValue(ProcessConfig.load(base.copy(eventFloor = 3.hours))).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.Events(EventPolicyError.Order)))
     },
-    exampleValue(ProcessConfig.load(base.copy(eventCap = Duration.Zero))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Events(EventPolicyError.Duration("cap"))))
-    },
+    exampleValue(ProcessConfig.load(base.copy(eventCap = Duration.Zero)))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(ProcessError.Events(EventPolicyError.Duration("cap")))
+        )
+      },
     exampleValue(ProcessConfig.load(base).map(_.key)).assert { key =>
       assertTrue(key == Right(None))
     },
@@ -277,7 +365,11 @@ activity events are on the [Events](events.html) page.
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.key.file" -> "/var/terret/key.env")))
+        .withConfigProvider(
+          ConfigProvider.fromMap(
+            Map("terret.key.file" -> "/var/terret/key.env")
+          )
+        )
     }.assert { config =>
       assertTrue(
         config.key == Some(KeySource.File(Path.of("/var/terret/key.env"))),
@@ -289,7 +381,9 @@ activity events are on the [Events](events.html) page.
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.key.file" -> "")))
+        .withConfigProvider(
+          ConfigProvider.fromMap(Map("terret.key.file" -> ""))
+        )
     }.assert { config =>
       assertTrue(config.key.isEmpty)
     },
@@ -298,24 +392,37 @@ activity events are on the [Events](events.html) page.
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("TERRET_KEY" -> "example-events-key")))
+        .withConfigProvider(
+          ConfigProvider.fromMap(Map("TERRET_KEY" -> "example-events-key"))
+        )
     }.assert { config =>
-      assertTrue(config.key.isEmpty, !config.toString.contains("example-events-key"))
+      assertTrue(
+        config.key.isEmpty,
+        !config.toString.contains("example-events-key"),
+      )
     },
-    exampleValue(ProcessConfig.load(base.copy(keyFile = Some("key.env")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.KeyPath))
-    },
+    exampleValue(ProcessConfig.load(base.copy(keyFile = Some("key.env"))))
+      .assert { loaded =>
+        assertTrue(loaded == Left(ProcessError.KeyPath))
+      },
     exampleValue(
       ProcessConfig.load(
-        base.copy(keyFile = Some("/var/terret/key.env"), keyService = Some("terret"), keyAccount = Some("mcp"))
+        base.copy(
+          keyFile = Some("/var/terret/key.env"),
+          keyService = Some("terret"),
+          keyAccount = Some("mcp"),
+        )
       )
     ).assert { loaded =>
       assertTrue(loaded == Left(ProcessError.KeyBoth))
     },
-    exampleValue(ProcessConfig.load(base.copy(keyService = Some("terret")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.KeyPair))
-    },
-    exampleValue(KeyGate.ready(Listen.Http(WarpLocal.Host, WarpLocal.Port), None)).assert { ready =>
+    exampleValue(ProcessConfig.load(base.copy(keyService = Some("terret"))))
+      .assert { loaded =>
+        assertTrue(loaded == Left(ProcessError.KeyPair))
+      },
+    exampleValue(
+      KeyGate.ready(Listen.Http(WarpLocal.Host, WarpLocal.Port), None)
+    ).assert { ready =>
       assertTrue(ready == Left(ProcessError.KeyMissing))
     },
     exampleValue(KeyGate.ready(Listen.Stdio, None)).assert { ready =>
@@ -325,21 +432,66 @@ activity events are on the [Events](events.html) page.
       assertTrue(limit == Right(4096))
     },
     exampleValue(ProcessConfig.load(base.copy(journalLimit = 0))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(0))))
-    },
-    exampleValue(ProcessConfig.load(base.copy(accessTeam = Some("example.cloudflareaccess.com")))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Incomplete)))
-    },
-    exampleValue(ProcessConfig.load(base.copy(accessPort = Some(8081)))).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Incomplete)))
+      assertTrue(
+        loaded == Left(
+          ProcessError.Journal(
+            terret.transcript.JournalBoundError.NonPositive(0)
+          )
+        )
+      )
     },
     exampleValue(
       ProcessConfig.load(
-        base.copy(accessTeam = Some("example.cloudflareaccess.com"), accessAudience = Some("aud"))
+        base.copy(accessTeam = Some("example.cloudflareaccess.com"))
+      )
+    ).assert { loaded =>
+      assertTrue(
+        loaded == Left(ProcessError.Access(AccessConfigError.Incomplete))
+      )
+    },
+    exampleValue(ProcessConfig.load(base.copy(accessPort = Some(8081))))
+      .assert { loaded =>
+        assertTrue(
+          loaded == Left(ProcessError.Access(AccessConfigError.Incomplete))
+        )
+      },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
+      )
+    ).assert { loaded =>
+      assertTrue(
+        loaded == Left(ProcessError.Access(AccessConfigError.Incomplete))
+      )
+    },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+          accessOwner = Some("not-an-email"),
+        )
+      )
+    ).assert { loaded =>
+      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.Owner)))
+    },
+    exampleValue(
+      ProcessConfig.load(
+        base.copy(
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+          accessOwner = Some("owner@example.com"),
+        )
       )
     ).assert { loaded =>
       assertTrue(
         loaded.map(_.access.map(_.audience.value)) == Right(Some("aud")),
+        loaded.map(_.access.map(_.owner.value)) == Right(
+          Some("owner@example.com")
+        ),
         loaded.map(_.access.map(_.port)) == Right(Some(AccessConfig.TunnelPort)),
       )
     },
@@ -348,16 +500,22 @@ activity events are on the [Events](events.html) page.
         base.copy(
           accessTeam = Some("example.cloudflareaccess.com"),
           accessAudience = Some("aud"),
+          accessOwner = Some("owner@example.com"),
           accessPort = Some(8080),
         )
       )
     ).assert { loaded =>
-      assertTrue(loaded == Left(ProcessError.Access(AccessConfigError.SamePort(8080))))
+      assertTrue(
+        loaded == Left(ProcessError.Access(AccessConfigError.SamePort(8080)))
+      )
     },
-    exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor)).assert { supervisor =>
-      assertTrue(supervisor == Right(SupervisorChoice.None))
-    },
-    exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw.copy(supervisor = "launchd"))).assert { loaded =>
+    exampleValue(ServiceConfig.load(ServiceConfig.defaultRaw).map(_.supervisor))
+      .assert { supervisor =>
+        assertTrue(supervisor == Right(SupervisorChoice.None))
+      },
+    exampleValue(
+      ServiceConfig.load(ServiceConfig.defaultRaw.copy(supervisor = "launchd"))
+    ).assert { loaded =>
       assertTrue(loaded == Left(ServiceError.LabelsMissing))
     },
   )
