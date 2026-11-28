@@ -17,7 +17,11 @@ File tools must resolve inside a granted root. `terret.readRoots` and `terret.wr
 roots, separately, and both default to empty. `ReadWorkspace` never grants a write. The shell
 stays off unless `RunCommands` is granted. When it is, its cwd is the workspace. A command terret
 starts is confined to the workspace and the configured roots, and a host that cannot sandbox
-refuses it. Grok's own process is not sandboxed.
+refuses it. A linked worktree may also read and write its admin directory and the common
+`objects`, `refs`, `logs`, `packed-refs`, and `packed-refs.lock`. Those writes require `WriteWorkspace`, and every
+path has to resolve strictly inside the project root. `hooks` and the common `HEAD` stay
+read-only. A path outside the project root is not granted, and the main checkout's files are not
+granted. Grok's own process is not sandboxed.
 
 There is one key. HTTP, including the local listener, refuses `/mcp` unless header `x-terret-key`
 matches that key. The same match is the event subscriber's principal: `key:` plus the first 8 hex

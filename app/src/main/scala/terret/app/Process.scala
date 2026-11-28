@@ -143,7 +143,7 @@ object Process:
         catalog,
       )
       surface <- ToolRuntime.make(config)
-      gh      <- ZIO.service[Gh].provide(Gh.live)
+      gh      <- ZIO.service[Gh].provide(Gh.live(config.root.map(_.path)))
       served  <- ZIO
         .fromEither(
           TerretMcp.served(

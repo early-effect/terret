@@ -1,9 +1,11 @@
 package terret.github
 
+import terret.git.{GitLayout, WorktreeGit}
 import terret.workspace.Workspace
 import zio.{Chunk, IO, ZIO, ZLayer}
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 
 final case class GhOutput(code: Int, stdout: String, stderr: String)
 
@@ -12,20 +14,28 @@ trait GhCommand:
   def execute(argv: Chunk[String], cwd: Workspace, stdin: Option[String]): IO[GhError, GhOutput]
 
 object GhCommand:
-  val jdk: GhCommand = Jdk
+  def make(project: Option[Path]): GhCommand = Jdk(project)
 
-  val layer: ZLayer[Any, Nothing, GhCommand] =
-    ZLayer.succeed(jdk)
+  val jdk: GhCommand = make(None)
+
+  def layer(project: Option[Path] = None): ZLayer[Any, Nothing, GhCommand] =
+    ZLayer.succeed(make(project))
 
   private val Cap: Int = 1000000
 
-  /** Drops `GIT_DIR`, `GIT_WORK_TREE`, and `GH_REPO` so the workspace directory is the only repository. */
-  private object Jdk extends GhCommand:
+  /** Clears inherited git location variables, then points a linked worktree at its own admin and common dirs. */
+  private final class Jdk(project: Option[Path]) extends GhCommand:
     def execute(argv: Chunk[String], cwd: Workspace, stdin: Option[String]): IO[GhError, GhOutput] =
-      ZIO.scoped:
-        ZIO.acquireRelease(start(argv, cwd))(stop).flatMap(run(_, stdin))
+      GitLayout.locate(cwd.path, project).mapError(_ => GhError.BadRequest(GhProblem.GitDir)).flatMap { place =>
+        ZIO.scoped:
+          ZIO.acquireRelease(start(argv, cwd, place))(stop).flatMap(run(_, stdin))
+      }
 
-    private def start(argv: Chunk[String], cwd: Workspace): IO[GhError, Process] =
+    private def start(
+        argv: Chunk[String],
+        cwd: Workspace,
+        place: Option[WorktreeGit],
+    ): IO[GhError, Process] =
       ZIO
         .attemptBlockingInterrupt {
           val builder = new ProcessBuilder(argv.toList*)
@@ -33,7 +43,14 @@ object GhCommand:
           val env = builder.environment()
           env.remove("GIT_DIR")
           env.remove("GIT_WORK_TREE")
+          env.remove("GIT_COMMON_DIR")
           env.remove("GH_REPO")
+          place match
+            case Some(git) =>
+              env.put("GIT_DIR", git.admin.toString)
+              env.put("GIT_COMMON_DIR", git.common.toString)
+              env.put("GIT_WORK_TREE", cwd.path.toString)
+            case None => ()
           env.put("GH_FORCE_TTY", "0")
           env.put("GH_PAGER", "")
           env.put("PAGER", "")
@@ -81,4 +98,5 @@ object GhCommand:
           case Some(text) => ZIO.succeed(text)
           case None       => ZIO.fail(GhError.TooLarge)
         }
+  end Jdk
 end GhCommand

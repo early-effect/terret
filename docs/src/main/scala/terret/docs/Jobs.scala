@@ -33,7 +33,9 @@ its state. `GET /watch` is served only on the tunnel listener and reads the feed
 on that listener: `POST /watch/{id}/run`, `/cancel`, `/resume`, and `POST /watch/open`. The local
 listener does not serve those paths.
 
-The gh tools run `gh` in the session workspace. `terret.gh` is empty unless set. `read` and `write`
+The gh tools run `gh` in the session workspace. In a linked worktree they set `GIT_DIR` to that
+worktree's admin directory and `GIT_COMMON_DIR` to the shared git directory, so `git` sees the
+repository. A git directory outside the project root is refused. `terret.gh` is empty unless set. `read` and `write`
 are separate grants. `write` does not grant read. A missing grant is `GhDenied` and names that
 grant, for example `pr list needs a gh read grant in terret.gh`. Merge requires a method. It is
 not the default, and it does not enable auto-merge.
@@ -113,4 +115,3 @@ An empty server version is rejected before the catalog is built.
       assertTrue(built == Left(TerretMcpError.EmptyVersion))
     },
   )
-end Jobs

@@ -4,11 +4,13 @@ import terret.redact.Redact
 import terret.workspace.Workspace
 import zio.{Chunk, IO, ZIO, ZLayer}
 
+import java.nio.file.Path
+
 /** Runs `gh` against one session workspace.
   *
-  * An empty `access` denies every op. The refusal names the grant that op needs. The command is an argument vector
-  * in `workspace`, and stdout is redacted before it is returned. Merge stays on the write grant and is not implied
-  * by create.
+  * An empty `access` denies every op. The refusal names the grant that op needs. The command is an argument vector in
+  * `workspace`, and stdout is redacted before it is returned. Merge stays on the write grant and is not implied by
+  * create.
   */
 trait Gh:
   def perform(op: GhOp, workspace: Workspace, access: GhAccess): IO[GhError, String]
@@ -22,8 +24,8 @@ object Gh:
   def layer: ZLayer[GhCommand, Nothing, Gh] =
     ZLayer.fromFunction(Live.apply)
 
-  val live: ZLayer[Any, Nothing, Gh] =
-    GhCommand.layer >>> layer
+  def live(project: Option[Path] = None): ZLayer[Any, Nothing, Gh] =
+    GhCommand.layer(project) >>> layer
 
   private final class Live(command: GhCommand) extends Gh:
     def perform(op: GhOp, workspace: Workspace, access: GhAccess): IO[GhError, String] =
