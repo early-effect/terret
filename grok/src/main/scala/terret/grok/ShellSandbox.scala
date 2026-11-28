@@ -24,7 +24,17 @@ enum SandboxError:
       case Rejected      => s"$name cannot be sandboxed"
       case TooLarge      => s"$name cannot be sandboxed"
 
-final case class ShellBounds(cwd: Path, reads: Chunk[Path], writes: Chunk[Path], network: Boolean)
+final case class ShellBounds(
+    cwd: Path,
+    reads: Chunk[Path],
+    writes: Chunk[Path],
+    network: Boolean,
+    javaHome: Option[Path] = None,
+    histosHome: Option[Path] = None,
+    tmp: Option[Path] = None,
+    home: Option[Path] = None,
+    xdgCache: Option[Path] = None,
+)
 
 object ShellBounds:
   def of(
@@ -150,14 +160,18 @@ object ShellSandbox:
           reads   <- ZIO.foreach(bounds.reads)(real)
           writes  <- ZIO.foreach(bounds.writes)(real)
           systems <- systemFiles
+          // A caller root can sit outside the workspace. java.home does. Its parents need the same metadata
+          // walk as the system roots, or lookup stops on the first one.
+          walked  <- ZIO.attemptBlocking(reach(Chunk(cwd) ++ reads ++ writes)).orDie
           text    <- ZIO.fromEither(
             SeatbeltProfile.render(
               SeatbeltPolicy(
                 dedup(reads ++ systems.reads),
                 dedup(writes),
-                dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
+                dedup(walked.ancestors ++ systems.ancestors),
                 bounds.network,
-                systems.links,
+                dedup(walked.links ++ systems.links),
+                systems.executables,
               )
             )
           )
@@ -175,15 +189,21 @@ object ShellSandbox:
       ZIO.attemptBlocking(readSystemFiles).orDie
 
     private def readSystemFiles: SystemFiles =
-      val reads = dedup(SystemReads.flatMap(existing))
-      val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, root) =>
+      // Read and exec only. The JDK is not a write root. `current` and its real directory are both named:
+      // a subpath of the symlink does not cover the directory it points at.
+      val jdk     = JdkGrant.host
+      val reads   = dedup(SystemReads.flatMap(existing) ++ jdk)
+      val reached = reach(reads)
+      SystemFiles(reads, dedup(reached.ancestors), dedup(reached.links), jdk)
+
+    private def reach(roots: Chunk[String]): Reach =
+      roots.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, root) =>
         Option(Path.of(root).getParent) match
           case None => acc
           case Some(parent) =>
             val next = parentsOf(parent)
             Reach(acc.ancestors ++ next.ancestors, acc.links ++ next.links)
       }
-      SystemFiles(reads, dedup(reached.ancestors), dedup(reached.links))
 
     private def existing(raw: String): Option[String] =
       try
@@ -207,23 +227,69 @@ object ShellSandbox:
         catch case _: IOException | _: SecurityException | _: InvalidPathException => above
 
     private def open(argv: Chunk[String], bounds: ShellBounds, combined: Boolean): IO[SandboxError, Process] =
-      prepare(bounds).flatMap(ready => spawn(ready.text, argv, ready.cwd, combined))
+      prepare(bounds).flatMap(ready => arm(bounds).flatMap(env => spawn(ready.text, argv, ready.cwd, combined, env)))
 
-    private def spawn(profile: String, argv: Chunk[String], cwd: Path, combined: Boolean): IO[SandboxError, Process] =
+    // PATH, LANG, and the git config paths are fixed. Toolchain paths are copied only when the profile already
+    // grants them. HOME is copied only when the caller names it. The rest of the parent environment stays out,
+    // because it can hold tokens.
+    private def arm(bounds: ShellBounds): IO[SandboxError, Armed] =
+      val inherited = Option(System.getenv("PATH")).filter(_.nonEmpty).getOrElse("/usr/bin:/bin")
+      for
+        java   <- optional(bounds.javaHome, bounds.reads)
+        histos <- optional(bounds.histosHome, bounds.reads)
+        tmp    <- optional(bounds.tmp, bounds.writes)
+        cache  <- optional(bounds.xdgCache, bounds.writes)
+        home   <- homeOf(bounds.home)
+      yield
+        val path = java.fold(inherited)(root => s"$root/bin:$inherited")
+        Armed(path, java, histos, tmp, cache, home)
+
+    private def optional(path: Option[Path], roots: Chunk[Path]): IO[SandboxError, Option[String]] =
+      path match
+        case None        => ZIO.succeed(None)
+        case Some(value) =>
+          for
+            found   <- real(value)
+            allowed <- ZIO.foreach(roots)(real)
+            _       <- ZIO.unless(allowed.exists(root => covers(root, found)))(ZIO.fail(SandboxError.BadPath(found)))
+          yield Some(found)
+
+    private def homeOf(path: Option[Path]): IO[SandboxError, Option[String]] =
+      path match
+        case None => ZIO.succeed(None)
+        case Some(value) =>
+          val text = value.toAbsolutePath.normalize.toString
+          if text.startsWith("/") && !text.exists(ch => ch < ' ' || ch == '\u007f') then ZIO.succeed(Some(text))
+          else ZIO.fail(SandboxError.BadPath(text))
+
+    private def covers(root: String, path: String): Boolean =
+      if root == "/" then path.startsWith("/") else path == root || path.startsWith(root + "/")
+
+    private def spawn(
+        profile: String,
+        argv: Chunk[String],
+        cwd: Path,
+        combined: Boolean,
+        armed: Armed,
+    ): IO[SandboxError, Process] =
       ZIO
         .attemptBlockingInterrupt {
           val builder = new ProcessBuilder(ShellSandbox.confined(profile, argv).toList.asJava)
           builder.directory(cwd.toFile)
           builder.redirectErrorStream(combined)
-          val env  = builder.environment()
-          val path = Option(env.get("PATH")).filter(_.nonEmpty).getOrElse("/usr/bin:/bin")
+          val env = builder.environment()
           env.clear()
-          env.put("PATH", path)
+          env.put("PATH", armed.path)
           env.put("LANG", "C")
           // Git exits fatal when a config file is denied. /dev/null keeps the host copies unopened.
           env.put("GIT_CONFIG_NOSYSTEM", "1")
           env.put("GIT_CONFIG_GLOBAL", "/dev/null")
           env.put("GIT_CONFIG_SYSTEM", "/dev/null")
+          armed.javaHome.foreach(path => env.put("JAVA_HOME", path))
+          armed.histosHome.foreach(path => env.put("HISTOS_HOME", path))
+          armed.tmp.foreach(path => env.put("TMPDIR", path))
+          armed.xdgCache.foreach(path => env.put("XDG_CACHE_HOME", path))
+          armed.home.foreach(path => env.put("HOME", path))
           val process = builder.start()
           close(process.getOutputStream)
           process
@@ -298,11 +364,25 @@ object ShellSandbox:
     private def dedup(paths: Chunk[String]): Chunk[String] =
       paths.foldLeft(Chunk.empty[String])((acc, path) => if acc.contains(path) then acc else acc :+ path)
 
-    private final case class SystemFiles(reads: Chunk[String], ancestors: Chunk[String], links: Chunk[String])
+    private final case class SystemFiles(
+        reads: Chunk[String],
+        ancestors: Chunk[String],
+        links: Chunk[String],
+        executables: Chunk[String],
+    )
 
     private final case class Reach(ancestors: Chunk[String], links: Chunk[String])
 
     private final case class Prepared(text: String, cwd: Path)
+
+    private final case class Armed(
+        path: String,
+        javaHome: Option[String],
+        histosHome: Option[String],
+        tmp: Option[String],
+        xdgCache: Option[String],
+        home: Option[String],
+    )
 
     private final class LiveHandle(
         process: Process,

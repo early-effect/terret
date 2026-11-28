@@ -28,7 +28,11 @@ A ceiling without `RunCommands` removes the shell, including both names Grok use
 shell is granted, its cwd is the workspace. The scan refuses a write the command line shows unless
 `WriteWorkspace` covers that path. A command terret starts is confined: it may write in the workspace
 and `writeRoots` only when `WriteWorkspace` is granted, it may read the workspace and `readRoots`,
-and network follows `Network`. A host that cannot apply that profile refuses the command. Grok's
+and network follows `Network`. Mach lookups, ipc, and system operations are denied, so a confined
+command cannot reach the keychain. The SDKMAN JDK at `~/.sdkman/candidates/java/current`, and the
+directory that link resolves to, may be read and executed, and may not be written. A Unix socket is
+allowed only under a write root. A host that
+cannot apply that profile refuses the command. Grok's
 own process is not sandboxed.
 `Network` covers `web_fetch` and `web_search`. A ceiling without `Network` removes both and
 passes `--disable-web-search`. A `use_tool` request whose `tool_name` is one of those, or
