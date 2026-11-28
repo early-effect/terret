@@ -53,13 +53,15 @@ object SbtGrantSpec extends ZIOSpecDefault:
     suite("macos sandbox")(
       test("current/bin/tool runs, and a sibling under sdks is denied") {
         withHome[SandboxError, TestResult] { home =>
-          ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(home)))(_.shutdown).flatMap { sandbox =>
+          ZIO.scoped {
+            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(home)))(_.shutdown).flatMap { sandbox =>
             for
               tree   <- toolTree(home)
               bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
               ran     <- sandbox.run(Chunk(tree.bin.toString), bounds)
               sibling <- sandbox.run(Chunk("/bin/cat", tree.sibling.toString), bounds)
             yield assertTrue(ran.code == 0, ran.stdout == "ok", TestHome.denied(sibling))
+          }
           }
         }
       } @@ TestAspect.timeout(30.seconds),

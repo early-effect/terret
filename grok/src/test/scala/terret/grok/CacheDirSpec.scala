@@ -134,7 +134,8 @@ object CacheDirSpec extends ZIOSpecDefault:
     suite("macos sandbox")(
       test("a cache directory is writable and a sibling cache is denied") {
         withYard[SandboxError, TestResult] { yard =>
-          ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
+          ZIO.scoped {
+            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
             for
               tree   <- cacheTree(yard.home)
               bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk(tree.work), network = false, writable = true)
@@ -162,11 +163,13 @@ object CacheDirSpec extends ZIOSpecDefault:
                     !lines.contains(s"(allow file-write* (subpath \"${parent.stripSuffix("/Caches")}\"))"),
                   )
           }
+          }
         }
       } @@ TestAspect.timeout(30.seconds),
       test("a cache write is denied without WriteWorkspace") {
         withYard[SandboxError, TestResult] { yard =>
-          ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
+          ZIO.scoped {
+            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
             for
               tree   <- cacheTree(yard.home)
               bounds = ShellBounds(tree.work, Chunk(tree.work), Chunk.empty, network = false, writable = false)
@@ -182,11 +185,13 @@ object CacheDirSpec extends ZIOSpecDefault:
                 !lines.exists(line => line.startsWith("(allow file-write* (subpath") && line.contains("Coursier")),
               )
           }
+          }
         }
       } @@ TestAspect.timeout(30.seconds),
       test("maven settings and ivy credentials are not readable") {
         withYard[SandboxError, TestResult] { yard =>
-          ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
+          ZIO.scoped {
+            ZIO.acquireRelease(ZIO.succeed(ShellSandbox.atHome(yard.home)))(_.shutdown).flatMap { sandbox =>
             for
               _ <- TestHome.lay {
                 val m2 = yard.home.resolve(".m2")
@@ -216,6 +221,7 @@ object CacheDirSpec extends ZIOSpecDefault:
               TestHome.denied(creds),
               !creds.stdout.contains("secret"),
             )
+          }
           }
         }
       } @@ TestAspect.timeout(30.seconds),
