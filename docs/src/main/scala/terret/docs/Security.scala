@@ -31,13 +31,15 @@ key is not logged, and it is not an environment variable of the start script. Se
 `terret.key.file` or the keychain pair `terret.key.service` and `terret.key.account`, not both.
 The [Config](config.html) page lists those keys.
 
-`terret.access.team` and `terret.access.audience` (`TERRET_ACCESS_TEAM`, `TERRET_ACCESS_AUDIENCE`)
-are both set or both omitted. When set, the local listener (default `127.0.0.1:8080`) has no Access
-check and does not serve `GET /watch`. `/mcp` on that listener still requires `x-terret-key`. The
-tunnel listener (`127.0.0.1:8081`, `terret.access.port`, `TERRET_ACCESS_PORT`) requires the same
-key on `/mcp`. Every other tunnel path, including `GET /watch`, requires a `Cf-Access-Jwt-Assertion`
-(RS256, the team certs at `https://<team>/cdn-cgi/access/certs`, the audience, issuer
-`https://<team>`, and not expired). There is no exemption for loopback or a Cloudflare header.
+`terret.access.team`, `terret.access.audience`, and `terret.access.owner` (`TERRET_ACCESS_TEAM`,
+`TERRET_ACCESS_AUDIENCE`, `TERRET_ACCESS_OWNER`) are all set or all omitted. When set, the local
+listener (default `127.0.0.1:8080`) has no Access check and does not serve `GET /watch`. `/mcp` on
+that listener still requires `x-terret-key`. The tunnel listener (`127.0.0.1:8081`,
+`terret.access.port`, `TERRET_ACCESS_PORT`) requires the same key on `/mcp`. Every other tunnel
+path, including `GET /watch`, requires a `Cf-Access-Jwt-Assertion` (RS256, the team certs at
+`https://<team>/cdn-cgi/access/certs`, the audience, issuer `https://<team>`, and not expired).
+The `email` claim must equal `terret.access.owner`. A service-token JWT (`common_name` and no
+email) is rejected. There is no exemption for loopback or a Cloudflare header.
 Point cloudflared at the tunnel port, not 8080.
 
 `GET /watch` reads the feed. Steering is POST on the tunnel listener: `POST /watch/{id}/run`,
@@ -49,7 +51,9 @@ leaves the process.
     exampleValue(PermissionPolicy.Closed.ceiling).assert { cap =>
       assertTrue(cap.allow == Set(Permission.ReadWorkspace))
     },
-    exampleValue(KeyGate.ready(Listen.Http(WarpLocal.Host, WarpLocal.Port), None)).assert { ready =>
+    exampleValue(
+      KeyGate.ready(Listen.Http(WarpLocal.Host, WarpLocal.Port), None)
+    ).assert { ready =>
       assertTrue(ready == Left(ProcessError.KeyMissing))
     },
     exampleValue(KeyGate.ready(Listen.Stdio, None)).assert { ready =>
@@ -58,7 +62,11 @@ leaves the process.
     exampleValue(Ceiling.all.clamp(Ceiling.closed)).assert { (kept, dropped) =>
       assertTrue(
         kept.allow == Set(Permission.ReadWorkspace),
-        dropped == Set(Permission.WriteWorkspace, Permission.RunCommands, Permission.Network),
+        dropped == Set(
+          Permission.WriteWorkspace,
+          Permission.RunCommands,
+          Permission.Network,
+        ),
       )
     },
   )

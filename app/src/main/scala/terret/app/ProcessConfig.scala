@@ -73,6 +73,9 @@ object ProcessConfig:
   private val accessAudience: Config[Option[String]] =
     Config.string("audience").optional.nested("access")
 
+  private val accessOwner: Config[Option[String]] =
+    Config.string("owner").optional.nested("access")
+
   private val accessPort: Config[Option[Int]] =
     Config.int("port").optional.nested("access")
 
@@ -89,6 +92,7 @@ object ProcessConfig:
       journal: Int,
       team: Option[String],
       audience: Option[String],
+      owner: Option[String],
       port: Option[Int],
       keyFile: Option[String],
       keyService: Option[String],
@@ -97,23 +101,30 @@ object ProcessConfig:
 
   /** One value so the process config product stays inside what `Config.++` flattens. */
   private val boundRaw: Config[BoundRaw] =
-    (journalLimit ++ accessTeam ++ accessAudience ++ accessPort ++ keyFile ++ keyService ++ keyAccount).map {
-      (journal, team, audience, port, file, service, account) =>
-        BoundRaw(journal, team, audience, port, file, service, account)
-    }
+    (journalLimit ++ accessTeam ++ accessAudience ++ accessOwner ++ accessPort ++ keyFile ++ keyService ++ keyAccount)
+      .map { (journal, team, audience, owner, port, file, service, account) =>
+        BoundRaw(journal, team, audience, owner, port, file, service, account)
+      }
 
-  private final case class OptInRaw(mcp: Option[String], network: Option[String], gh: Option[String])
+  private final case class OptInRaw(
+      mcp: Option[String],
+      network: Option[String],
+      gh: Option[String],
+  )
 
   private val optInRaw: Config[OptInRaw] =
-    (Config.string("mcp").optional ++ Config.string("network").optional ++ Config.string("gh").optional).map {
-      (mcp, network, gh) =>
-        OptInRaw(mcp, network, gh)
+    (Config.string("mcp").optional ++ Config
+      .string("network")
+      .optional ++ Config.string("gh").optional).map { (mcp, network, gh) =>
+      OptInRaw(mcp, network, gh)
     }
 
   private final case class RootsRaw(read: Option[String], write: Option[String])
 
   private val rootsRaw: Config[RootsRaw] =
-    (Config.string("readRoots").optional ++ Config.string("writeRoots").optional).map { (read, write) =>
+    (Config
+      .string("readRoots")
+      .optional ++ Config.string("writeRoots").optional).map { (read, write) =>
       RootsRaw(read, write)
     }
 
@@ -203,6 +214,7 @@ object ProcessConfig:
           bound.journal,
           bound.team,
           bound.audience,
+          bound.owner,
           bound.port,
           grokConfig,
         )
@@ -223,8 +235,14 @@ object ProcessConfig:
       events     <- eventsOf(raw)
       grokConfig <- grokConfigOf(raw.grokConfig)
       journal    <- journalOf(raw.journalLimit)
-      access     <- accessOf(raw.accessTeam, raw.accessAudience, raw.accessPort, listen)
-      key        <- KeySource.parse(raw.keyFile, raw.keyService, raw.keyAccount)
+      access     <- accessOf(
+        raw.accessTeam,
+        raw.accessAudience,
+        raw.accessOwner,
+        raw.accessPort,
+        listen,
+      )
+      key <- KeySource.parse(raw.keyFile, raw.keyService, raw.keyAccount)
     yield ProcessConfig(
       listen,
       policy,
@@ -257,26 +275,39 @@ object ProcessConfig:
   private def versionOf(version: String): Either[ProcessError, String] =
     if version.isEmpty then Left(ProcessError.Version) else Right(version)
 
-  private def rootOf(root: Option[String]): Either[ProcessError, Option[Workspace]] =
+  private def rootOf(
+      root: Option[String]
+  ): Either[ProcessError, Option[Workspace]] =
     root match
       case None      => Right(None)
-      case Some(raw) => Workspace.from(raw).left.map(ProcessError.Workspace(_)).map(Some(_))
+      case Some(raw) =>
+        Workspace.from(raw).left.map(ProcessError.Workspace(_)).map(Some(_))
 
-  private def policyOf(name: String, allow: String): Either[ProcessError, PermissionPolicy] =
+  private def policyOf(
+      name: String,
+      allow: String,
+  ): Either[ProcessError, PermissionPolicy] =
     name match
       case "Closed"  => Right(PermissionPolicy.Closed)
       case "Inherit" => Right(PermissionPolicy.Inherit)
-      case "Clamp"   => permissions(allow).map(set => PermissionPolicy.Clamp(Ceiling(set)))
-      case other     => Left(ProcessError.Policy(other))
+      case "Clamp"   =>
+        permissions(allow).map(set => PermissionPolicy.Clamp(Ceiling(set)))
+      case other => Left(ProcessError.Policy(other))
 
-  private def permissions(allow: String): Either[ProcessError, Set[Permission]] =
-    allow.split(',').map(_.trim).filter(_.nonEmpty).foldLeft[Either[ProcessError, Set[Permission]]](Right(Set.empty)) {
-      case (Left(error), _)   => Left(error)
-      case (Right(acc), name) =>
-        permission(name) match
-          case Left(error)  => Left(error)
-          case Right(value) => Right(acc + value)
-    }
+  private def permissions(
+      allow: String
+  ): Either[ProcessError, Set[Permission]] =
+    allow
+      .split(',')
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .foldLeft[Either[ProcessError, Set[Permission]]](Right(Set.empty)) {
+        case (Left(error), _)   => Left(error)
+        case (Right(acc), name) =>
+          permission(name) match
+            case Left(error)  => Left(error)
+            case Right(value) => Right(acc + value)
+      }
 
   private def permission(name: String): Either[ProcessError, Permission] =
     name match
@@ -286,13 +317,19 @@ object ProcessConfig:
       case "Network"        => Right(Permission.Network)
       case other            => Left(ProcessError.Permission(other))
 
-  private def harnessOf(raw: Raw, policy: PermissionPolicy): Either[ProcessError, ProcessHarness] =
+  private def harnessOf(
+      raw: Raw,
+      policy: PermissionPolicy,
+  ): Either[ProcessError, ProcessHarness] =
     raw.harness match
       case "grok" => grokOf(raw, policy).map(ProcessHarness.Grok(_))
       case "dsh"  => dshOf(raw).map(ProcessHarness.Dsh(_))
       case other  => Left(ProcessError.Harness(other))
 
-  private def grokOf(raw: Raw, policy: PermissionPolicy): Either[ProcessError, GrokConfig] =
+  private def grokOf(
+      raw: Raw,
+      policy: PermissionPolicy,
+  ): Either[ProcessError, GrokConfig] =
     raw.profile match
       case Some(_) => Left(ProcessError.ProfileUnexpected)
       case None    =>
@@ -306,7 +343,9 @@ object ProcessConfig:
             .map(ProcessError.Grok(_))
         yield config
 
-  private def rootsOf(raw: Option[String]): Either[ProcessError, Chunk[Workspace]] =
+  private def rootsOf(
+      raw: Option[String]
+  ): Either[ProcessError, Chunk[Workspace]] =
     raw match
       case None       => Right(Chunk.empty)
       case Some(text) =>
@@ -314,7 +353,9 @@ object ProcessConfig:
           .split(',')
           .map(_.trim)
           .filter(_.nonEmpty)
-          .foldLeft[Either[ProcessError, Chunk[Workspace]]](Right(Chunk.empty)) {
+          .foldLeft[Either[ProcessError, Chunk[Workspace]]](
+            Right(Chunk.empty)
+          ) {
             case (Left(error), _)   => Left(error)
             case (Right(acc), part) =>
               Workspace.from(part) match
@@ -339,14 +380,18 @@ object ProcessConfig:
       policy: PermissionPolicy,
   ): Either[ProcessError, GrokTransport] =
     (named, approval, policy) match
-      case (Some("Cli"), GrokApproval.Ask, PermissionPolicy.Inherit) => Right(GrokTransport.Cli)
-      case (None, GrokApproval.Ask, PermissionPolicy.Inherit)        => Right(GrokTransport.Cli)
-      case (Some("Cli"), GrokApproval.Ask, _)                        => Left(ProcessError.CliAsk)
-      case (None, GrokApproval.Ask, _)                               => Right(GrokTransport.AcpStdio)
-      case (None, GrokApproval.Always, _)                            => Right(GrokTransport.Cli)
-      case (Some(name), _, _)                                        => namedTransport(name)
+      case (Some("Cli"), GrokApproval.Ask, PermissionPolicy.Inherit) =>
+        Right(GrokTransport.Cli)
+      case (None, GrokApproval.Ask, PermissionPolicy.Inherit) =>
+        Right(GrokTransport.Cli)
+      case (Some("Cli"), GrokApproval.Ask, _) => Left(ProcessError.CliAsk)
+      case (None, GrokApproval.Ask, _)        => Right(GrokTransport.AcpStdio)
+      case (None, GrokApproval.Always, _)     => Right(GrokTransport.Cli)
+      case (Some(name), _, _)                 => namedTransport(name)
 
-  private def namedTransport(name: String): Either[ProcessError, GrokTransport] =
+  private def namedTransport(
+      name: String
+  ): Either[ProcessError, GrokTransport] =
     name match
       case "Cli"          => Right(GrokTransport.Cli)
       case "AcpStdio"     => Right(GrokTransport.AcpStdio)
@@ -367,10 +412,15 @@ object ProcessConfig:
   ): Either[ProcessError, Option[AcpBind]] =
     (transport, host, port, secret) match
       case (GrokTransport.AcpWebSocket, Some(host), Some(port), Some(secret)) =>
-        AcpBind.make(host, port, secret).left.map(ProcessError.Grok(_)).map(Some(_))
-      case (GrokTransport.AcpWebSocket, _, _, _) => Left(ProcessError.BindIncomplete)
-      case (_, None, None, None)                 => Right(None)
-      case _                                     => Left(ProcessError.BindUnexpected)
+        AcpBind
+          .make(host, port, secret)
+          .left
+          .map(ProcessError.Grok(_))
+          .map(Some(_))
+      case (GrokTransport.AcpWebSocket, _, _, _) =>
+        Left(ProcessError.BindIncomplete)
+      case (_, None, None, None) => Right(None)
+      case _                     => Left(ProcessError.BindUnexpected)
 
   final case class Raw(
       listen: String,
@@ -403,6 +453,7 @@ object ProcessConfig:
       journalLimit: Int = JournalBound.DefaultSize,
       accessTeam: Option[String] = None,
       accessAudience: Option[String] = None,
+      accessOwner: Option[String] = None,
       accessPort: Option[Int] = None,
       grokConfig: Option[String] = None,
   )
@@ -439,17 +490,19 @@ object ProcessConfig:
   private def accessOf(
       team: Option[String],
       audience: Option[String],
+      owner: Option[String],
       port: Option[Int],
       listen: Listen,
   ): Either[ProcessError, Option[AccessConfig]] =
-    (present(team), present(audience), port) match
-      case (None, None, None)              => Right(None)
-      case (Some(host), Some(tag), chosen) =>
+    (present(team), present(audience), present(owner), port) match
+      case (None, None, None, None)                     => Right(None)
+      case (Some(host), Some(tag), Some(email), chosen) =>
         for
-          parsedHost <- TeamHost.from(host).left.map(ProcessError.Access(_))
-          parsedTag  <- Audience.from(tag).left.map(ProcessError.Access(_))
-          tunnel     <- tunnelPort(chosen, listen)
-        yield Some(AccessConfig(parsedHost, parsedTag, tunnel))
+          parsedHost  <- TeamHost.from(host).left.map(ProcessError.Access(_))
+          parsedTag   <- Audience.from(tag).left.map(ProcessError.Access(_))
+          parsedOwner <- OwnerEmail.from(email).left.map(ProcessError.Access(_))
+          tunnel      <- tunnelPort(chosen, listen)
+        yield Some(AccessConfig(parsedHost, parsedTag, parsedOwner, tunnel))
       case _ => Left(ProcessError.Access(AccessConfigError.Incomplete))
 
   private def tunnelPort(chosen: Option[Int], listen: Listen): Either[ProcessError, Int] =
@@ -501,18 +554,20 @@ enum ProcessError:
   case KeyPath
 
   def render: String = this match
-    case Listen(value)        => s"listen is http or stdio, got $value"
-    case Host                 => "host is empty"
-    case Port(value)          => s"port is 0 to 65535, got $value"
-    case Version              => "version is empty"
-    case Policy(value)        => s"policy is Closed, Inherit, or Clamp, got $value"
-    case Permission(value)    => s"unknown permission $value"
-    case Transport(value)     => s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
-    case Approval(value)      => s"approval is Ask or Always, got $value"
-    case Harness(value)       => s"harness is grok or dsh, got $value"
-    case ProfileUnexpected    => "profile belongs on the dsh harness"
-    case GrokKeys             => "transport, approval, and bind belong on the grok harness"
-    case BindIncomplete       => "a socket transport needs bindHost, bindPort, and bindSecret"
+    case Listen(value)     => s"listen is http or stdio, got $value"
+    case Host              => "host is empty"
+    case Port(value)       => s"port is 0 to 65535, got $value"
+    case Version           => "version is empty"
+    case Policy(value)     => s"policy is Closed, Inherit, or Clamp, got $value"
+    case Permission(value) => s"unknown permission $value"
+    case Transport(value)  =>
+      s"transport is Cli, AcpStdio, or AcpWebSocket, got $value"
+    case Approval(value)   => s"approval is Ask or Always, got $value"
+    case Harness(value)    => s"harness is grok or dsh, got $value"
+    case ProfileUnexpected => "profile belongs on the dsh harness"
+    case GrokKeys          => "transport, approval, and bind belong on the grok harness"
+    case BindIncomplete    =>
+      "a socket transport needs bindHost, bindPort, and bindSecret"
     case BindUnexpected       => "bind fields belong on a socket transport"
     case CliAsk               => "the CLI transport cannot answer a permission prompt"
     case Workspace(error)     => s"workspace ${error.toString}"
@@ -532,21 +587,27 @@ enum ProcessError:
     case Config(error)        => error.toString
     case KeyMissing           =>
       "HTTP needs a key: set terret.key.file to a mode 600 env file, or terret.key.service and terret.key.account"
-    case Key(error)           => error.render
-    case KeyBoth              => "set terret.key.file or the keychain item, not both"
-    case KeyPair              => "terret.key.service and terret.key.account are set together"
-    case KeyPath              => "terret.key.file must be an absolute path"
+    case Key(error) => error.render
+    case KeyBoth    => "set terret.key.file or the keychain item, not both"
+    case KeyPair    => "terret.key.service and terret.key.account are set together"
+    case KeyPath    => "terret.key.file must be an absolute path"
 
   private def journalMessage(error: JournalBoundError): String =
     error match
-      case JournalBoundError.NonPositive(value) => s"journal.limit must be positive, got $value"
+      case JournalBoundError.NonPositive(value) =>
+        s"journal.limit must be positive, got $value"
 
   private def accessMessage(error: AccessConfigError): String =
     error match
-      case AccessConfigError.Incomplete      => "access needs terret.access.team and terret.access.audience"
-      case AccessConfigError.Team            => "access team is a hostname with no scheme or path"
-      case AccessConfigError.Audience        => "access audience is a tag with no whitespace"
-      case AccessConfigError.Port(value)     => s"access.port is 1 to 65535, got $value"
+      case AccessConfigError.Incomplete =>
+        "access needs terret.access.team, terret.access.audience, and terret.access.owner"
+      case AccessConfigError.Team =>
+        "access team is a hostname with no scheme or path"
+      case AccessConfigError.Audience =>
+        "access audience is a tag with no whitespace"
+      case AccessConfigError.Owner       => "access owner is an email address"
+      case AccessConfigError.Port(value) =>
+        s"access.port is 1 to 65535, got $value"
       case AccessConfigError.SamePort(value) =>
         s"access.port $value is the local listener, and the tunnel needs its own port"
 
