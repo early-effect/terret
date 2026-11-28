@@ -30,18 +30,31 @@ object Process:
   ): ZIO[ModelCatalog & Scope, ProcessError, Unit] =
     assemble(config, harness, gate).flatMap { prepared =>
       val body = config.listen match
-        case Listen.Stdio            => prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
+        case Listen.Stdio =>
+          prepared.served.mcp.stdio().mapError(ProcessError.Stdio(_))
         case Listen.Http(host, port) =>
           prepared.key match
             case None      => ZIO.fail(ProcessError.KeyMissing)
-            case Some(key) => http(prepared.served, prepared.terret, host, port, config, key) *> ZIO.never
+            case Some(key) =>
+              http(
+                prepared.served,
+                prepared.terret,
+                host,
+                port,
+                config,
+                key,
+              ) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
-      armed(prepared.served, prepared.terret, gate, config)(body).ensuring(prepared.terret.shutdown)
+      armed(prepared.served, prepared.terret, gate, config)(body)
+        .ensuring(prepared.terret.shutdown)
     }
 
   /** Bind HTTP and leave the socket open until the scope closes. */
-  def bind(config: ProcessConfig, harness: Harness): ZIO[ModelCatalog & Scope, ProcessError, Server] =
+  def bind(
+      config: ProcessConfig,
+      harness: Harness,
+  ): ZIO[ModelCatalog & Scope, ProcessError, Server] =
     config.listen match
       case Listen.Stdio            => ZIO.fail(ProcessError.Listen("stdio"))
       case Listen.Http(host, port) =>
@@ -64,7 +77,11 @@ object Process:
       port: Int,
       config: ProcessConfig,
       key: EventsKey,
-  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
+  ): ZIO[
+    Milestones & Events.Env & AccessGate & AuthLog & Scope,
+    ProcessError,
+    Server,
+  ] =
     for
       streams <- WatchStreams.make
       csrf    <- CsrfTokens.make
@@ -79,7 +96,11 @@ object Process:
       host: String,
       port: Int,
       key: EventsKey,
-  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
+  ): ZIO[
+    Milestones & Events.Env & AccessGate & AuthLog & Scope,
+    ProcessError,
+    Server,
+  ] =
     bind(Ingress.local(served.routes, key), host, port)
 
   private def tunnelListener(
@@ -87,7 +108,11 @@ object Process:
       watch: heddle.route.Routes[AuthLog, Nothing],
       port: Int,
       key: EventsKey,
-  ): ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, Server] =
+  ): ZIO[
+    Milestones & Events.Env & AccessGate & AuthLog & Scope,
+    ProcessError,
+    Server,
+  ] =
     bind(Ingress.tunnel(served.routes, watch, key), AccessConfig.TunnelHost, port)
 
   private def bind[R](
@@ -96,7 +121,7 @@ object Process:
       port: Int,
   ): ZIO[R & Scope, ProcessError, Server] =
     for
-      bound  <- ZIO.fromEither(Port.make(port).left.map(_ => ProcessError.Port(port)))
+      bound <- ZIO.fromEither(Port.make(port).left.map(_ => ProcessError.Port(port)))
       server <- Server
         .install(routes, Server.Config.default.copy(host = host, port = bound))
         .mapError(ProcessError.Server(_))
@@ -110,29 +135,56 @@ object Process:
     for
       key     <- loadKey(config)
       catalog <- ZIO.service[ModelCatalog]
-      terret  <- Terret.make(harness, TerretConfig(config.policy, config.root), Hooks.identity, gate, catalog)
+      terret  <- Terret.make(
+        harness,
+        TerretConfig(config.policy, config.root),
+        Hooks.identity,
+        gate,
+        catalog,
+      )
       surface <- ToolRuntime.make(config)
       gh      <- ZIO.service[Gh].provide(Gh.live)
       served  <- ZIO
-        .fromEither(TerretMcp.served(terret, config.version, config.events, key, surface, gh, config.gh))
+        .fromEither(
+          TerretMcp.served(
+            terret,
+            config.version,
+            config.events,
+            key,
+            surface,
+            gh,
+            config.gh,
+          )
+        )
         .mapError(ProcessError.Mcp(_))
     yield Prepared(served, terret, key)
 
   /** Stdio with a source still reads it, so a world-readable file fails before the pipe opens. */
   private def loadKey(config: ProcessConfig): ZIO[Any, ProcessError, Option[EventsKey]] =
     ZIO.fromEither(KeyGate.ready(config.listen, config.key)).flatMap {
-      case None => ZIO.succeed(None)
-      case Some(source) =>
-        SecretStore.load(source).mapBoth(ProcessError.Key(_), Some(_)).provide(Keychain.live)
+      case None         => ZIO.succeed(None)
+      case Some(source) => SecretStore.load(source).mapBoth(ProcessError.Key(_), Some(_)).provide(Keychain.live)
     }
 
   /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
-  private def armed[A](served: Served, terret: Terret, gate: MilestoneGate, config: ProcessConfig)(
-      body: ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, A]
+  private def armed[A](
+      served: Served,
+      terret: Terret,
+      gate: MilestoneGate,
+      config: ProcessConfig,
+  )(
+      body: ZIO[
+        Milestones & Events.Env & AccessGate & AuthLog & Scope,
+        ProcessError,
+        A,
+      ]
   ): ZIO[Scope, ProcessError, A] =
     val layers =
       served.mcp.eventsLayer(
-        SubscriptionStore.file(config.subscriptions.toString, config.events.ttl.maxSubscriptions)
+        SubscriptionStore.file(
+          config.subscriptions.toString,
+          config.events.ttl.maxSubscriptions,
+        )
       ) ++
         WebhookTransport.live ++
         Milestones.live ++
@@ -140,12 +192,16 @@ object Process:
         AuthLog.live
     for
       skipped <- SubscriptionResume.prepare
-        .provide(SubscriptionResume.layer, OpenSessions.layer(terret), SubscriptionJournal.file(config.subscriptions))
+        .provide(
+          SubscriptionResume.layer,
+          OpenSessions.layer(terret),
+          SubscriptionJournal.file(config.subscriptions),
+        )
         .mapError(ProcessError.Subscriptions(_))
       _ <- ZIO.foreachDiscard(skipped) { row =>
         ZIO.consoleWith(_.printLineError(row.render)).ignore
       }
-      env <- layers.build.mapError(ProcessError.Subscriptions(_))
+      env   <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
       value <-
         val open =
@@ -161,7 +217,12 @@ object Process:
   private def access(config: ProcessConfig): ULayer[AccessGate] =
     config.access match
       case None      => AccessGate.open
-      case Some(cfg) => ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.team, cfg.audience)
+      case Some(cfg) =>
+        ZLayer.succeed(AccessCerts.remote(cfg.team)) >>> AccessGate.layer(cfg.team, cfg.audience, cfg.owner)
 
-  private final case class Prepared(served: Served, terret: Terret, key: Option[EventsKey])
+  private final case class Prepared(
+      served: Served,
+      terret: Terret,
+      key: Option[EventsKey],
+  )
 end Process

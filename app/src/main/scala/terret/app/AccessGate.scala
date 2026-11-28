@@ -8,13 +8,15 @@ import zio.{Chunk, Clock, IO, Ref, ULayer, ZIO, ZLayer}
 
 import java.time.Instant
 
-/** Team hostname, such as `example.cloudflareaccess.com`. No scheme and no path. */
+/** Team hostname, such as `example.cloudflareaccess.com`. No scheme and no path.
+  */
 opaque type TeamHost = String
 
 object TeamHost:
   def from(raw: String): Either[AccessConfigError, TeamHost] =
     val host = raw.trim
-    if host.isEmpty || host.contains("://") || host.contains('/') || host.exists(_.isWhitespace) || !host.contains('.')
+    if host.isEmpty || host.contains("://") || host.contains('/') || host
+        .exists(_.isWhitespace) || !host.contains('.')
     then Left(AccessConfigError.Team)
     else Right(host)
 
@@ -27,13 +29,54 @@ opaque type Audience = String
 object Audience:
   def from(raw: String): Either[AccessConfigError, Audience] =
     val tag = raw.trim
-    if tag.isEmpty || tag.exists(_.isWhitespace) then Left(AccessConfigError.Audience) else Right(tag)
+    if tag.isEmpty || tag.exists(_.isWhitespace) then Left(AccessConfigError.Audience)
+    else Right(tag)
 
   extension (audience: Audience) def value: String = audience
 end Audience
 
+/** The mailbox the Access JWT `email` claim must equal. `common_name` is not this identity.
+  */
+opaque type OwnerEmail = String
+
+object OwnerEmail:
+  def from(raw: String): Either[AccessConfigError, OwnerEmail] =
+    val email = raw.trim
+    val at    = email.indexOf('@')
+    if at <= 0 || email.lastIndexOf('@') != at then Left(AccessConfigError.Owner)
+    else
+      val local  = email.substring(0, at)
+      val domain = email.substring(at + 1)
+      if localOk(local) && domainOk(domain) then Right(email)
+      else Left(AccessConfigError.Owner)
+
+  extension (email: OwnerEmail) def value: String = email
+
+  private def localOk(local: String): Boolean =
+    shaped(
+      local,
+      char => char == '.' || char == '_' || char == '%' || char == '+' || char == '-',
+    )
+
+  private def domainOk(domain: String): Boolean =
+    val labels = domain.split("\\.", -1).toList
+    labels.length >= 2 && labels.forall(label => shaped(label, _ == '-'))
+
+  private def shaped(raw: String, extra: Char => Boolean): Boolean =
+    def lastOf(chars: List[Char], seen: Char): Char =
+      chars match
+        case Nil          => seen
+        case char :: rest => lastOf(rest, char)
+
+    raw.toList match
+      case Nil           => false
+      case first :: rest =>
+        val last = lastOf(rest, first)
+        first.isLetterOrDigit && last.isLetterOrDigit && raw.forall(char => char.isLetterOrDigit || extra(char))
+end OwnerEmail
+
 /** `port` is the tunnel listener. It is not the local MCP port. */
-final case class AccessConfig(team: TeamHost, audience: Audience, port: Int)
+final case class AccessConfig(team: TeamHost, audience: Audience, owner: OwnerEmail, port: Int)
 
 object AccessConfig:
   val TunnelHost: String = "127.0.0.1"
@@ -43,6 +86,7 @@ enum AccessConfigError:
   case Incomplete
   case Team
   case Audience
+  case Owner
   case Port(value: Int)
   case SamePort(value: Int)
 
@@ -75,17 +119,18 @@ object AccessGate:
     ZLayer.succeed(new:
       def allow(headers: Headers): IO[AccessError, Unit] = ZIO.unit)
 
-  def layer(team: TeamHost, audience: Audience): ZLayer[AccessCerts, Nothing, AccessGate] =
+  def layer(team: TeamHost, audience: Audience, owner: OwnerEmail): ZLayer[AccessCerts, Nothing, AccessGate] =
     ZLayer.scoped {
       for
         certs <- ZIO.service[AccessCerts]
         cache <- Ref.make(Option.empty[(Chunk[AccessJwt.RsaKey], Instant)])
-      yield Live(certs, audience, AccessJwt.issuer(team), cache)
+      yield Live(certs, audience, AccessJwt.issuer(team), owner, cache)
     }
 
-  /** The tunnel listener, on every path except `/mcp`. A missing token is rejected. There is no localhost exemption:
-    * cloudflared connects from 127.0.0.1, so an exemption would let every tunnel request through. The local listener
-    * does not install this. `/mcp` requires the configured key and does not require this JWT.
+  /** The tunnel listener, on every path except `/mcp`. A missing token is rejected, and so is a token that does not
+    * name the configured owner. There is no localhost exemption: cloudflared connects from 127.0.0.1, so an exemption
+    * would let every tunnel request through. The local listener does not install this. `/mcp` requires the configured
+    * key and does not require this JWT.
     */
   def http: Middleware[AccessGate & AuthLog] =
     Middleware.interceptZIO { request =>
@@ -107,6 +152,7 @@ object AccessGate:
       certs: AccessCerts,
       audience: Audience,
       issuer: String,
+      owner: OwnerEmail,
       cache: Ref[Option[(Chunk[AccessJwt.RsaKey], Instant)]],
   ) extends AccessGate:
     def allow(headers: Headers): IO[AccessError, Unit] =
@@ -122,7 +168,7 @@ object AccessGate:
           }
 
     private def check(jwt: String, keys: Chunk[AccessJwt.RsaKey], now: Instant): IO[AccessError, Unit] =
-      ZIO.fromEither(AccessJwt.verify(jwt, keys, audience.value, issuer, now))
+      ZIO.fromEither(AccessJwt.verify(jwt, keys, audience.value, issuer, owner, now))
 
     /** An unknown kid refreshes once. A cache younger than 30 seconds stays, so a bad kid cannot stampede the certs. */
     private def load(force: Boolean): IO[AccessError, Chunk[AccessJwt.RsaKey]] =

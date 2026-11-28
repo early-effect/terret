@@ -32,7 +32,8 @@ object ProcessSpec extends ZIOSpecDefault:
             config == ProcessConfig.local,
             config.listen match
               case http: Listen.Http =>
-                WarpLocal.url(http.host, http.port) == "http://127.0.0.1:8080/mcp"
+                WarpLocal
+                  .url(http.host, http.port) == "http://127.0.0.1:8080/mcp"
               case Listen.Stdio => false,
           )
         }
@@ -62,7 +63,10 @@ object ProcessSpec extends ZIOSpecDefault:
         parsed.map(_.policy) == Right(
           PermissionPolicy.Clamp(
             terret.permission.Ceiling(
-              Set(terret.permission.Permission.ReadWorkspace, terret.permission.Permission.Network)
+              Set(
+                terret.permission.Permission.ReadWorkspace,
+                terret.permission.Permission.Network,
+              )
             )
           )
         ),
@@ -71,7 +75,9 @@ object ProcessSpec extends ZIOSpecDefault:
           .make("127.0.0.1", 6767, "secret")
           .map { bind =>
             ProcessHarness.Grok(
-              terret.grok.GrokConfig.socket(bind).withApproval(terret.grok.GrokApproval.Always)
+              terret.grok.GrokConfig
+                .socket(bind)
+                .withApproval(terret.grok.GrokApproval.Always)
             )
           }
           .left
@@ -80,15 +86,32 @@ object ProcessSpec extends ZIOSpecDefault:
     },
     test("dsh is the other harness, and the other harness's keys are refused") {
       val selected = ProcessConfig.load(
-        defaults.copy(harness = "dsh", command = None, profile = Some("sdk"), transport = None, approval = None)
+        defaults.copy(
+          harness = "dsh",
+          command = None,
+          profile = Some("sdk"),
+          transport = None,
+          approval = None,
+        )
       )
       val blank = ProcessConfig.load(
-        defaults.copy(harness = "dsh", command = None, profile = Some(""), transport = None, approval = None)
+        defaults.copy(
+          harness = "dsh",
+          command = None,
+          profile = Some(""),
+          transport = None,
+          approval = None,
+        )
       )
-      val profile = ProcessConfig.load(defaults.copy(profile = Some("headless")))
+      val profile =
+        ProcessConfig.load(defaults.copy(profile = Some("headless")))
       val keys    = ProcessConfig.load(defaults.copy(harness = "dsh"))
       val unknown = ProcessConfig.load(defaults.copy(harness = "codex"))
-      val made    = terret.dsh.DshConfig.make("dsh", "sdk").map(ProcessHarness.Dsh(_)).left.map(ProcessError.Dsh(_))
+      val made    = terret.dsh.DshConfig
+        .make("dsh", "sdk")
+        .map(ProcessHarness.Dsh(_))
+        .left
+        .map(ProcessError.Dsh(_))
       assertTrue(
         selected.map(_.harness) == made,
         blank == Left(ProcessError.Dsh(terret.dsh.DshConfigError.EmptyProfile)),
@@ -100,23 +123,48 @@ object ProcessSpec extends ZIOSpecDefault:
     test("ask under a ceiling uses stdio, and an explicit cli ask is refused") {
       val omitted   = ProcessConfig.load(defaults.copy(transport = None))
       val explicit  = ProcessConfig.load(defaults)
-      val inherited = ProcessConfig.load(defaults.copy(policy = "Inherit", transport = None))
-      val roots     = ProcessConfig.load(defaults.copy(transport = None, writeRoots = Some("work")))
-      val scratch   = ProcessConfig.load(defaults.copy(transport = None, writeRoots = Some("/tmp")))
+      val inherited =
+        ProcessConfig.load(defaults.copy(policy = "Inherit", transport = None))
+      val roots = ProcessConfig.load(
+        defaults.copy(transport = None, writeRoots = Some("work"))
+      )
+      val scratch = ProcessConfig.load(
+        defaults.copy(transport = None, writeRoots = Some("/tmp"))
+      )
       assertTrue(
-        omitted.map(_.harness) == Right(ProcessHarness.Grok(terret.grok.GrokConfig.stdio)),
+        omitted.map(_.harness) == Right(
+          ProcessHarness.Grok(terret.grok.GrokConfig.stdio)
+        ),
         explicit == Left(ProcessError.CliAsk),
-        inherited.map(_.harness) == Right(ProcessHarness.Grok(terret.grok.GrokConfig.cli)),
-        roots == Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
+        inherited.map(_.harness) == Right(
+          ProcessHarness.Grok(terret.grok.GrokConfig.cli)
+        ),
+        roots == Left(
+          ProcessError.Workspace(
+            terret.workspace.WorkspaceError.Relative("work")
+          )
+        ),
         scratch.map(_.writeRoots) == terret.workspace.Workspace
           .from("/tmp")
           .map(root => zio.Chunk(root))
           .left
           .map(ProcessError.Workspace(_)),
-        ProcessConfig.load(defaults.copy(transport = None, readRoots = Some("work"))) ==
-          Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
-        ProcessConfig.load(defaults.copy(transport = None, readRoots = Some("/tmp"))).map(_.readRoots) ==
-          terret.workspace.Workspace.from("/tmp").map(root => zio.Chunk(root)).left.map(ProcessError.Workspace(_)),
+        ProcessConfig.load(
+          defaults.copy(transport = None, readRoots = Some("work"))
+        ) ==
+          Left(
+            ProcessError.Workspace(
+              terret.workspace.WorkspaceError.Relative("work")
+            )
+          ),
+        ProcessConfig
+          .load(defaults.copy(transport = None, readRoots = Some("/tmp")))
+          .map(_.readRoots) ==
+          terret.workspace.Workspace
+            .from("/tmp")
+            .map(root => zio.Chunk(root))
+            .left
+            .map(ProcessError.Workspace(_)),
       )
     },
     test("an empty version and a relative root are refused") {
@@ -124,44 +172,71 @@ object ProcessSpec extends ZIOSpecDefault:
       val relative = ProcessConfig.load(defaults.copy(root = Some("work")))
       assertTrue(
         empty == Left(ProcessError.Version),
-        relative == Left(ProcessError.Workspace(terret.workspace.WorkspaceError.Relative("work"))),
+        relative == Left(
+          ProcessError.Workspace(
+            terret.workspace.WorkspaceError.Relative("work")
+          )
+        ),
       )
     },
     test("terret.grok.config selects the model file") {
-      val stdio      = defaults.copy(transport = None)
-      val selected   = ProcessConfig.load(stdio.copy(grokConfig = Some("/var/terret/grok.toml")))
+      val stdio    = defaults.copy(transport = None)
+      val selected = ProcessConfig.load(
+        stdio.copy(grokConfig = Some("/var/terret/grok.toml"))
+      )
       val empty      = ProcessConfig.load(stdio.copy(grokConfig = Some("")))
       val overridden = ZIO
         .config(ProcessConfig.raw)
         .mapError(ProcessError.Config(_))
         .flatMap(raw => ZIO.fromEither(ProcessConfig.load(raw)))
-        .withConfigProvider(ConfigProvider.fromMap(Map("terret.grok.config" -> "/var/terret/grok.toml")))
+        .withConfigProvider(
+          ConfigProvider.fromMap(
+            Map("terret.grok.config" -> "/var/terret/grok.toml")
+          )
+        )
       for chosen <- overridden
       yield assertTrue(
-        selected.map(_.grokConfig) == Right(java.nio.file.Path.of("/var/terret/grok.toml")),
+        selected.map(_.grokConfig) == Right(
+          java.nio.file.Path.of("/var/terret/grok.toml")
+        ),
         empty == Left(ProcessError.GrokConfigPath),
         chosen.grokConfig == java.nio.file.Path.of("/var/terret/grok.toml"),
       )
     },
-    test("journal limit must be positive, and access is both fields or neither") {
+    test(
+      "journal limit must be positive, and access is team, audience, and owner or none"
+    ) {
       val open = ProcessConfig.load(defaults.copy(transport = None))
-      val zero = ProcessConfig.load(defaults.copy(transport = None, journalLimit = 0))
+      val zero =
+        ProcessConfig.load(defaults.copy(transport = None, journalLimit = 0))
       val half = ProcessConfig.load(
-        defaults.copy(transport = None, accessTeam = Some("example.cloudflareaccess.com"))
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("example.cloudflareaccess.com"),
+        )
+      )
+      val pair = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+        )
       )
       val bad = ProcessConfig.load(
         defaults.copy(
           transport = None,
           accessTeam = Some("https://example.cloudflareaccess.com"),
           accessAudience = Some("aud"),
+          accessOwner = Some("owner@example.com"),
         )
       )
-      val both = ProcessConfig.load(
+      val enabled = ProcessConfig.load(
         defaults.copy(
           transport = None,
           journalLimit = 128,
           accessTeam = Some("example.cloudflareaccess.com"),
           accessAudience = Some("aud"),
+          accessOwner = Some("owner@example.com"),
         )
       )
       val spaced = ProcessConfig.load(
@@ -169,31 +244,64 @@ object ProcessSpec extends ZIOSpecDefault:
           transport = None,
           accessTeam = Some("example.cloudflareaccess.com"),
           accessAudience = Some("two words"),
+          accessOwner = Some("owner@example.com"),
+        )
+      )
+      val mailbox = ProcessConfig.load(
+        defaults.copy(
+          transport = None,
+          accessTeam = Some("example.cloudflareaccess.com"),
+          accessAudience = Some("aud"),
+          accessOwner = Some("not-an-email"),
         )
       )
       assertTrue(
         open.map(_.journal.limit) == Right(4096),
         open.map(_.access) == Right(None),
-        zero == Left(ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(0))),
+        zero == Left(
+          ProcessError.Journal(
+            terret.transcript.JournalBoundError.NonPositive(0)
+          )
+        ),
         half == Left(ProcessError.Access(AccessConfigError.Incomplete)),
+      ) &&
+      assertTrue(
+        pair == Left(ProcessError.Access(AccessConfigError.Incomplete)),
         bad == Left(ProcessError.Access(AccessConfigError.Team)),
         spaced == Left(ProcessError.Access(AccessConfigError.Audience)),
-        both.map(_.journal.limit) == Right(128),
-        both.map(_.access.map(_.team.value)) == Right(Some("example.cloudflareaccess.com")),
-        both.map(_.access.map(_.audience.value)) == Right(Some("aud")),
-        both.map(_.access.map(_.port)) == Right(Some(AccessConfig.TunnelPort)),
+        mailbox == Left(ProcessError.Access(AccessConfigError.Owner)),
+      ) &&
+      assertTrue(
+        enabled.map(_.journal.limit) == Right(128),
+        enabled.map(_.access.map(_.team.value)) == Right(
+          Some("example.cloudflareaccess.com")
+        ),
+        enabled.map(_.access.map(_.audience.value)) == Right(Some("aud")),
+        enabled.map(_.access.map(_.owner.value)) == Right(
+          Some("owner@example.com")
+        ),
+      ) &&
+      assertTrue(
+        enabled.map(_.access.map(_.port)) == Right(
+          Some(AccessConfig.TunnelPort)
+        ),
         ProcessConfig
           .load(
             defaults.copy(
               transport = None,
               accessTeam = Some("example.cloudflareaccess.com"),
               accessAudience = Some("aud"),
+              accessOwner = Some("owner@example.com"),
               accessPort = Some(8080),
             )
           )
           .left
           .exists(_.render.contains("8080")),
-        !ProcessError.Journal(terret.transcript.JournalBoundError.NonPositive(-3)).render.contains("secret"),
+        !ProcessError
+          .Journal(terret.transcript.JournalBoundError.NonPositive(-3))
+          .render
+          .contains("secret"),
+        !ProcessError.Access(AccessConfigError.Owner).render.contains("@"),
       )
     },
     test("subscriptions sit beside the pid file") {
@@ -201,7 +309,10 @@ object ProcessSpec extends ZIOSpecDefault:
         Subscriptions.file == Subscriptions.beside(PidFile.defaultPath),
         Subscriptions.beside(Path.of("target", "state", "server.pid")) ==
           Path.of("target", "state", "subscriptions.json"),
-        Subscriptions.beside(Path.of("server.pid")) == Path.of(".terret", "subscriptions.json"),
+        Subscriptions.beside(Path.of("server.pid")) == Path.of(
+          ".terret",
+          "subscriptions.json",
+        ),
       )
     },
     test("the Warp file names the local HTTP endpoint") {
@@ -223,7 +334,9 @@ object ProcessSpec extends ZIOSpecDefault:
             subscriptions = dir.resolve("subscriptions.json"),
             key = Some(source),
           )
-          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          server <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           status <- listed(port, HttpSecret)
         yield assertTrue(
@@ -253,7 +366,9 @@ object ProcessSpec extends ZIOSpecDefault:
         )
       }
     },
-    test("the local listener stays open and the tunnel listener requires a JWT") {
+    test(
+      "the local listener stays open and the tunnel listener requires a JWT"
+    ) {
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
@@ -267,10 +382,12 @@ object ProcessSpec extends ZIOSpecDefault:
             access = Some(access),
             key = Some(source),
           )
-          server      <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
-          local       <- server.port
-          open        <- sessions(local)
-          denied      <- sessions(tunnel)
+          server <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          local   <- server.port
+          open    <- sessions(local)
+          denied  <- sessions(tunnel)
           bareMcp <- exchange(
             tunnel,
             "POST",
@@ -279,9 +396,21 @@ object ProcessSpec extends ZIOSpecDefault:
             "Content-Type" -> "application/json",
             "Accept"       -> "application/json",
           )
-          localWatch  <- exchange(local, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
-          tunnelWatch <- exchange(tunnel, "GET", "/watch", None, "CF-Connecting-IP" -> "203.0.113.4")
-          mcp         <- listed(tunnel, HttpSecret)
+          localWatch <- exchange(
+            local,
+            "GET",
+            "/watch",
+            None,
+            "CF-Connecting-IP" -> "203.0.113.4",
+          )
+          tunnelWatch <- exchange(
+            tunnel,
+            "GET",
+            "/watch",
+            None,
+            "CF-Connecting-IP" -> "203.0.113.4",
+          )
+          mcp <- listed(tunnel, HttpSecret)
         yield assertTrue(
           open.status == 200,
           open.body.contains("["),
@@ -292,7 +421,9 @@ object ProcessSpec extends ZIOSpecDefault:
           open.headers.get("Access-Control-Allow-Origin").isEmpty,
           denied.status == 401,
           denied.body.contains("access denied"),
-          denied.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
+          denied.headers
+            .get("Strict-Transport-Security")
+            .exists(_.contains("max-age=31536000")),
           localWatch.status == 404,
           localWatch.headers.get("Strict-Transport-Security").isEmpty,
           localWatch.headers.get("X-Content-Type-Options").contains("nosniff"),
@@ -301,8 +432,12 @@ object ProcessSpec extends ZIOSpecDefault:
           tunnelWatch.headers.get("X-Content-Type-Options").contains("nosniff"),
           tunnelWatch.headers.get("X-Frame-Options").contains("DENY"),
           tunnelWatch.headers.get("Referrer-Policy").contains("strict-origin"),
-          tunnelWatch.headers.get("Content-Security-Policy").exists(_.contains("frame-ancestors 'none'")),
-          tunnelWatch.headers.get("Strict-Transport-Security").exists(_.contains("max-age=31536000")),
+          tunnelWatch.headers
+            .get("Content-Security-Policy")
+            .exists(_.contains("frame-ancestors 'none'")),
+          tunnelWatch.headers
+            .get("Strict-Transport-Security")
+            .exists(_.contains("max-age=31536000")),
           tunnelWatch.headers.get("Access-Control-Allow-Origin").isEmpty,
           bareMcp.status == 401,
           bareMcp.body.contains("access denied"),
@@ -339,7 +474,7 @@ object ProcessSpec extends ZIOSpecDefault:
           memory <- InMemory.make(Script.echo)
           dir    <- scratch("process-subscriptions")
           source <- keyFile(dir, "rw-------")
-          space <- ZIO.acquireRelease(
+          space  <- ZIO.acquireRelease(
             ZIO.attempt {
               val root = Path.of("target")
               Files.createDirectories(root)
@@ -351,13 +486,20 @@ object ProcessSpec extends ZIOSpecDefault:
             subscriptions = dir.resolve("subscriptions.json"),
             key = Some(source),
           )
-          server <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          server <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port   <- server.port
           opened <- exchange(
             port,
             "POST",
             "/sessions",
-            Some(OpenJob(space.toAbsolutePath.toString, Chunk.empty[Permission]).toJson),
+            Some(
+              OpenJob(
+                space.toAbsolutePath.toString,
+                Chunk.empty[Permission],
+              ).toJson
+            ),
             "Content-Type" -> "application/json",
             "Accept"       -> "application/json",
           )
@@ -412,7 +554,10 @@ object ProcessSpec extends ZIOSpecDefault:
             listen = Listen.Http("127.0.0.1", 0),
             subscriptions = dir.resolve("subscriptions.json"),
           )
-          failed <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty)).exit
+          failed <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+            .exit
         yield assertTrue(
           failed == Exit.fail(ProcessError.KeyMissing),
           ProcessError.KeyMissing.render.contains("terret.key.file"),
@@ -432,15 +577,22 @@ object ProcessSpec extends ZIOSpecDefault:
             subscriptions = dir.resolve("subscriptions.json"),
             key = Some(source),
           )
-          failed <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty)).exit
+          failed <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+            .exit
         yield assertTrue(
           failed == Exit.fail(ProcessError.Key(KeyError.Exposed)),
-          ProcessError.Key(KeyError.Exposed).render == "key file must be mode 600",
+          ProcessError
+            .Key(KeyError.Exposed)
+            .render == "key file must be mode 600",
           !ProcessError.Key(KeyError.Exposed).render.contains(HttpSecret),
         )
       }
     },
-    test("HTTP mcp requires the configured key and a cross-site post stays forbidden") {
+    test(
+      "HTTP mcp requires the configured key and a cross-site post stays forbidden"
+    ) {
       ZIO.scoped {
         for
           memory <- InMemory.make(Script.echo)
@@ -451,11 +603,19 @@ object ProcessSpec extends ZIOSpecDefault:
             subscriptions = dir.resolve("subscriptions.json"),
             key = Some(source),
           )
-          server  <- Process.bind(config, memory).provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
+          server <- Process
+            .bind(config, memory)
+            .provideSome[Scope](ZLayer.succeed(ModelCatalog.empty))
           port    <- server.port
           missing <- mcpPost(port, None)
           wrong   <- mcpPost(port, Some(WrongSecret))
-          opened  <- exchange(port, "GET", "/mcp", None, EventsKey.Header -> HttpSecret)
+          opened  <- exchange(
+            port,
+            "GET",
+            "/mcp",
+            None,
+            EventsKey.Header -> HttpSecret,
+          )
           closed  <- exchange(port, "GET", "/mcp", None)
           removed <- exchange(
             port,
@@ -465,7 +625,13 @@ object ProcessSpec extends ZIOSpecDefault:
             "Content-Type"   -> "application/json",
             EventsKey.Header -> HttpSecret,
           )
-          kept <- exchange(port, "DELETE", "/mcp", None, "Content-Type" -> "application/json")
+          kept <- exchange(
+            port,
+            "DELETE",
+            "/mcp",
+            None,
+            "Content-Type" -> "application/json",
+          )
           tools   <- listed(port, HttpSecret)
           crossed <- exchange(
             port,
@@ -532,9 +698,16 @@ object ProcessSpec extends ZIOSpecDefault:
 
   private def tunnelAccess(port: Int): Either[ProcessError, AccessConfig] =
     for
-      team <- TeamHost.from("example.cloudflareaccess.com").left.map(ProcessError.Access(_))
-      tag  <- Audience.from("aud").left.map(ProcessError.Access(_))
-    yield AccessConfig(team, tag, port)
+      team <- TeamHost
+        .from("example.cloudflareaccess.com")
+        .left
+        .map(ProcessError.Access(_))
+      tag   <- Audience.from("aud").left.map(ProcessError.Access(_))
+      owner <- OwnerEmail
+        .from("owner@example.com")
+        .left
+        .map(ProcessError.Access(_))
+    yield AccessConfig(team, tag, owner, port)
 
   private def freePort: ZIO[Any, Throwable, Int] =
     ZIO.attempt {
@@ -544,7 +717,11 @@ object ProcessSpec extends ZIOSpecDefault:
       port
     }
 
-  private final case class HttpText(status: Int, body: String, headers: Map[String, String])
+  private final case class HttpText(
+      status: Int,
+      body: String,
+      headers: Map[String, String],
+  )
 
   private def sessions(port: Int): ZIO[Any, Throwable, HttpText] =
     exchange(
@@ -568,7 +745,8 @@ object ProcessSpec extends ZIOSpecDefault:
         .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
         .flatMap { client =>
           ZIO.attemptBlocking {
-            val builder = HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port$path"))
+            val builder =
+              HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port$path"))
             headers.foreach((name, value) => builder.header(name, value))
             val publisher = body match
               case Some(text) => HttpRequest.BodyPublishers.ofString(text)
@@ -577,8 +755,9 @@ object ProcessSpec extends ZIOSpecDefault:
               case "GET"  => builder.GET()
               case "POST" => builder.POST(publisher)
               case other  => builder.method(other, publisher)
-            val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
-            val kept     = List(
+            val response =
+              client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+            val kept = List(
               "X-Content-Type-Options",
               "X-Frame-Options",
               "Referrer-Policy",
@@ -586,15 +765,25 @@ object ProcessSpec extends ZIOSpecDefault:
               "Strict-Transport-Security",
               "Access-Control-Allow-Origin",
             ).flatMap(name => response.headers().firstValue(name).toScala.map(name -> _)).toMap
-            HttpText(response.statusCode(), Option(response.body()).getOrElse(""), kept)
+            HttpText(
+              response.statusCode(),
+              Option(response.body()).getOrElse(""),
+              kept,
+            )
           }
         }
     }
 
   private def decoded[A: JsonDecoder](body: String): ZIO[Any, Throwable, A] =
-    ZIO.fromEither(body.fromJson[A]).mapError(message => new IllegalArgumentException(message))
+    ZIO
+      .fromEither(body.fromJson[A])
+      .mapError(message => new IllegalArgumentException(message))
 
-  private def untilEnded(port: Int, session: String, left: Int): ZIO[Any, Throwable, StatusView] =
+  private def untilEnded(
+      port: Int,
+      session: String,
+      left: Int,
+  ): ZIO[Any, Throwable, StatusView] =
     exchange(
       port,
       "POST",
@@ -632,20 +821,27 @@ object ProcessSpec extends ZIOSpecDefault:
       KeySource.File(path)
     }
 
-  private def mcpPost(port: Int, key: Option[String]): ZIO[Any, Throwable, HttpText] =
+  private def mcpPost(
+      port: Int,
+      key: Option[String],
+  ): ZIO[Any, Throwable, HttpText] =
     val headers = List(
       "Content-Type" -> "application/json",
       "Accept"       -> "application/json",
     ) ++ key.map(EventsKey.Header -> _)
     exchange(port, "POST", "/mcp", Some("{}"), headers*)
 
-  private def listed(port: Int, key: String): ZIO[Any, Throwable, Either[String, Set[String]]] =
+  private def listed(
+      port: Int,
+      key: String,
+  ): ZIO[Any, Throwable, Either[String, Set[String]]] =
     ZIO.scoped:
       ZIO
         .acquireRelease(ZIO.attempt(HttpClient.newHttpClient()))(client => ZIO.attempt(client.close()).ignore)
         .flatMap: client =>
           ZIO.attemptBlocking:
-            val tool    = Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None))
+            val tool =
+              Message.stateless(RequestId.Num(1), ClientRequest.ListTools(None))
             val request = HttpRequest
               .newBuilder(URI.create(s"http://127.0.0.1:$port/mcp"))
               .header("Content-Type", "application/json")
@@ -655,8 +851,9 @@ object ProcessSpec extends ZIOSpecDefault:
               .header(Http.MethodHeader, Methods.ListTools)
               .POST(HttpRequest.BodyPublishers.ofString(tool.json.toJson))
               .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-            val body     = Option(response.body()).getOrElse("")
+            val response =
+              client.send(request, HttpResponse.BodyHandlers.ofString())
+            val body = Option(response.body()).getOrElse("")
             if response.statusCode() != 200 then Left(body)
             else names(body)
 
@@ -682,7 +879,8 @@ object ProcessSpec extends ZIOSpecDefault:
     if Files.exists(root) then
       val walked = Files.walk(root)
       try
-        val paths = walked.iterator.asScala.toVector.sortBy(_.getNameCount)(using Ordering[Int].reverse)
+        val paths = walked.iterator.asScala.toVector
+          .sortBy(_.getNameCount)(using Ordering[Int].reverse)
         paths.foreach(Files.deleteIfExists(_))
       finally walked.close()
 end ProcessSpec
