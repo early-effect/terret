@@ -24,12 +24,17 @@ object SiteSpec extends ZIOSpecDefault:
             .withConfigProvider(ConfigProvider.fromMap(props))
             .flatMap { _ =>
               ZIO.attempt {
-                val index = Files.readString(dir.resolve("index.html"))
-                val jobs  = Files.readString(dir.resolve("jobs.html"))
-                (index, jobs)
+                val index      = Files.readString(dir.resolve("index.html"))
+                val jobs       = Files.readString(dir.resolve("jobs.html"))
+                val attach     = Files.readString(dir.resolve("attach.html"))
+                val events     = Files.readString(dir.resolve("events.html"))
+                val security   = Files.readString(dir.resolve("security.html"))
+                val operations = Files.readString(dir.resolve("operations.html"))
+                val config     = Files.readString(dir.resolve("config.html"))
+                (index, jobs, attach, events, security, operations, config)
               }
             }
-            .map { (index, jobs) =>
+            .map { (index, jobs, attach, events, security, operations, config) =>
               assertTrue(
                 index.contains("the ring a rein passes through"),
                 index.contains("a guide on a loom"),
@@ -49,6 +54,19 @@ object SiteSpec extends ZIOSpecDefault:
                 jobs.contains("status"),
                 jobs.contains("find"),
                 jobs.contains("call"),
+                attach.contains("x-terret-key"),
+                events.contains("session.milestone"),
+                events.contains("session.activity"),
+                events.contains("[redacted]"),
+                security.contains("x-terret-key"),
+                security.contains("Cf-Access-Jwt-Assertion"),
+                operations.contains("scripts/terret-restart"),
+                operations.contains("TERRET_SUPERVISOR"),
+                operations.contains("TERRET_LAUNCHD_LABELS"),
+                operations.contains("https://www.earlyeffect.rocks/terret/"),
+                config.contains("key.file"),
+                config.contains("TERRET_KEY_SERVICE"),
+                config.contains("TERRET_KEY_FILE"),
               )
             }
         }
