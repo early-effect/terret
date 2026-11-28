@@ -93,7 +93,9 @@ An empty version is rejected. A relative root is rejected. The packaged process 
 service manager. `launchd` reads `launchd.labels` and `launchd.plistDir`. There is no built-in job
 label. `foreground` reads `foreground.command`, one executable path. The server writes `pidFile`
 when it starts. Webhook subscriptions and ring heads are stored in `subscriptions.json` beside
-that file, so a restart keeps each id and cursor and the next event is one past the saved head.
+that file. A restart keeps each subscription that still restores, with the same id and cursor,
+and the next event is one past the saved head. A subscription that names a session this process
+does not hold, or that cannot be restored, is skipped and logged, and startup continues.
 A subscription whose deliveries are failing is left to expire. Restart waits use `restart.pace`,
 `restart.exit`, `restart.port`, and `restart.listen`.
 """,

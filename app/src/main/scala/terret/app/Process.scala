@@ -35,7 +35,7 @@ object Process:
           http(prepared.served, prepared.terret, host, port, config) *> ZIO.never
       // Join the turn while this scope is still open. Joining a fiber forked into the
       // scope from that scope's finalizer waits forever.
-      armed(prepared.served, gate, config)(body).ensuring(prepared.terret.shutdown)
+      armed(prepared.served, prepared.terret, gate, config)(body).ensuring(prepared.terret.shutdown)
     }
 
   /** Bind HTTP and leave the socket open until the scope closes. */
@@ -46,7 +46,7 @@ object Process:
         for
           gate     <- MilestoneGate.make
           prepared <- assemble(config, harness, gate)
-          server   <- armed(prepared.served, gate, config)(
+          server   <- armed(prepared.served, prepared.terret, gate, config)(
             http(prepared.served, prepared.terret, host, port, config)
           )
         yield server
@@ -114,7 +114,7 @@ object Process:
     yield Prepared(served, terret)
 
   /** The caller's scope owns the ring, the subscription file, the worker, and the accept loop. */
-  private def armed[A](served: Served, gate: MilestoneGate, config: ProcessConfig)(
+  private def armed[A](served: Served, terret: Terret, gate: MilestoneGate, config: ProcessConfig)(
       body: ZIO[Milestones & Events.Env & AccessGate & AuthLog & Scope, ProcessError, A]
   ): ZIO[Scope, ProcessError, A] =
     val layers =
@@ -126,7 +126,13 @@ object Process:
         access(config) ++
         AuthLog.live
     for
-      env   <- layers.build.mapError(ProcessError.Subscriptions(_))
+      skipped <- SubscriptionResume.prepare
+        .provide(SubscriptionResume.layer, OpenSessions.layer(terret), SubscriptionJournal.file(config.subscriptions))
+        .mapError(ProcessError.Subscriptions(_))
+      _ <- ZIO.foreachDiscard(skipped) { row =>
+        ZIO.consoleWith(_.printLineError(row.render)).ignore
+      }
+      env <- layers.build.mapError(ProcessError.Subscriptions(_))
       scope <- ZIO.environment[Scope]
       value <-
         val open =

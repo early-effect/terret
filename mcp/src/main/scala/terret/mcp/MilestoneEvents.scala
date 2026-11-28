@@ -27,7 +27,7 @@ final case class MilestoneData(
       JsonCodec
 
 object MilestoneEvents:
-  private val name: EventName = EventName("session.milestone")
+  val name: EventName = EventName("session.milestone")
 
   def accept(filter: MilestoneFilter, data: MilestoneData): Boolean =
     val session = filter.session.forall(_ == data.session)

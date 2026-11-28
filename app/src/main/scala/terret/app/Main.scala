@@ -4,7 +4,7 @@ import terret.dsh.DshHarness
 import terret.grok.{GrokHarness, GrokModels}
 import terret.harness.Harness
 import terret.milestone.MilestoneGate
-import zio.{ExitCode, Scope, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer}
+import zio.{ExitCode, Scope, UIO, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer}
 
 object Main extends ZIOAppDefault:
   def run =
@@ -53,8 +53,11 @@ object Main extends ZIOAppDefault:
       _ => ZIO.succeed(ExitCode.success),
     )
 
-  private def report(message: String) =
-    ZIO.consoleWith(_.printLineError(message)).ignore.as(ExitCode.failure)
+  private def report(message: String): UIO[ExitCode] =
+    // Returning ExitCode.failure is not enough: a recovered failure is a successful fiber, and the process
+    // exits 0. launchd KeepAlive with SuccessfulExit=false then leaves it down. exit forces the status.
+    ZIO.consoleWith(_.printLineError(message)).orDie *>
+      exit(ExitCode.failure).as(ExitCode.failure)
 
   private def wired(config: ProcessConfig, milestones: MilestoneGate): ZLayer[Scope, Nothing, Harness] =
     config.harness match
