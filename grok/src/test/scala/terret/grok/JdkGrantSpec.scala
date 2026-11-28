@@ -17,9 +17,9 @@ object JdkGrantSpec extends ZIOSpecDefault:
           real    <- ZIO.attemptBlocking(version.toRealPath()).refineToOrDie[IOException]
           got     <- JdkGrant.decide(home)
         yield
-          val root = real.toString
-          val link = real.resolveSibling("current").toString
-          val lines = SeatbeltProfile
+          val root     = real.toString
+          val link     = real.resolveSibling("current").toString
+          val lines    = SeatbeltProfile
             .render(
               ShellSandbox.policyOf(
                 Chunk.empty,
@@ -35,16 +35,18 @@ object JdkGrantSpec extends ZIOSpecDefault:
               )
             )
             .split('\n')
+          val readRoot = s"(allow file-read* (subpath \"$root\"))"
+          val readMeta = s"(allow file-read-metadata (literal \"$link\"))"
+          val readData = s"(allow file-read-data (literal \"$link\"))"
+          val readLink = s"(allow file-read* (subpath \"$link\"))"
+          val noMap    = !lines.exists(_.startsWith("(allow file-map-executable (subpath"))
+          val noWrite  = !lines.exists(line => line.contains("file-write") && line.contains(root))
           assertTrue(
             got.root.text == root,
             got.link.text == link,
-            lines.contains(s"(allow file-read* (subpath \"$root\"))"),
-            lines.contains(s"(allow file-read-metadata (literal \"$link\"))"),
-            lines.contains(s"(allow file-read-data (literal \"$link\"))"),
-            !lines.contains(s"(allow file-read* (subpath \"$link\"))"),
-            !lines.exists(_.startsWith("(allow file-map-executable (subpath")),
-            !lines.exists(line => line.contains("file-write") && line.contains(root)),
-          )
+            lines.contains(readRoot),
+            lines.contains(readMeta),
+          ) && assertTrue(lines.contains(readData), !lines.contains(readLink), noMap, noWrite)
       }
     },
     test("a relative home is a bad path") {
@@ -183,9 +185,7 @@ object JdkGrantSpec extends ZIOSpecDefault:
                 ran.stdout == "ok",
                 TestHome.denied(sibling),
                 TestHome.denied(etc),
-                TestHome.denied(wrote),
-                !exists,
-              )
+              ) && assertTrue(TestHome.denied(wrote), !exists)
       } @@ TestAspect.timeout(30.seconds),
     ).when(macPresent),
   )

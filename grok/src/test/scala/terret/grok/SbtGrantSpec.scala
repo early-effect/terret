@@ -17,19 +17,22 @@ object SbtGrantSpec extends ZIOSpecDefault:
           other   <- ZIO.attemptBlocking(Files.createDirectories(home.resolve("sdks").resolve("other"))).orDie
           got     <- SbtGrant.decide(home)
         yield
-          val root  = version.toString
-          val link  = current(home).toString
-          val lines = profile(got).split('\n')
+          val root      = version.toString
+          val link      = current(home).toString
+          val lines     = profile(got).split('\n')
+          val sdks      = home.resolve("sdks").toString
+          val readRoot  = s"(allow file-read* (subpath \"$root\"))"
+          val readMeta  = s"(allow file-read-metadata (literal \"$link\"))"
+          val readData  = s"(allow file-read-data (literal \"$link\"))"
+          val readSdks  = s"(allow file-read* (subpath \"$sdks\"))"
+          val readOther = s"(allow file-read* (subpath \"${other.toString}\"))"
+          val noWrite   = !lines.exists(line => line.contains("file-write") && line.contains(root))
           assertTrue(
             got.root.text == root,
             got.link.text == link,
-            lines.contains(s"(allow file-read* (subpath \"$root\"))"),
-            lines.contains(s"(allow file-read-metadata (literal \"$link\"))"),
-            lines.contains(s"(allow file-read-data (literal \"$link\"))"),
-            !lines.contains(s"(allow file-read* (subpath \"${home.resolve("sdks").toString}\"))"),
-            !lines.contains(s"(allow file-read* (subpath \"${other.toString}\"))"),
-            !lines.exists(line => line.contains("file-write") && line.contains(root)),
-          )
+            lines.contains(readRoot),
+            lines.contains(readMeta),
+          ) && assertTrue(lines.contains(readData), !lines.contains(readSdks), !lines.contains(readOther), noWrite)
       }
     },
     test("a target inside candidates/sbt is granted") {
