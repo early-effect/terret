@@ -31,7 +31,10 @@ and `writeRoots` only when `WriteWorkspace` is granted, it may read the workspac
 and network follows `Network`. The SDKMAN JDK is readable when `current` resolves to a directory
 strictly inside `~/.sdkman/candidates/java/`. The link is only a literal, so lookup can lstat and
 readlink it, and a symlink at `.sdkman` is not granted. A symlink inside that directory that
-points outside it is denied. A host that cannot apply that profile refuses the command. Grok's
+points outside it is denied. The shell may also read and write `.histos`, `.cache/coursier`,
+`Library/Caches/Coursier`, `.ivy2`, and `.m2` when each is a real directory strictly inside the
+home directory. A missing directory is skipped. A symlink to somewhere else is not granted, and
+`Library` itself is not granted. A host that cannot apply that profile refuses the command. Grok's
 own process is not sandboxed.
 `Network` covers `web_fetch` and `web_search`. A ceiling without `Network` removes both and
 passes `--disable-web-search`. A `use_tool` request whose `tool_name` is one of those, or

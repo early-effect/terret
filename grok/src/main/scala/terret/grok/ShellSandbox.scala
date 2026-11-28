@@ -152,11 +152,12 @@ object ShellSandbox:
           reads   <- ZIO.foreach(bounds.reads)(real)
           writes  <- ZIO.foreach(bounds.writes)(real)
           jdk     <- granted(home)
-          systems <- systemFiles(jdk)
+          caches  <- CacheDir.decide(home)
+          systems <- systemFiles(jdk, caches)
           text = SeatbeltProfile.render(
             SeatbeltPolicy(
               dedup(reads ++ systems.reads),
-              dedup(writes),
+              dedup(writes ++ systems.writes),
               dedup(SeatbeltProfile.ancestors(cwd) ++ systems.ancestors),
               bounds.network,
               systems.links,
@@ -177,13 +178,13 @@ object ShellSandbox:
     private def granted(home: Path): UIO[Option[Granted]] =
       JdkGrant.decide(home).foldZIO(why => ZIO.logWarning(why.explain).as(None), grant => ZIO.succeed(Some(grant)))
 
-    private def systemFiles(jdk: Option[Granted]): UIO[SystemFiles] =
-      ZIO.attemptBlocking(readSystemFiles(jdk)).orDie
+    private def systemFiles(jdk: Option[Granted], caches: Chunk[AbsPath]): UIO[SystemFiles] =
+      ZIO.attemptBlocking(readSystemFiles(jdk, caches)).orDie
 
-    private def readSystemFiles(jdk: Option[Granted]): SystemFiles =
+    private def readSystemFiles(jdk: Option[Granted], caches: Chunk[AbsPath]): SystemFiles =
       val root  = jdk.fold(Chunk.empty[AbsPath])(grant => Chunk(grant.root))
       val link  = jdk.fold(Chunk.empty[AbsPath])(grant => Chunk(grant.link))
-      val reads = dedup(SystemReads.flatMap(existing) ++ root)
+      val reads = dedup(SystemReads.flatMap(existing) ++ root ++ caches)
       val reached = reads.foldLeft(Reach(Chunk.empty, Chunk.empty)) { (acc, path) =>
         Option(Path.of(path.text).getParent) match
           case None => acc
@@ -191,7 +192,7 @@ object ShellSandbox:
             val next = parentsOf(parent)
             Reach(acc.ancestors ++ next.ancestors, acc.links ++ next.links)
       }
-      SystemFiles(reads, dedup(reached.ancestors ++ link), dedup(reached.links ++ link))
+      SystemFiles(reads, caches, dedup(reached.ancestors ++ link), dedup(reached.links ++ link))
 
     private def existing(raw: String): Option[AbsPath] =
       try
@@ -312,7 +313,12 @@ object ShellSandbox:
     private def dedup(paths: Chunk[AbsPath]): Chunk[AbsPath] =
       paths.foldLeft(Chunk.empty[AbsPath])((acc, path) => if acc.contains(path) then acc else acc :+ path)
 
-    private final case class SystemFiles(reads: Chunk[AbsPath], ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
+    private final case class SystemFiles(
+        reads: Chunk[AbsPath],
+        writes: Chunk[AbsPath],
+        ancestors: Chunk[AbsPath],
+        links: Chunk[AbsPath],
+    )
 
     private final case class Reach(ancestors: Chunk[AbsPath], links: Chunk[AbsPath])
 

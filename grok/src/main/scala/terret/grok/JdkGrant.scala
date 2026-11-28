@@ -1,11 +1,9 @@
 package terret.grok
 
-import zio.{Chunk, IO, ZIO}
+import zio.{IO, ZIO}
 
 import java.io.IOException
 import java.nio.file.{Files, InvalidPathException, LinkOption, Path}
-
-import scala.jdk.CollectionConverters.*
 
 /** Why `current` did not yield a JDK directory. */
 enum JdkRefuse:
@@ -97,53 +95,11 @@ object JdkGrant:
       case Left(AbsPathError.NotAbsolute)  => Left(JdkRefuse.BadPath)
       case Left(AbsPathError.Illegal)      => Left(JdkRefuse.BadPath)
 
-  // FileRoots.live.resolve normalizes before following links, and None hides a loop, a dangling target, and IO.
   private def realpath(start: Path, seen: Set[String]): Either[JdkRefuse, Path] =
-    rooted(start).flatMap { abs =>
-      val key = abs.toString
-      if seen.contains(key) then Left(JdkRefuse.Loop)
-      else descend(Path.of("/"), names(abs), seen)
+    HomePath.real(start, seen).left.map {
+      case WalkFault.Outside  => JdkRefuse.Outside
+      case WalkFault.Dangling => JdkRefuse.Dangling
+      case WalkFault.Loop     => JdkRefuse.Loop
+      case WalkFault.BadPath  => JdkRefuse.BadPath
     }
-
-  private def names(path: Path): Chunk[String] =
-    Chunk.from(path.iterator.asScala.map(_.toString))
-
-  private def descend(acc: Path, names: Chunk[String], seen: Set[String]): Either[JdkRefuse, Path] =
-    names.headOption match
-      case None => Right(acc)
-      case Some(name) =>
-        step(acc, name, seen).flatMap(next => descend(next, names.drop(1), seen))
-
-  private def step(acc: Path, name: String, seen: Set[String]): Either[JdkRefuse, Path] =
-    if name == "." then Right(acc)
-    else if name == ".." then Right(Option(acc.getParent).getOrElse(acc))
-    else if name.isEmpty then Left(JdkRefuse.BadPath)
-    else enter(acc.resolve(name), seen)
-
-  private def enter(path: Path, seen: Set[String]): Either[JdkRefuse, Path] =
-    rooted(path) match
-      case Left(why) => Left(why)
-      case Right(abs) =>
-        val key = abs.toString
-        if seen.contains(key) then Left(JdkRefuse.Loop)
-        else if Files.isSymbolicLink(abs) then follow(abs, seen + key)
-        else if Files.exists(abs, LinkOption.NOFOLLOW_LINKS) then Right(abs)
-        else Left(JdkRefuse.Dangling)
-
-  private def rooted(path: Path): Either[JdkRefuse, Path] =
-    val abs = path.toAbsolutePath
-    if abs.isAbsolute then Right(abs) else Left(JdkRefuse.BadPath)
-
-  private def follow(link: Path, seen: Set[String]): Either[JdkRefuse, Path] =
-    val raw = Files.readSymbolicLink(link)
-    linked(link, raw) match
-      case Left(why)   => Left(why)
-      case Right(path) => realpath(path, seen)
-
-  private def linked(link: Path, raw: Path): Either[JdkRefuse, Path] =
-    if raw.isAbsolute then Right(raw)
-    else
-      Option(link.getParent) match
-        case Some(parent) => Right(parent.resolve(raw))
-        case None         => Left(JdkRefuse.Outside)
 end JdkGrant
