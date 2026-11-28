@@ -5,21 +5,28 @@ import zio.{Chunk, UIO, ZIO}
 import java.io.IOException
 import java.nio.file.{Files, InvalidPathException, LinkOption, Path}
 
-/** One build cache the shell may read and write. The path is these segments under home, and nothing above them. */
+/** One build cache directory. The path is these segments under home, and nothing above them. */
 enum CacheDir:
   case Histos
+  case CacheHistos
   case Coursier
   case MacCoursier
+  case CacheSbt
   case Ivy
   case Maven
 
   def segments: Chunk[String] =
     this match
       case Histos      => Chunk(".histos")
+      case CacheHistos => Chunk(".cache", "histos")
       case Coursier    => Chunk(".cache", "coursier")
       case MacCoursier => Chunk("Library", "Caches", "Coursier")
+      case CacheSbt    => Chunk(".cache", "sbt")
       case Ivy         => Chunk(".ivy2")
       case Maven       => Chunk(".m2")
+
+/** A cache directory that resolved inside home. Writability is decided with the profile, not here. */
+final case class CacheGrant(dir: CacheDir, root: AbsPath)
 
 /** Why one cache directory was not granted. */
 enum CacheSkip:
@@ -46,25 +53,26 @@ enum CacheSkip:
 
 object CacheDir:
   val allowlist: Chunk[CacheDir] =
-    Chunk(CacheDir.Histos, CacheDir.Coursier, CacheDir.MacCoursier, CacheDir.Ivy, CacheDir.Maven)
+    Chunk(
+      CacheDir.Histos,
+      CacheDir.CacheHistos,
+      CacheDir.Coursier,
+      CacheDir.MacCoursier,
+      CacheDir.CacheSbt,
+      CacheDir.Ivy,
+      CacheDir.Maven,
+    )
 
   /** Directories from `allowlist` that are real, strictly inside `home`, and not a symlink elsewhere.
     *
     * `CacheDir.decide(home)` grants `home/.cache/coursier` when that directory is real. A missing directory is
-    * skipped. A link to another directory, including one inside `home`, is skipped.
+    * skipped. A link to another directory, including one inside `home`, is skipped. `.cache/sbt` covers `boot`.
     */
-  def decide(home: Path): UIO[Chunk[AbsPath]] =
+  def decide(home: Path): UIO[Chunk[CacheGrant]] =
     if !home.isAbsolute then ZIO.logWarning("cache home is not absolute").as(Chunk.empty)
-    else
-      ZIO.foreach(allowlist)(one(home, _)).map { found =>
-        found.foldLeft(Chunk.empty[AbsPath]) { (acc, next) =>
-          next match
-            case Some(root) => acc :+ root
-            case None       => acc
-        }
-      }
+    else ZIO.foreach(allowlist)(one(home, _)).map(_.collect { case Some(grant) => grant })
 
-  private def one(home: Path, dir: CacheDir): UIO[Option[AbsPath]] =
+  private def one(home: Path, dir: CacheDir): UIO[Option[CacheGrant]] =
     ZIO
       .attemptBlocking(inspect(home, dir))
       .refineOrDie {
@@ -79,18 +87,18 @@ object CacheDir:
         root => ZIO.succeed(Some(root)),
       )
 
-  private def inspect(home: Path, dir: CacheDir): Either[CacheSkip, AbsPath] =
+  private def inspect(home: Path, dir: CacheDir): Either[CacheSkip, CacheGrant] =
     for
-      base     <- walked(home, Set.empty)
-      _        <- directory(base)
-      lexical  <- Right(dir.segments.foldLeft(base)((acc, name) => acc.resolve(name)))
+      base <- walked(home, Set.empty)
+      _    <- directory(base)
+      lexical = dir.segments.foldLeft(base)((acc, name) => acc.resolve(name))
       _        <- present(lexical)
       resolved <- walked(lexical, Set.empty)
       _        <- placed(base, resolved)
       _        <- directory(resolved)
       _        <- same(lexical, resolved)
       root     <- abs(resolved)
-    yield root
+    yield CacheGrant(dir, root)
 
   private def walked(start: Path, seen: Set[String]): Either[CacheSkip, Path] =
     HomePath.real(start, seen).left.map {
@@ -102,17 +110,20 @@ object CacheDir:
 
   /** The cache directory is that directory, not a symlink to somewhere else. */
   private def same(lexical: Path, resolved: Path): Either[CacheSkip, Unit] =
-    if lexical.toAbsolutePath.toString == resolved.toAbsolutePath.toString then Right(())
-    else Left(CacheSkip.Moved)
+    HomePath.unmoved(lexical, resolved).left.map {
+      case WalkFault.Outside  => CacheSkip.Moved
+      case WalkFault.Dangling => CacheSkip.Moved
+      case WalkFault.Loop     => CacheSkip.Moved
+      case WalkFault.BadPath  => CacheSkip.Moved
+    }
 
   private def placed(parent: Path, child: Path): Either[CacheSkip, Unit] =
-    val base = parent.toAbsolutePath.toString
-    val text = child.toAbsolutePath.toString
-    if base != "/" && text.startsWith(base + "/") && noDots(text) then Right(())
-    else Left(CacheSkip.Outside)
-
-  private def noDots(text: String): Boolean =
-    text.split('/').forall(part => part != ".." && part != ".")
+    HomePath.within(parent, child).left.map {
+      case WalkFault.Outside  => CacheSkip.Outside
+      case WalkFault.Dangling => CacheSkip.Outside
+      case WalkFault.Loop     => CacheSkip.Outside
+      case WalkFault.BadPath  => CacheSkip.Outside
+    }
 
   private def present(path: Path): Either[CacheSkip, Unit] =
     if Files.exists(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path) then Right(())

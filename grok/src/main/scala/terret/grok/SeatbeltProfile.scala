@@ -31,6 +31,7 @@ final case class SeatbeltPolicy(
     ancestors: Chunk[AbsPath],
     network: Boolean,
     links: Chunk[AbsPath] = Chunk.empty,
+    denies: Chunk[AbsPath] = Chunk.empty,
 )
 
 object SeatbeltProfile:
@@ -41,6 +42,8 @@ object SeatbeltProfile:
         policy.writes.map(path => s"(allow file-write* (subpath ${quote(path)}))") ++
         policy.ancestors.map(path => s"(allow file-read-metadata (literal ${quote(path)}))") ++
         policy.links.map(path => s"(allow file-read-data (literal ${quote(path)}))") ++
+        // Last matching rule wins, so a literal deny has to follow the cache subpath allow.
+        policy.denies.map(path => s"(deny file-read* (literal ${quote(path)}))") ++
         (if policy.network then Chunk("(allow network*)") else Chunk.empty)
     body.mkString("", "\n", "\n")
 

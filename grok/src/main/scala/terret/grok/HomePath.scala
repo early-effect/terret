@@ -23,6 +23,21 @@ object HomePath:
       else descend(Path.of("/"), names(abs), seen)
     }
 
+  /** `child` is strictly inside `base`. `/` and a path with `.` or `..` are outside. Comparison does not normalize. */
+  def within(base: Path, child: Path): Either[WalkFault, Unit] =
+    val root = base.toAbsolutePath.toString
+    val text = child.toAbsolutePath.toString
+    if root != "/" && text.startsWith(root + "/") && plain(text) then Right(())
+    else Left(WalkFault.Outside)
+
+  /** The lexical path and the walked path are the same string. A symlink is a different path, so it is outside. */
+  def unmoved(lexical: Path, resolved: Path): Either[WalkFault, Unit] =
+    if lexical.toAbsolutePath.toString == resolved.toAbsolutePath.toString then Right(())
+    else Left(WalkFault.Outside)
+
+  private def plain(text: String): Boolean =
+    text.split('/').forall(part => part != ".." && part != ".")
+
   private def names(path: Path): Chunk[String] =
     Chunk.from(path.iterator.asScala.map(_.toString))
 

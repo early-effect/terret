@@ -96,7 +96,7 @@ final class GrokHarness private (
     }
 
   def close: UIO[Unit] =
-    terminals.shutdown *> sessions.get.zip(gates.get).flatMap { (rows, open) =>
+    terminals.shutdown *> sandbox.shutdown *> sessions.get.zip(gates.get).flatMap { (rows, open) =>
       ZIO.foreachDiscard(rows) { (id, slot) =>
         slot.hostCancel.set(true) *>
           ZIO.foreachDiscard(open.get(id))(_.succeed(())) *>
